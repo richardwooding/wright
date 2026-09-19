@@ -210,11 +210,64 @@ func TestLoadEnvOverrides(t *testing.T) {
 	}
 }
 
-func TestLoadMalformedFileErrors(t *testing.T) {
-	root, _ := setupLayers(t)
-	write(t, filepath.Join(root, ".wright", "settings.json"), `{not json`)
-	if _, err := config.Load(root); err == nil || !strings.Contains(err.Error(), "settings.json") {
-		t.Fatalf("expected error naming the file, got %v", err)
+// TestLoadMalformedFile pins who a broken settings file may stop. The user's
+// own config is theirs to fix, so it is fatal. A project file arrived with
+// the repository: making it fatal would let any checkout stop wright from
+// starting in that directory, which is the denial of service the trust gate
+// closes for the file's *contents*. It is recorded and dropped instead.
+func TestLoadMalformedFile(t *testing.T) {
+	tests := []struct {
+		name  string
+		file  string
+		body  string
+		layer string
+		fatal bool
+		want  string
+	}{
+		{name: "project settings", file: ".wright/settings.json", body: "{not json", layer: "project", want: "invalid JSON at line 1"},
+		{name: "project local", file: ".wright/settings.local.json", body: "", layer: "project.local", want: "the file is empty"},
+		{name: "truncated project file", file: ".wright/settings.json", body: "{\n  \"model\": {\n", layer: "project", want: "ends in the middle of a value at line 3"},
+		{name: "wrong type", file: ".wright/settings.json", body: `{"model": {"default": 7}}`, layer: "project", want: "line 1"},
+		{name: "user config", file: "config.json", body: "{not json", fatal: true, want: "invalid JSON at line 1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, home := setupLayers(t)
+			path := filepath.Join(root, filepath.FromSlash(tt.file))
+			if tt.fatal {
+				path = filepath.Join(home, filepath.FromSlash(tt.file))
+			}
+			write(t, path, tt.body)
+
+			l, err := config.Load(root)
+			if tt.fatal {
+				if err == nil || !strings.Contains(err.Error(), tt.want) {
+					t.Fatalf("user config error = %v, want one mentioning %q", err, tt.want)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("a broken project layer must not stop the load: %v", err)
+			}
+			var got error
+			for _, layer := range l.Layers {
+				if layer.Name == tt.layer {
+					got = layer.Err
+				}
+			}
+			if got == nil {
+				t.Fatalf("layer %s carries no error; layers = %+v", tt.layer, l.Layers)
+			}
+			if !strings.Contains(got.Error(), tt.want) {
+				t.Errorf("error = %v, want one mentioning %q", got, tt.want)
+			}
+			if !strings.Contains(got.Error(), filepath.Base(tt.file)) {
+				t.Errorf("error = %v, want it to name the file", got)
+			}
+			if len(l.Project.Permissions.Allow) != 0 || len(l.ProjectLocal.Permissions.Allow) != 0 {
+				t.Error("a layer that failed to parse must contribute nothing")
+			}
+		})
 	}
 }
 

@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path/filepath"
@@ -122,6 +123,9 @@ type Layer struct {
 	Name    string // "builtin", "user", "project", "project.local", "env"
 	Path    string // file path, empty for builtin/env
 	Present bool
+	// Err is set when the file exists but could not be parsed. For a project
+	// layer that is not fatal: the layer is dropped and the caller warns.
+	Err error
 }
 
 // Layered is the result of Load: the merged Settings plus provenance.
@@ -148,7 +152,9 @@ func Defaults() Settings {
 }
 
 // Load builds the layered settings for a workspace rooted at cwd's project
-// directory. Missing files are not errors; malformed JSON is.
+// directory. Missing files are not errors. Malformed JSON is fatal only for
+// the user's own config; a malformed project layer is recorded on its Layer
+// and dropped, so a repository cannot stop wright from starting.
 func Load(cwd string) (*Layered, error) {
 	paths := DefaultPaths(cwd)
 	l := &Layered{Settings: Defaults(), Paths: paths}
@@ -166,7 +172,17 @@ func Load(cwd string) (*Layered, error) {
 	for _, st := range steps {
 		s, present, err := readFile(st.path)
 		if err != nil {
-			return nil, err
+			// A broken *user* config is the user's own file and stops the
+			// run. A broken *project* file arrived with the repository, so
+			// treating it as fatal would let any checkout stop wright from
+			// starting in that directory — the same denial of service the
+			// trust gate closes for the file's contents. It is dropped, and
+			// the caller says so out loud.
+			if st.keep == nil {
+				return nil, err
+			}
+			l.Layers = append(l.Layers, Layer{Name: st.name, Path: st.path, Present: true, Err: err})
+			continue
 		}
 		l.Layers = append(l.Layers, Layer{Name: st.name, Path: st.path, Present: present})
 		if !present {
@@ -218,9 +234,39 @@ func Decode(data []byte) (Settings, error) {
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&s); err != nil {
-		return Settings{}, err
+		return Settings{}, describeDecodeError(data, err)
 	}
 	return s, nil
+}
+
+// describeDecodeError turns the JSON package's errors into something a
+// person can act on. A bare "EOF" or "invalid character '}'" says nothing
+// about *where* to look, and the file it came from may not even be one the
+// user wrote.
+func describeDecodeError(data []byte, err error) error {
+	if errors.Is(err, io.EOF) && len(bytes.TrimSpace(data)) == 0 {
+		return errors.New("the file is empty (an empty settings file is not valid JSON; use {} for no settings)")
+	}
+	var syn *json.SyntaxError
+	if errors.As(err, &syn) {
+		return fmt.Errorf("invalid JSON at line %d: %w", lineAt(data, syn.Offset), err)
+	}
+	var typ *json.UnmarshalTypeError
+	if errors.As(err, &typ) {
+		return fmt.Errorf("line %d: %q is %s, want %s", lineAt(data, typ.Offset), typ.Field, typ.Value, typ.Type)
+	}
+	if errors.Is(err, io.ErrUnexpectedEOF) {
+		return fmt.Errorf("the file ends in the middle of a value at line %d (a missing closing brace?)", lineAt(data, int64(len(data))))
+	}
+	return err
+}
+
+// lineAt reports the 1-based line containing byte offset.
+func lineAt(data []byte, offset int64) int {
+	if offset > int64(len(data)) {
+		offset = int64(len(data))
+	}
+	return 1 + bytes.Count(data[:offset], []byte("\n"))
 }
 
 // Merge overlays src onto dst: non-zero scalars replace, rule lists and other

@@ -96,6 +96,7 @@ func (b *builder) workspaceAndConfig() error {
 		return err
 	}
 	b.ws, b.layered, b.user = ws, l, user
+	b.warnBrokenLayers()
 	b.trusted = b.checkTrust()
 	b.settings = effectiveSettings(l, user, b.trusted, b.env)
 	if extra := b.settings.Permissions.AdditionalDirs; b.trusted && len(extra) > 0 {
@@ -142,6 +143,19 @@ func ProjectHash(paths config.Paths) (string, error) {
 		return "", nil
 	}
 	return trust.HashStrings(shared, local), nil
+}
+
+// warnBrokenLayers reports a project settings file that could not be parsed.
+// It is loud and not fatal: the file came with the repository, so making it
+// fatal would let any checkout stop wright from starting in that directory —
+// and an empty settings.local.json is exactly what a payload that got one
+// write leaves behind.
+func (b *builder) warnBrokenLayers() {
+	for _, l := range b.layered.Layers {
+		if l.Err != nil {
+			b.warn("%s could not be read (%v); it is ignored for this session", b.ws.Rel(l.Path), l.Err)
+		}
+	}
 }
 
 // projectFiles names the project settings files that exist, for messages.

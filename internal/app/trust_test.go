@@ -171,6 +171,40 @@ func TestUntrustedLocalAllowRuleDoesNotApply(t *testing.T) {
 	}
 }
 
+// TestBrokenProjectSettingsDoNotStopTheRun covers the denial of service a
+// repository could otherwise ship: an unparseable .wright/settings.json (or
+// the empty settings.local.json a single sandbox write leaves behind) made
+// every later run fail at startup with a bare "EOF".
+func TestBrokenProjectSettingsDoNotStopTheRun(t *testing.T) {
+	tests := []struct{ name, file, body string }{
+		{"empty local file", "settings.local.json", ""},
+		{"malformed shared file", "settings.json", "{not json"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws := isolate(t)
+			setScript(t, []step{{text: "hi"}})
+			writeFile(t, filepath.Join(ws, ".wright", tt.file), tt.body)
+			o := baseOpts(ws)
+			o.Prompt = "hello"
+			var stdout, stderr bytes.Buffer
+			o.Stdout, o.Stderr = &stdout, &stderr
+			code, err := app.Run(context.Background(), o, nil)
+			if err != nil || code != 0 {
+				t.Fatalf("a broken project settings file must not stop the run: code=%d err=%v\n%s", code, err, stderr.String())
+			}
+			note := stderr.String()
+			if !strings.Contains(note, tt.file) || !strings.Contains(note, "ignored for this session") {
+				t.Errorf("the warning must name the file and say it was ignored: %q", note)
+			}
+			// A bare "EOF" or "invalid character" says nothing actionable.
+			if !strings.Contains(note, "line") && !strings.Contains(note, "empty") {
+				t.Errorf("the warning must say what is wrong and where: %q", note)
+			}
+		})
+	}
+}
+
 func TestProjectHashCoversBothLayers(t *testing.T) {
 	ws := isolate(t)
 	paths := config.DefaultPaths(ws)
