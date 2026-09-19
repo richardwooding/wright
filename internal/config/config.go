@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"slices"
@@ -218,9 +219,7 @@ func Merge(dst *Settings, src Settings) {
 		if dst.MCPServers == nil {
 			dst.MCPServers = map[string]MCPServer{}
 		}
-		for k, v := range src.MCPServers {
-			dst.MCPServers[k] = v
-		}
+		maps.Copy(dst.MCPServers, src.MCPServers)
 	}
 	dst.Skills.ExtraDirs = appendDedupe(dst.Skills.ExtraDirs, src.Skills.ExtraDirs)
 	dst.Skills.LoadClaudeSkills = dst.Skills.LoadClaudeSkills || src.Skills.LoadClaudeSkills

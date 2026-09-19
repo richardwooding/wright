@@ -13,6 +13,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -286,11 +287,11 @@ func (s *Store) RestoreRun(runID string) ([]Entry, error) {
 		return nil, err
 	}
 	var done []Entry
-	for i := len(entries) - 1; i >= 0; i-- {
-		if err := s.Restore(entries[i]); err != nil {
+	for _, e := range slices.Backward(entries) {
+		if err := s.Restore(e); err != nil {
 			return done, err
 		}
-		done = append(done, entries[i])
+		done = append(done, e)
 	}
 	return done, nil
 }

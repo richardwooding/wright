@@ -57,8 +57,8 @@ func uploadArg(args []word, i int) string {
 	case "-T", "--upload-file", "--post-file", "--body-file":
 		return val
 	case "-d", "--data", "--data-binary", "--data-raw", "-F", "--form":
-		if idx := strings.Index(val, "=@"); idx >= 0 {
-			return val[idx+2:]
+		if _, after, ok := strings.Cut(val, "=@"); ok {
+			return after
 		}
 		if strings.HasPrefix(val, "@") {
 			return val[1:]

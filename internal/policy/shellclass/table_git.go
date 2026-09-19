@@ -2,6 +2,7 @@ package shellclass
 
 import (
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -187,10 +188,8 @@ func (a *analyzer) protectedBranch(ref string) bool {
 // anything touching core.hooksPath are hard-denied.
 func gitConfig(a *analyzer, rest []word) result {
 	nf := texts(nonFlags(rest))
-	for _, t := range nf {
-		if isHooksPath(t) {
-			return privilegeDeny("git config core.hooksPath overrides hooks")
-		}
+	if slices.ContainsFunc(nf, isHooksPath) {
+		return privilegeDeny("git config core.hooksPath overrides hooks")
 	}
 	readFlag := hasFlag(rest, "--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l", "--show-origin", "--show-scope")
 	writeFlag := hasFlag(rest, "--unset", "--unset-all", "--replace-all", "--add", "--remove-section", "--rename-section", "--edit", "-e", "set", "unset")
