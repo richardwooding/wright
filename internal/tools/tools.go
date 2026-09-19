@@ -231,7 +231,9 @@ func New(deps Deps) agentkit.Toolset {
 		}
 	}
 	d := &deps
-	ts := agentkit.Toolset{d.readFile(), d.writeFile(), d.editFile()}
+	ts := agentkit.Toolset{
+		d.readFile(), d.writeFile(), d.editFile(), d.glob(), d.grep(), d.listDir(),
+	}
 	return ts
 }
 
