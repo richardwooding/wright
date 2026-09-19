@@ -37,7 +37,8 @@ func (b *builder) modelAndSession() error {
 	} else {
 		b.warn("secret redaction is OFF (settings.redaction=false)")
 	}
-	if b.auditLog, err = audit.Open(store.AuditPath(b.sessionID), b.redactor); err != nil {
+	anchors := audit.OpenAnchors(b.layered.Paths.AuditAnchorDir())
+	if b.auditLog, err = audit.OpenAnchored(store.AuditPath(b.sessionID), b.redactor, anchors); err != nil {
 		return err
 	}
 	if b.snaps, err = snapshot.Open(store.SnapshotDir(b.sessionID)); err != nil {

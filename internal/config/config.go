@@ -309,6 +309,11 @@ func (p Paths) UserConfigFile() string { return filepath.Join(p.UserConfig, "con
 // TrustFile is where accepted project/MCP hashes are stored.
 func (p Paths) TrustFile() string { return filepath.Join(p.UserConfig, "trust.json") }
 
+// AuditAnchorDir is where the head of each audit log is recorded. It lives
+// in the config directory, never beside the log: an anchor a log's own
+// writer could edit would witness nothing.
+func (p Paths) AuditAnchorDir() string { return filepath.Join(p.UserConfig, "audit-anchors") }
+
 // ProjectSettingsFile is the shared (committed) project settings file.
 func (p Paths) ProjectSettingsFile() string { return filepath.Join(p.ProjectDir, "settings.json") }
 

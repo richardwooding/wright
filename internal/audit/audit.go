@@ -150,19 +150,28 @@ type MCP struct {
 
 // Log is an append-only audit file for one session.
 type Log struct {
-	mu   sync.Mutex
-	f    *os.File
-	w    *bufio.Writer
-	r    *redact.Redactor
-	seq  int
-	prev string
-	path string
+	mu      sync.Mutex
+	f       *os.File
+	w       *bufio.Writer
+	r       *redact.Redactor
+	seq     int
+	prev    string
+	path    string
+	anchors *Anchors
 }
 
 // Open opens (or creates, mode 0600) the log at path for appending. When
 // the file already has events, Seq and Prev continue the chain. r may be
-// nil to disable redaction (tests only).
+// nil to disable redaction (tests only). The chain is not anchored — use
+// OpenAnchored for a log whose head must be verifiable from outside.
 func Open(path string, r *redact.Redactor) (*Log, error) {
+	return OpenAnchored(path, r, nil)
+}
+
+// OpenAnchored is Open plus an anchor store: every written line records the
+// new head there, so Verify can tell a truncated or re-forged log from the
+// one wright wrote. anchors may be nil.
+func OpenAnchored(path string, r *redact.Redactor, anchors *Anchors) (*Log, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
@@ -174,7 +183,7 @@ func Open(path string, r *redact.Redactor) (*Log, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Log{f: f, w: bufio.NewWriter(f), r: r, seq: seq, prev: prev, path: path}, nil
+	return &Log{f: f, w: bufio.NewWriter(f), r: r, seq: seq, prev: prev, path: path, anchors: anchors}, nil
 }
 
 // tail returns the last sequence number and line hash of an existing log.
@@ -237,7 +246,10 @@ func (l *Log) Write(ev Event) error {
 		return err
 	}
 	l.prev = hashLine(line)
-	return nil
+	// The anchor moves with the line it witnesses. A failure here is
+	// reported rather than swallowed: an unanchored line is a line nothing
+	// outside the file can vouch for.
+	return l.anchors.Record(l.path, l.seq, l.prev)
 }
 
 // scrub redacts free text and bounds argument size.
@@ -314,21 +326,73 @@ func Read(path string) iter.Seq2[Event, error] {
 	}
 }
 
-// ErrTampered is returned by Verify when the chain does not hold.
-var ErrTampered = errors.New("audit: log has been modified or truncated")
+// Verification outcomes. They are distinct because the remedies differ: a
+// broken chain means a line was edited, a short log means lines were removed
+// wholesale, and a head that does not match the anchor means the chain was
+// recomputed by someone who could write the file.
+var (
+	// ErrTampered is returned when the chain itself does not hold.
+	ErrTampered = errors.New("audit: log has been modified or truncated")
+	// ErrTruncated is returned when the chain holds but the log is shorter
+	// than the head wright recorded.
+	ErrTruncated = errors.New("audit: log is shorter than the recorded head")
+	// ErrForged is returned when the chain holds and the log has the
+	// expected length but its head is not the one wright recorded — a chain
+	// recomputed over rewritten lines.
+	ErrForged = errors.New("audit: log head does not match the recorded head")
+	// ErrNoAnchor is returned when no head was ever recorded for a log, so
+	// only self-consistency could be checked.
+	ErrNoAnchor = errors.New("audit: no recorded head for this log")
+)
 
 // Verify re-hashes every line and checks Seq and Prev. It returns the
 // number of valid events; on failure the error names the first bad line.
+// It proves only that the log is self-consistent: use VerifyAnchored to
+// learn whether it is also the log wright wrote.
 func Verify(path string) (int, error) {
+	n, _, err := verifyFile(path)
+	return n, err
+}
+
+// VerifyAnchored verifies the chain and then checks the log against the head
+// recorded in anchors, which lives outside the log's directory. A log whose
+// tail was cut off, or whose chain was recomputed after an edit, verifies
+// cleanly on its own; only the anchor makes either visible.
+func VerifyAnchored(path string, anchors *Anchors) (int, error) {
+	n, head, err := verifyFile(path)
+	if err != nil {
+		return n, err
+	}
+	an, ok := anchors.Head(path)
+	if !ok {
+		return n, ErrNoAnchor
+	}
+	switch {
+	case n < an.Seq:
+		return n, fmt.Errorf("%w: it ends at seq %d, the recorded head is seq %d (%d event(s) removed)",
+			ErrTruncated, n, an.Seq, an.Seq-n)
+	case n > an.Seq:
+		return n, fmt.Errorf("%w: it ends at seq %d, past the recorded head at seq %d (%d line(s) nothing witnessed)",
+			ErrForged, n, an.Seq, n-an.Seq)
+	case head != an.Hash:
+		return n, fmt.Errorf("%w: line %d hashes to %s, the recorded head is %s",
+			ErrForged, n, short(head), short(an.Hash))
+	}
+	return n, nil
+}
+
+// verifyFile walks the chain and returns the event count and the hash of the
+// last line, which is what the anchor is compared against.
+func verifyFile(path string) (int, string, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer func() { _ = f.Close() }() // read-only: nothing to flush
 	return verify(f)
 }
 
-func verify(r io.Reader) (int, error) {
+func verify(r io.Reader) (int, string, error) {
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	n, prev := 0, ""
@@ -339,16 +403,24 @@ func verify(r io.Reader) (int, error) {
 		}
 		var ev Event
 		if err := json.Unmarshal(line, &ev); err != nil {
-			return n, fmt.Errorf("%w: line %d is not valid JSON", ErrTampered, n+1)
+			return n, prev, fmt.Errorf("%w: line %d is not valid JSON", ErrTampered, n+1)
 		}
 		if ev.Seq != n+1 {
-			return n, fmt.Errorf("%w: line %d has seq %d, want %d", ErrTampered, n+1, ev.Seq, n+1)
+			return n, prev, fmt.Errorf("%w: line %d has seq %d, want %d", ErrTampered, n+1, ev.Seq, n+1)
 		}
 		if ev.Prev != prev {
-			return n, fmt.Errorf("%w: line %d does not chain to line %d", ErrTampered, n+1, n)
+			return n, prev, fmt.Errorf("%w: line %d does not chain to line %d", ErrTampered, n+1, n)
 		}
 		prev = hashLine(line)
 		n++
 	}
-	return n, sc.Err()
+	return n, prev, sc.Err()
+}
+
+// short abbreviates a hash for a message.
+func short(h string) string {
+	if len(h) > 12 {
+		return h[:12] + "…"
+	}
+	return h
 }

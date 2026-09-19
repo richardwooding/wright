@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/richardwooding/wright/internal/app"
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/session"
 )
@@ -99,17 +100,29 @@ type AuditVerifyCmd struct {
 	ID string `arg:"" optional:"" help:"Session ID (default: latest)."`
 }
 
-// Run re-hashes the log and reports the result.
+// Run re-hashes the log and checks it against the head recorded outside it.
 func (c *AuditVerifyCmd) Run(g *Globals) error {
 	path, err := auditPath(g, c.ID)
 	if err != nil {
 		return err
 	}
-	n, err := audit.Verify(path)
+	_, l, err := app.OpenStore(g.CLI.Cwd)
 	if err != nil {
-		return fmt.Errorf("%s: %w (%d valid event(s) before the break)", path, err, n)
+		return err
 	}
-	fmt.Fprintf(g.Stdout, "ok: %d event(s), chain intact (%s)\n", n, path)
+	anchors := audit.OpenAnchors(l.Paths.AuditAnchorDir())
+	n, err := audit.VerifyAnchored(path, anchors)
+	switch {
+	case errors.Is(err, audit.ErrNoAnchor):
+		// Saying "intact" alone would be the false assurance the anchor
+		// exists to remove: an absent anchor is also what a truncation
+		// looks like once the anchor file is deleted.
+		fmt.Fprintf(g.Stdout, "ok: %d event(s), chain intact (%s)\nwarning: no recorded head for this log, so a removed tail cannot be ruled out (anchors: %s)\n", n, path, anchors.Dir())
+		return nil
+	case err != nil:
+		return fmt.Errorf("%s: %w (%d valid event(s) read)", path, err, n)
+	}
+	fmt.Fprintf(g.Stdout, "ok: %d event(s), chain intact and matching the recorded head (%s)\n", n, path)
 	return nil
 }
 
