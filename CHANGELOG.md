@@ -273,3 +273,42 @@ redaction and a tamper-evident audit log between the model and the machine.
   with `LD_PRELOAD`, `BASH_ENV`, `PERL5OPT` and their relatives — are in the
   hard-strip set, so `sandbox.passEnv` from a trusted settings file cannot
   reinstate them either.
+- The landlock backend protects `.git/hooks`, `.git/config` and `.wright`
+  with read-only bind mounts instead of by withholding write on the
+  workspace root. Landlock rules are additive, so the first fix kept those
+  paths read-only the only way Landlock can — by granting the root entry by
+  entry — and that also stopped a shell command creating *any* new file or
+  directory in the repository root. The shipped container image selects
+  landlock (`WRIGHT_SANDBOX=landlock`, no bwrap), so `podman run
+  ghcr.io/richardwooding/wright` got exactly that, and an agent that cannot
+  create a file in the repository root is not an agent. The helper now runs
+  in a mount namespace and bind-mounts those paths read-only over
+  themselves, which is what bwrap does, and the root is granted read-write
+  as normal: `touch NEWFILE`, `mkdir sub` and `git commit` all work while
+  the hook stays unwritable. Where a filesystem refuses the remount — a
+  volume a container runtime bind-mounted in is locked by the user namespace
+  that owns it — commands keep working and the backend says plainly that
+  those paths rest on the permission layer alone.
+- Protected paths that do not exist yet are created before the sandbox is
+  built. Binding only what existed left the protection defeatable by
+  `mkdir .wright && echo … > .wright/settings.local.json`, which landed on
+  the host from inside the sandbox. `sandbox.EnsureProtected` creates
+  `.wright`, and `.git/hooks` and `.git/config` when `.git` is a directory,
+  in the workspace roots only — never a `.git` of wright's own invention,
+  which would make git treat a plain directory as a repository.
+- Nothing may replace a sandboxed command's process attributes. The bash
+  tool set its process group by assigning a fresh `SysProcAttr`, discarding
+  the clone flags that put the command in its own network and mount
+  namespaces — silently, with the status bar still reporting "landlock". It
+  adds to them now, and the helper compares its namespaces against the
+  backend's and refuses to run the payload if it is still in the parent's,
+  so the same mistake cannot be made quietly again.
+- A malformed `.wright/settings.json` or `.wright/settings.local.json` no
+  longer stops wright from starting in that directory. A repository could
+  ship one — or a payload with a single write could leave an empty file
+  behind — and every later run failed at startup with a bare `EOF` from the
+  JSON decoder. Decode errors now name the file and the line ("invalid JSON
+  at line 3", "the file is empty"), and a project layer that will not parse
+  is reported and dropped, matching how an untrusted project layer is
+  already dropped. The user's own `config.json` stays fatal: it is theirs to
+  fix.

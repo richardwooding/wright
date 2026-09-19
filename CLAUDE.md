@@ -178,20 +178,36 @@ client to HTTP MCP transports).
   `--bind` (last operation wins) and tmpfs-masks the user dirs; seatbelt
   denies after the allows (last SBPL rule wins). **Landlock rules are
   additive** — the kernel unions every rule matching an ancestor, so a
-  subtree can never be subtracted from an RW rule; `splitReadWrite` grants
-  the root entry by entry instead, which is why new entries directly in the
-  workspace root or in `.git` cannot be created under landlock. The policy
-  layer already denies *declared* writes there (`workspace.IsProtected`);
-  this is the layer for writes it cannot see.
-- **Landlock "no network" is a network namespace.** `RestrictNet` covers TCP
-  bind/connect only, so it alone left UDP, ICMP and raw sockets open. The
-  backend re-execs the helper with `CLONE_NEWUSER|CLONE_NEWNET` and an
-  identity uid/gid map (`netnsAttr`); `execve` drops the capabilities the
-  namespace grants, so the payload gains nothing. When the kernel forbids
-  unprivileged user namespaces, `Warnings()` says the confinement is TCP
-  only — never leave a guarantee in the UI that the backend is not making.
-  Name resolution through a local resolver's unix socket survives under both
-  backends; that is a property of the host, not of the sandbox.
+  subtree can never be subtracted from an RW rule — so landlock grants the
+  root read-write as normal and the helper *bind-mounts* the protected paths
+  read-only instead. Withholding write on the root to compensate is not an
+  option: an agent that cannot create a file in the repository root is not
+  an agent. `EnsureProtected` creates the protected paths that do not exist
+  yet (in the workspace roots only, and never a `.git` of its own
+  invention), because a path that is absent cannot be bound and the payload
+  would just `mkdir` it. The policy layer already denies *declared* writes
+  there (`workspace.IsProtected`); this is the layer for writes it cannot
+  see.
+- **The landlock helper's namespaces are the confinement.** The backend
+  re-execs it with `CLONE_NEWUSER|CLONE_NEWNET`, `Unshareflags:
+  CLONE_NEWNS`, an identity uid/gid map and ambient `CAP_SYS_ADMIN`
+  (`nsAttr`): `RestrictNet` covers TCP bind/connect only, so the network
+  namespace is what makes "no network" true, and the mount namespace is what
+  carries the read-only binds. Ambient is the only capability kind that
+  survives the `execve` into the helper — a user namespace grants everything
+  at clone time and `execve` by a non-root uid drops it all. The helper
+  mounts, then `dropCapabilities`, then Landlock, then `syscall.Exec`, all on
+  one `runtime.LockOSThread` thread, because capabilities are per-thread and
+  `execve` takes the calling thread's. **Never replace a sandboxed command's
+  `SysProcAttr`** — add to it (`tools.setProcessGroup` once replaced it and
+  silently cost the backend both namespaces); the helper now compares its
+  namespaces with `Helper.ParentNS` and refuses to run if they are the
+  parent's. A remount can still fail where the filesystem's mount is locked
+  by another user namespace — a container runtime's volume — so the probe
+  (`__sandbox --probe --probe-dir <root>`) measures the *workspace*, and
+  `WarningsFor` says plainly that those paths rest on the permission layer
+  alone. Name resolution through a local resolver's unix socket survives
+  under both backends; that is a property of the host, not of the sandbox.
 - **`sandbox.Env` is an allowlist with a hard strip.** Passthrough from trusted
   settings can add names, but nothing matching the strip regexes
   (`_KEY|_TOKEN|_SECRET|_PASSWORD`, `AWS_`, provider prefixes…) ever reaches a
@@ -261,7 +277,12 @@ client to HTTP MCP transports).
   be kept out of `tighteningOnly` and named in `untrustedNote` — the note is
   read as an assurance, so it must list everything that was dropped. The same
   split feeds `policy.New` (project *and* project-local allow rules only when
-  trusted). `wright init` trusts the files it writes; a persisted grant
+  trusted). A project settings file that does not *parse* is a warning and a
+  dropped layer, not a fatal error: it arrived with the repository, so making
+  it fatal would let any checkout stop wright from starting in that
+  directory. The user's own `config.json` stays fatal — it is theirs to fix —
+  and `config.Decode` names the line instead of returning a bare `EOF`.
+  `wright init` trusts the files it writes; a persisted grant
   rewrites `settings.local.json` and re-records the hash, but only for an
   already-trusted project. `/trust` accepts an existing pair, effective from
   the next session. `config show` prints the gated view.
@@ -386,12 +407,13 @@ client to HTTP MCP transports).
 - **Landlock via re-exec.** Landlock restricts the *calling* process, so the
   backend re-executes the wright binary as `wright __sandbox … -- bash -c SCRIPT`;
   the hidden subcommand applies `landlock.V5.BestEffort()` and `syscall.Exec`s
-  the payload. The network namespace is created by the *backend*, as clone
-  flags on that re-exec, not by the helper: `unshare(CLONE_NEWUSER)` returns
-  EINVAL in a multi-threaded process, and every Go program is one. Running
-  `wright __sandbox` by hand therefore gets the filesystem rules but no
-  namespace. The sandbox tests use `TestMain` to make the test binary answer
-  `__sandbox` too.
+  the payload. The namespaces are created by the *backend*, as clone flags on
+  that re-exec, not by the helper: `unshare(CLONE_NEWUSER)` returns EINVAL in
+  a multi-threaded process, and every Go program is one. Running `wright
+  __sandbox` by hand therefore gets the filesystem rules but no namespaces
+  and no read-only binds. The sandbox tests use `TestMain` to make the test
+  binary answer `__sandbox` too — and it must exit 0 when `Exec` returns,
+  which only `--probe` does.
 
 ## Conventions
 
