@@ -68,11 +68,11 @@ func TestImportDAG(t *testing.T) {
 			}
 		}
 	}
-	// cli is the only internal package allowed to import app; package main
-	// may too, to hand app the TUI's Interactive hook.
+	// cli is the only internal package allowed to import app, plus tuiwire
+	// (the adapter that hands app the TUI's Interactive hook) and package main.
 	for p, imports := range graph {
-		if slices.Contains(imports, pkg("app")) && p != pkg("cli") && p != module+"/cmd/wright" {
-			t.Errorf("%s imports internal/app; only internal/cli and cmd/wright may", p)
+		if slices.Contains(imports, pkg("app")) && p != pkg("cli") && p != pkg("tuiwire") && p != module+"/cmd/wright" {
+			t.Errorf("%s imports internal/app; only internal/cli, internal/tuiwire and cmd/wright may", p)
 		}
 	}
 }

@@ -46,6 +46,7 @@ internal/
               /redaction /mcp /skills; InitProject, LoadEffective, OpenStore for the read-only commands; DAG/network tests
   engine/     wraps agentkit: runs, fan-in Event channel, Approver, Asker, Inbox steering, mode/model switch, Compact, Undo
   enginetest/ Scripted core.Chatter + TextResp/CallResp shared by the engine, headless and app tests
+  tuiwire/    adapts app.Interactive → tui.Run (Controller/SessionSource shims, "@" file walk); the only package importing both
   tui/        Bubble Tea v2 root model (Controller + Event channel → engine); --plain loop; subpackages
               transcript (block list + render cache), composer (textarea, history, @ and / popups),
               overlay (approval/question/picker/help/todos/confirm/input), markdown (glamour cache),
