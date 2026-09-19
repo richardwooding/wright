@@ -5,13 +5,14 @@ go 1.27.0
 require (
 	charm.land/lipgloss/v2 v2.0.6
 	github.com/alecthomas/kong v1.16.1
+	github.com/bmatcuk/doublestar/v4 v4.10.1
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/landlock-lsm/go-landlock v0.10.1
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
+	mvdan.cc/sh/v3 v3.14.1
 )
 
 require (
-	github.com/bmatcuk/doublestar/v4 v4.10.1 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886 // indirect
 	github.com/charmbracelet/x/ansi v0.11.8 // indirect
@@ -27,5 +28,4 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
-	mvdan.cc/sh/v3 v3.14.1 // indirect
 )
