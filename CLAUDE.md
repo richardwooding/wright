@@ -185,6 +185,12 @@ client to HTTP MCP transports).
   names that path to the model, so any tool that spills must redact first
   (`bash`, `web_fetch`). Redacting the clipped result only cleans the excerpt
   and leaves the secret on disk.
+- **A described path must be the path that runs.** `bash` executes with
+  `spec.Dir = Cwd.Get()`, which `cd` moves, so `describeBash` wraps
+  `policy.NewShellWorkspace` in `cwdWorkspace` to resolve relative words
+  against that directory. Anything that classifies a command has to use the
+  same base the command will use, or the verdict and the approval preview
+  describe a different file from the one that is opened.
 - **Audit lines are immutable.** `audit.Log.Write` sets `Seq` and `Prev` (the
   SHA-256 of the previous *line*), redacts `Text`/`Args`, caps `Args` at 4 KiB
   and records `ArgsSHA256` of the full value. Never log environment variables

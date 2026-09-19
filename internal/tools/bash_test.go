@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -260,4 +261,65 @@ func spillPath(t *testing.T, out string) string {
 		t.Fatalf("note names no spill file: %q", note)
 	}
 	return note[j+len(marker):]
+}
+
+// TestBashDescribeResolvesAgainstCwd pins M6: the analyzer must resolve a
+// relative word against the working directory the command will actually run
+// in (spec.Dir, which `cd` moves), not against the workspace root. Otherwise
+// the verdict and the approval preview name a different file from the one
+// the command opens.
+func TestBashDescribeResolvesAgainstCwd(t *testing.T) {
+	f := newFixture(t, nil)
+	for _, dir := range []string{"sub", "sub/deep"} {
+		if err := os.MkdirAll(filepath.Join(f.root, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d, ok := tools.Lookup(f.ts, tools.NameBash)
+	if !ok {
+		t.Fatal("bash has no Describer")
+	}
+	req, _, err := d.Describe(json.RawMessage(`{"command":"cat notes.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.root, "notes.txt"); !contains(req.Paths, want) {
+		t.Errorf("at the root, read paths = %v, want %s", req.Paths, want)
+	}
+	if _, err := f.text(tools.NameBash, `{"command":"cd sub"}`); err != nil {
+		t.Fatal(err)
+	}
+	req, _, err = d.Describe(json.RawMessage(`{"command":"cat notes.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.root, "sub", "notes.txt"); !contains(req.Paths, want) {
+		t.Errorf("after cd sub, read paths = %v, want %s", req.Paths, want)
+	}
+	// Writes follow the same path resolution.
+	req, _, err = d.Describe(json.RawMessage(`{"command":"echo hi > deep/out.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.root, "sub", "deep", "out.txt"); !contains(req.Writes, want) {
+		t.Errorf("after cd sub, write paths = %v, want %s", req.Writes, want)
+	}
+	// Absolute paths are untouched by the rebase.
+	abs := filepath.Join(f.root, "top.txt")
+	req, _, err = d.Describe(json.RawMessage(`{"command":"cat ` + filepath.ToSlash(abs) + `"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(req.Paths, abs) {
+		t.Errorf("absolute path rewritten: %v, want %s", req.Paths, abs)
+	}
+}
+
+func contains(paths []string, want string) bool {
+	for _, p := range paths {
+		if p == want {
+			return true
+		}
+	}
+	return false
 }

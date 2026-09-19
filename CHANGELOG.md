@@ -163,3 +163,10 @@ redaction and a tamper-evident audit log between the model and the machine.
   hands the model that path, so redacting afterwards left the unredacted
   secret on disk. Nothing unredacted is written now, and the truncation note
   counts the bytes that were actually saved.
+- `bash`'s `Describe` resolves relative paths against the working directory
+  the command will run in, not the workspace root. The tool runs with
+  `spec.Dir` set to the tracked cwd, which `cd` moves, so every declared read
+  and write in the policy request — and in the approval preview the user
+  reads — could name a different file from the one the command opens. It
+  failed safe with a single root; a second root at another depth
+  (`--add-dir`) would have made it exploitable.
