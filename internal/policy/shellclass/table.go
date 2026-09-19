@@ -171,30 +171,175 @@ func (v verbs) lookup(args []word, def result) result {
 
 // ---- readers ------------------------------------------------------------------
 
-// reader builds a handler for commands that only read their file arguments;
-// skip positional arguments (e.g. the grep pattern) are not treated as files.
-func reader(skip int) handler {
+// readerSpec describes a command that reads its file arguments, in enough
+// detail to notice the options that make it do something else. Without it an
+// option *value* looks like a positional file: `sort main.go -o main.go` read
+// as two file reads and classified SafeRead while truncating a tracked file.
+type readerSpec struct {
+	// skip is how many leading positionals are not files (grep's pattern).
+	skip int
+	// pattern lists the options that supply that positional themselves, so
+	// nothing is skipped when one of them is present (grep -e PAT FILE).
+	pattern []string
+	// value maps an option to the number of following words it consumes.
+	value map[string]int
+	// output lists the options whose value is a file the command writes.
+	output []string
+	// exec lists the options whose value is a program the command runs.
+	exec []string
+	// outputPositional, when non-zero, is the index (after skip) of the first
+	// positional that is an output file rather than an input (xxd in out).
+	outputPositional int
+}
+
+// reader builds a handler for commands that only read their file arguments.
+func reader(skip int) handler { return readerFrom(readerSpec{skip: skip}) }
+
+// readerFrom builds a handler from a spec: option values are not mistaken for
+// files, an output option's value becomes a declared write (raising the
+// class), and an option naming a program makes the command opaque.
+func readerFrom(spec readerSpec) handler {
 	return func(a *analyzer, name string, args []word) result {
+		files, writes, exec := spec.split(args)
+		if exec != "" {
+			return opaque(name + " " + exec + " runs a program of the caller's choosing")
+		}
 		r := safe("")
-		files := nonFlags(args)
-		if len(files) > skip {
-			a.readFiles(&r, files[skip:])
+		a.readFiles(&r, files)
+		if len(writes) > 0 {
+			r.reason = joinReason(r.reason, name+" writes its output file")
+			a.writeFiles(&r, writes, true)
 		}
 		return r
 	}
 }
 
+// split separates the input files from the output files. exec names the first
+// program-running option found, if any.
+func (s readerSpec) split(args []word) (files, writes []word, exec string) {
+	var positional []word
+	skip, i := s.skip, 0
+	for i < len(args) {
+		t := args[i].text
+		switch {
+		case t == "--":
+			positional = append(positional, args[i+1:]...)
+			i = len(args)
+		case !isFlag(t):
+			positional = append(positional, args[i])
+			i++
+		default:
+			opt, _, _ := strings.Cut(t, "=")
+			if slices.Contains(s.exec, opt) {
+				return nil, nil, opt
+			}
+			if slices.Contains(s.pattern, opt) {
+				skip = 0
+			}
+			val, ok, next := optionArg(args, i, s.value[opt])
+			if ok && slices.Contains(s.output, opt) {
+				writes = append(writes, val)
+			}
+			i = next
+		}
+	}
+	return s.operands(positional, skip, writes)
+}
+
+// operands applies skip and outputPositional to the positional arguments.
+func (s readerSpec) operands(positional []word, skip int, writes []word) (files, out []word, exec string) {
+	if len(positional) <= skip {
+		return nil, writes, ""
+	}
+	rest := positional[skip:]
+	if n := s.outputPositional; n > 0 && len(rest) > n {
+		writes = append(writes, rest[n:]...)
+		rest = rest[:n]
+	}
+	return rest, writes, ""
+}
+
+// optionArg returns the value of the option at i — `--opt=value` or, when the
+// option consumes n following words, `-o value` — and the index after it.
+func optionArg(args []word, i, n int) (val word, ok bool, next int) {
+	if _, v, eq := strings.Cut(args[i].text, "="); eq {
+		return word{text: v, dynamic: args[i].dynamic}, true, i + 1
+	}
+	if n > 0 && i+1 < len(args) {
+		return args[i+1], true, i + 1 + n
+	}
+	return word{}, false, i + 1
+}
+
+// vals builds a value map where each option consumes one following word.
+func vals(flags ...string) map[string]int {
+	m := make(map[string]int, len(flags))
+	for _, f := range flags {
+		m[f] = 1
+	}
+	return m
+}
+
 // noFiles is for commands whose positional arguments are not files.
 func noFiles(a *analyzer, name string, args []word) result { return safe("") }
 
+// readerSpecs are the readers whose options need inspecting: a value that
+// looks like a file, a file they write, or a program they run.
+var readerSpecs = map[string]readerSpec{
+	"head":     {value: vals("-n", "-c", "--lines", "--bytes")},
+	"tail":     {value: vals("-n", "-c", "-s", "--lines", "--bytes", "--sleep-interval", "--pid", "--max-unchanged-stats")},
+	"nl":       {value: vals("-b", "-d", "-f", "-h", "-i", "-l", "-n", "-s", "-v", "-w")},
+	"od":       {value: vals("-A", "-j", "-N", "-S", "-w", "-t", "--address-radix", "--skip-bytes", "--read-bytes", "--strings", "--width", "--format")},
+	"hexdump":  {value: vals("-e", "-f", "-n", "-s")},
+	"xxd":      {value: vals("-c", "-g", "-l", "-o", "-s"), outputPositional: 1},
+	"strings":  {value: vals("-n", "-t", "-e", "-T", "--bytes", "--radix", "--encoding", "--target")},
+	"file":     {value: vals("-f", "-m", "-F", "--files-from", "--magic-file", "--separator")},
+	"stat":     {value: vals("-c", "--format", "--printf")},
+	"less":     {value: vals("-o", "-O", "-b", "-h", "-j", "-k", "-P", "-x", "-y", "-z", "--log-file"), output: []string{"-o", "-O", "--log-file"}},
+	"sort":     {value: vals("-o", "-k", "-t", "-S", "-T", "--output", "--key", "--field-separator", "--buffer-size", "--temporary-directory", "--files0-from", "--compress-program"), output: []string{"-o", "--output"}, exec: []string{"--compress-program"}},
+	"uniq":     {value: vals("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars", "--group", "--all-repeated"), outputPositional: 1},
+	"cut":      {value: vals("-b", "-c", "-d", "-f", "--bytes", "--characters", "--delimiter", "--fields", "--output-delimiter")},
+	"paste":    {value: vals("-d", "--delimiters")},
+	"join":     {value: vals("-1", "-2", "-a", "-e", "-o", "-t", "-v", "--output-delimiter")},
+	"comm":     {value: vals("--output-delimiter")},
+	"column":   {value: vals("-c", "-s", "-o", "-N", "-l", "-W", "-R", "-H", "-T", "--columns", "--separator", "--output-separator", "--table-columns")},
+	"fold":     {value: vals("-w", "--width")},
+	"fmt":      {value: vals("-w", "-p", "--width", "--prefix")},
+	"expand":   {value: vals("-t", "--tabs")},
+	"unexpand": {value: vals("-t", "--tabs")},
+	"diff":     {value: vals("-U", "-C", "-W", "-S", "-X", "-D", "--unified", "--context", "--width", "--label", "--starting-file", "--exclude", "--exclude-from", "--ifdef", "--from-file", "--to-file", "--horizon-lines")},
+	"cmp":      {value: vals("-i", "-n", "--ignore-initial", "--bytes")},
+	"ls":       {value: vals("-I", "-w", "-T", "--ignore", "--hide", "--width", "--tabsize", "--block-size", "--format", "--time-style", "--sort", "--indicator-style", "--quoting-style")},
+	"tree":     {value: vals("-L", "-P", "-I", "-o", "-H", "-T", "--filelimit"), output: []string{"-o"}},
+	"du":       {value: vals("-d", "-B", "-t", "--max-depth", "--block-size", "--threshold", "--exclude", "--files0-from")},
+	"df":       {value: vals("-B", "-t", "-x", "--block-size", "--type", "--exclude-type", "--output")},
+	"base64":   {value: vals("-w", "--wrap")},
+	"base32":   {value: vals("-w", "--wrap")},
+	"jq":       {value: map[string]int{"-f": 1, "--indent": 1, "--arg": 2, "--argjson": 2, "--slurpfile": 2, "--rawfile": 2}, skip: 1},
+	"grep":     {skip: 1, pattern: []string{"-e", "-f", "--regexp", "--file"}, value: vals("-e", "-f", "-m", "-A", "-B", "-C", "-d", "-D", "--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context", "--include", "--exclude", "--exclude-dir", "--exclude-from", "--label", "--binary-files", "--devices", "--directories")},
+	"rg": {
+		skip: 1, pattern: []string{"-e", "-f", "--regexp", "--file"},
+		value: vals("-e", "-f", "-m", "-A", "-B", "-C", "-g", "-t", "-T", "-r", "-j", "-E", "--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context", "--glob", "--iglob", "--type", "--type-not", "--type-add", "--replace", "--threads", "--max-depth", "--max-filesize", "--encoding", "--ignore-file", "--path-separator", "--colors", "--sort", "--sortr", "--engine", "--pre", "--pre-glob", "--hostname-bin"),
+		exec:  []string{"--pre", "--hostname-bin"},
+	},
+	"ag":  {skip: 1, pattern: []string{"-G", "--file-search-regex"}, value: vals("-A", "-B", "-C", "-m", "-p", "--pager", "--ignore", "--path-to-ignore", "--depth", "--workers"), exec: []string{"--pager"}},
+	"ack": {skip: 1, pattern: []string{"--match"}, value: vals("-A", "-B", "-C", "-m", "--match", "--pager", "--ignore-dir", "--ignore-file", "--type-add", "--type-set"), exec: []string{"--pager"}},
+}
+
 func registerReaders() {
 	register(reader(0),
-		"cat", "head", "tail", "less", "more", "wc", "tac", "rev", "nl", "od", "hexdump", "xxd", "strings",
-		"file", "stat", "md5sum", "sha1sum", "sha256sum", "sha512sum", "b2sum", "cksum", "sum",
-		"sort", "uniq", "cut", "paste", "join", "comm", "column", "fold", "fmt", "expand", "unexpand",
-		"diff", "cmp", "ls", "tree", "du", "df", "base64", "base32", "jq", "yq", "readelf", "objdump", "nm", "ldd", "gzip -l",
+		"cat", "more", "wc", "tac", "rev",
+		"md5sum", "sha1sum", "sha256sum", "sha512sum", "b2sum", "cksum", "sum",
+		"readelf", "objdump", "nm", "ldd",
 	)
-	register(reader(1), "grep", "egrep", "fgrep", "rg", "ag", "ack", "awk", "gawk", "mawk", "nawk")
+	for name, spec := range readerSpecs {
+		register(readerFrom(spec), name)
+	}
+	register(readerFrom(readerSpecs["grep"]), "egrep", "fgrep")
+	register(handleYq, "yq")
+	// awk is not a reader: its first argument is a program that can run
+	// shell commands and write files.
+	register(handleAwk, "awk", "gawk", "mawk", "nawk", "busybox-awk")
 	register(noFiles,
 		"echo", "printf", "true", "false", ":", "pwd", "cd", "pushd", "popd", "dirs", "read", "return", "exit",
 		"break", "continue", "shift", "wait", "sleep", "date", "uname", "hostname", "id", "whoami", "groups",
@@ -212,6 +357,30 @@ func registerReaders() {
 	register(handleSplit, "split", "csplit")
 }
 
+// yqVerbs are the subcommands that precede the expression.
+var yqVerbs = []string{"e", "eval", "ea", "eval-all", "r", "read", "w", "write"}
+
+// handleYq: yq's first positional is an expression, not a file, and -i edits
+// the files it is given in place — as a plain reader it was a SafeRead that
+// rewrote tracked files.
+func handleYq(a *analyzer, name string, args []word) result {
+	files := nonFlags(args)
+	if len(files) > 0 && slices.Contains(yqVerbs, files[0].text) {
+		files = files[1:]
+	}
+	if len(files) > 0 {
+		files = files[1:] // the expression
+	}
+	if !hasFlag(args, "-i", "--inplace", "--in-place") {
+		r := safe("yq evaluates an expression")
+		a.readFiles(&r, files)
+		return r
+	}
+	r := mutating("yq edits files in place")
+	a.writeFiles(&r, files, false)
+	return r
+}
+
 // handleUnset: unsetting PATH/IFS changes command resolution.
 func handleUnset(a *analyzer, name string, args []word) result {
 	for _, w := range nonFlags(args) {
@@ -220,24 +389,6 @@ func handleUnset(a *analyzer, name string, args []word) result {
 		}
 	}
 	return safe("")
-}
-
-// handleSed: -i edits files in place (mutating, protected targets denied);
-// otherwise sed only reads.
-func handleSed(a *analyzer, name string, args []word) result {
-	inPlace := hasShort(args, 'i') || hasFlag(args, "--in-place")
-	files := nonFlags(args)
-	if !hasFlag(args, "-e", "-f", "--expression", "--file") && len(files) > 0 {
-		files = files[1:] // the script
-	}
-	if !inPlace {
-		r := safe("")
-		a.readFiles(&r, files)
-		return r
-	}
-	r := mutating("edits files in place")
-	a.writeFiles(&r, files, false)
-	return r
 }
 
 // handleTee writes (truncating unless -a) every positional argument.
@@ -273,19 +424,23 @@ func handleFind(a *analyzer, name string, args []word) result {
 		switch t {
 		case "-delete":
 			r.raise(Destructive)
+			r.unknown = true
 			r.reason = joinReason(r.reason, "find -delete removes matches")
 		case "-exec", "-execdir", "-ok", "-okdir":
 			end := i + 1
 			for end < len(args) && args[end].text != ";" && args[end].text != "+" {
 				end++
 			}
-			a.foldExec(&r, args[i+1:end])
+			if !a.foldExec(&r, args[i+1:end]) {
+				r.unknown = true
+			}
 			i = end
 		case "-fprint", "-fprintf", "-fls", "-fprint0":
 			if i+1 < len(args) {
 				a.writeFiles(&r, args[i+1:i+2], true)
 				i++
 			}
+			r.unknown = true
 		}
 		i++
 	}
@@ -293,8 +448,14 @@ func handleFind(a *analyzer, name string, args []word) result {
 }
 
 // foldExec classifies the -exec payload ({} placeholders stripped) and merges
-// it into r at no less than MutatingWorkspace.
-func (a *analyzer) foldExec(r *result, payload []word) {
+// it into r at no less than MutatingWorkspace. The payload's declared reads
+// and writes are merged too: path deny rules match on the declared paths, and
+// a payload whose paths never surfaced was invisible to them.
+//
+// safeReader reports a payload that is itself a recognised safe reader. Any
+// other payload must not be coverable by a bare `find *` argv-prefix rule —
+// the rule cannot see what the payload does — so handleFind marks it opaque.
+func (a *analyzer) foldExec(r *result, payload []word) (safeReader bool) {
 	inner := make([]word, 0, len(payload))
 	for _, w := range payload {
 		if w.text != "{}" {
@@ -302,17 +463,21 @@ func (a *analyzer) foldExec(r *result, payload []word) {
 		}
 	}
 	if len(inner) == 0 {
-		return
+		return false
 	}
 	ir := a.classify(inner)
+	safeReader = ir.class == SafeRead && !ir.unknown && ir.hardDeny == ""
 	ir.raise(MutatingWorkspace)
 	r.raise(ir.class)
 	r.network = r.network || ir.network
 	r.unknown = r.unknown || ir.unknown
+	r.reads = append(r.reads, ir.reads...)
+	r.writes = append(r.writes, ir.writes...)
 	if r.hardDeny == "" {
 		r.hardDeny = ir.hardDeny
 	}
 	r.reason = joinReason(r.reason, "find -exec "+inner[0].text+": "+ir.reason)
+	return safeReader
 }
 
 // ---- build tools ----------------------------------------------------------------
@@ -340,7 +505,42 @@ func registerBuildTools() {
 	register(func(a *analyzer, name string, args []word) result { return network("downloads toolchain") }, "rustup", "govulncheck", "nvm", "fnm", "volta", "asdf", "mise", "sdk", "pyenv", "rbenv", "gvm")
 }
 
+// goExecFlags name go options whose value is a program the toolchain runs, or
+// a file that replaces what it compiles.
+var goExecFlags = []string{"-exec", "-toolexec", "-vettool", "-overlay", "-pkgdir"}
+
+// goCompilerFlags pass options through to the compiler and linker, which have
+// exec-injection options of their own (-toolexec, -extld).
+var goCompilerFlags = []string{"-gcflags", "-ldflags", "-asmflags", "-gccgoflags"}
+
+// goInjection reports the go option that would run a program of the caller's
+// choosing. `go test -exec /tmp/evil ./...` ran it under the builtin
+// `bash(go test *)` allow rule, which sees only the argv prefix.
+func goInjection(args []word) (string, bool) {
+	for i, w := range args {
+		opt, val, hasEq := strings.Cut(w.text, "=")
+		if slices.Contains(goExecFlags, opt) {
+			return opt, true
+		}
+		if !slices.Contains(goCompilerFlags, opt) {
+			continue
+		}
+		if !hasEq && i+1 < len(args) {
+			val = args[i+1].text
+		}
+		if strings.Contains(val, "-toolexec") || strings.Contains(val, "-extld") {
+			return opt, true
+		}
+	}
+	return "", false
+}
+
 func handleGo(a *analyzer, name string, args []word) result {
+	if opt, ok := goInjection(args); ok {
+		// Opaque as well as Privilege: an argv-prefix allow rule must never
+		// cover a command that names its own executor.
+		return result{class: Privilege, unknown: true, reason: "go " + opt + " runs a program of the caller's choosing"}
+	}
 	sub := first(args)
 	rest := nonFlags(args)
 	switch sub {
