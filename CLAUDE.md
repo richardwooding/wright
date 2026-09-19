@@ -9,6 +9,10 @@ Go 1.27, pure Go, no cgo): a Bubble Tea v2 TUI and a headless mode around an
 `agentkit` agent, with a permission engine, an OS sandbox, secret redaction and a
 tamper-evident audit log between the model and the machine. Generic agent/LLM
 plumbing belongs in `agentkit`/`llmkit`; everything coding-specific lives here.
+It works end to end today — `wright`, `wright -p`, sessions, audit — and is
+pre-1.0 and untagged; MCP and skills are still stubs. User-facing documentation
+lives in `README.md` and `docs/index.html`; keep both honest about what exists,
+because "no invented capabilities" is part of the product.
 
 ## Commands
 
@@ -23,10 +27,52 @@ go test -run 'TestImportDAG|TestNoUnexpectedNetwork' ./internal/app -v
 
 gofumpt -l . && golangci-lint run ./...               # the bar is 0 issues (default linters + gocyclo/gocognit/goconst)
 go run ./cmd/wright doctor                            # sandbox backends, landlock ABI, tools, credential names
+```
 
+### End-to-end against a fake model (no provider, no network)
+
+`llmkit.ParseModel` routes an unknown bare name to Ollama and the Ollama client
+takes its base URL from `OLLAMA_HOST`, so a 40-line fake server is a complete
+model provider: serve `GET /api/tags` with one model and `POST /api/chat` with
+NDJSON chunks (`{"message":{"role":"assistant","content":"…"},"done":false}`
+then `{"done":true,"done_reason":"stop","prompt_eval_count":N,"eval_count":M}`;
+add `"tool_calls"` to a chunk to drive the tool path). Point `WRIGHT_DATA_DIR`
+and `WRIGHT_CONFIG_DIR` at a scratch directory so a run never touches real
+sessions or settings.
+
+```sh
+python3 /tmp/fake-ollama.py &                          # throwaway; any server on 127.0.0.1:11434 will do
+export OLLAMA_HOST=http://127.0.0.1:11434
+export WRIGHT_DATA_DIR=$(mktemp -d) WRIGHT_CONFIG_DIR=$(mktemp -d)
+
+go run ./cmd/wright -p 'say hello' -m fake:latest                     # exit 0, text on stdout
+go run ./cmd/wright -p 'list the files' -m fake:latest --output stream-json
+go run ./cmd/wright -p 'run curl please' -m fake:latest               # ask → denial naming the --allow rule, exit 3
+go run ./cmd/wright sessions list && go run ./cmd/wright audit verify # chain intact
+```
+
+The TUI needs a real terminal, so drive it from a pty: `pty.fork()`, write the
+prompt plus `\r`, then `\x03` twice within 1.5 s to quit, and assert on what
+was written after the alt screen closed — the end-of-run summary
+(`steps 1 · tool calls 0 · 39 tok · — · 0s · completed`), the session line and
+the token line. `internal/tui/teatest_test.go` covers the same flow in-process;
+the pty run is the check that the real binary, the alt screen and the exit
+summary agree.
+
+```sh
+TERM=xterm-256color python3 /tmp/pty-tui.py go run ./cmd/wright -m fake:latest
+```
+
+### Release checks
+
+```sh
 goreleaser check
 goreleaser release --snapshot --clean --skip=publish,docker   # local release dry run (docker needs buildx; use podman below)
-CGO_ENABLED=0 GOOS=linux go build -trimpath -o dist/wright-local ./cmd/wright && podman build -f Containerfile.local -t wright:dev .
+
+CGO_ENABLED=0 GOOS=linux go build -trimpath -o dist/wright-local ./cmd/wright
+podman build -f Containerfile.local -t wright:dev .
+podman run --rm wright:dev --version
+podman run --rm -v "$PWD:/workspace:Z" wright:dev doctor   # container detected; selected = landlock when the host kernel allows it
 ```
 
 This module depends on the *tagged* `agentkit` and `llmkit` releases. To develop against an
