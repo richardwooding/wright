@@ -54,6 +54,10 @@ internal/
   snapshot/   content-addressed pre-edit snapshots per run → /undo
   config/     Settings layers (embedded defaults.json < user < project < project.local < env), atomic saves
   trust/      accepted project settings / MCP servers by hash, ~/.config/wright/trust.json
+  session/    agentkit FileStore + sessions/meta/<id>.meta.json sidecars: Open/List/Get/Touch/Latest/ExportMarkdown/Delete/Purge
+  model/      Choice: flag > WRIGHT_MODEL > settings > credential detection > Ollama probe; Best/Fast/List from the catalog
+  cost/       Meter (usage per model → USD via catalog), FormatUSD/FormatTokens; unknown models price as "—"
+  prompt/     System(in) → (stable, dynamic); LoadInstructions (AGENTS.md walk, CLAUDE.md fallback); WrapUntrusted, ScanInjection
   git/        exec git: Status (2 s timeout), Diff, IsTracked
   theme/      lipgloss v2 palette (gloam tokens as LightDark pairs) + styles
 docs/         gloam Pages site (gloam.css/gloam.js vendored; sync-gloam.sh + gloam-sync.yml keep them current)
@@ -118,6 +122,24 @@ imports nothing internal (it takes a small `Workspace` interface that
   (and other slices) and overrides scalars only when non-zero; booleans that
   default to true are `*bool` so a later layer can turn them off.
 - **Doctor prints credential *names* only.** Never print an environment value.
+- **The stable prompt must stay stable.** `prompt.System` returns two strings:
+  the stable half is sent with `WithInstructions` + `WithCache` and must be
+  byte-identical across turns and sessions (no date, cwd, model, mode, git);
+  everything that varies goes in the dynamic environment block.
+  `TestSystemStableIsIdenticalAcrossTurns` pins it — put new facts in
+  `environment`, not in the constants.
+- **Session sidecars live in `sessions/meta/`.** `agentkit.FileStore.List`
+  reads every `*.json`/`*.jsonl` in its directory as a transcript (and skips
+  subdirectories), so `<id>.meta.json` beside the transcript would be parsed
+  as a legacy session. `Delete` also removes `snapshots/<id>` and
+  `audit/<id>.jsonl`; IDs go through `ValidID` before touching any path.
+- **Model names are provider-qualified when needed.** `llmkit.ParseModel`
+  routes `org/model` names to Hugging Face and unknown bare names to Ollama,
+  so `model.Best`/`Fast` emit `groq/openai/gpt-oss-120b`, `openrouter/…` via
+  `qualify`; `catalog.Lookup` strips the prefix again. `Detect` never reads
+  the process environment or the network itself — `env` and `probeOllama` are
+  injected — and `ProbeOllama` refuses non-loopback hosts unless `OLLAMA_HOST`
+  is set.
 
 ### Why these choices
 
