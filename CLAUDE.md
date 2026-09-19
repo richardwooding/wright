@@ -351,8 +351,8 @@ files, native fuzz tests for every parser (`shellclass`, `policy` rules,
 `redact`, `config` decode, `workspace.Resolve`). Every exported identifier is
 documented; comments say *why*. `gofumpt`; golangci-lint v2 at 0 issues with
 gocyclo ≤ 15 / gocognit ≤ 20 in non-test code (split functions rather than
-suppress). Conventional commits; every commit ends with
-`Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>`.
+suppress). Conventional commits; a commit made by an assistant ends with its own
+`Co-Authored-By:` trailer (the model in use, not a fixed name).
 
 ## Release recipe
 

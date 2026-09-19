@@ -246,13 +246,17 @@ func (a *analyzer) assigns(as []*syntax.Assign) (env []string, danger string) {
 }
 
 // dangerousVar names variables whose assignment changes command resolution
-// or loads code into every later process.
+// or loads code into every later process. The GIT_* entries are the
+// environment spelling of the config keys that point git at a program
+// (GIT_EXTERNAL_DIFF=… git diff runs that program on every file).
 func dangerousVar(name string) bool {
 	switch name {
-	case "PATH", "IFS", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "BASH_ENV", "ENV", "PROMPT_COMMAND", "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "PYTHONSTARTUP", "NODE_OPTIONS", "SHELLOPTS", "BASHOPTS":
+	case "PATH", "IFS", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "BASH_ENV", "ENV", "PROMPT_COMMAND", "PYTHONSTARTUP", "NODE_OPTIONS", "SHELLOPTS", "BASHOPTS",
+		"GIT_SSH", "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
+		"GIT_PAGER", "GIT_ASKPASS", "GIT_PROXY_COMMAND", "GIT_TEMPLATE_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_ATTR_NOSYSTEM":
 		return true
 	}
-	return strings.HasPrefix(name, "DYLD_")
+	return strings.HasPrefix(name, "DYLD_") || strings.HasPrefix(name, "GIT_CONFIG")
 }
 
 func (a *analyzer) expandAll(ws []*syntax.Word) []word {
