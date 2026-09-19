@@ -8,6 +8,7 @@ require (
 	github.com/bmatcuk/doublestar/v4 v4.10.1
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/landlock-lsm/go-landlock v0.10.1
+	github.com/richardwooding/llmkit v0.3.0
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	mvdan.cc/sh/v3 v3.14.1
 )
