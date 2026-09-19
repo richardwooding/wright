@@ -20,14 +20,15 @@ type Picker struct {
 	title string
 	th    theme.Theme
 	items []Item
-	pick  func(Item)
+	pick  func(Item) tea.Cmd
 	query string
 	hits  list
 	shown []Item
 }
 
-// NewPicker builds a picker; pick is called with the chosen item.
-func NewPicker(title string, items []Item, th theme.Theme, pick func(Item)) *Picker {
+// NewPicker builds a picker; pick turns the chosen item into a message for
+// the caller's Update, since an overlay cannot reach into the root model.
+func NewPicker(title string, items []Item, th theme.Theme, pick func(Item) tea.Cmd) *Picker {
 	p := &Picker{title: title, th: th, items: items, pick: pick}
 	p.refilter()
 	return p
@@ -51,10 +52,11 @@ func (p *Picker) Update(msg tea.Msg) (Overlay, tea.Cmd, bool) {
 		p.hits.move(1)
 	case keyEnter:
 		if len(p.shown) > 0 {
+			var cmd tea.Cmd
 			if p.pick != nil {
-				p.pick(p.shown[p.hits.focus])
+				cmd = p.pick(p.shown[p.hits.focus])
 			}
-			return p, nil, true
+			return p, cmd, true
 		}
 	case "backspace":
 		if p.query != "" {

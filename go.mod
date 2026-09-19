@@ -10,6 +10,7 @@ require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/bmatcuk/doublestar/v4 v4.10.1
 	github.com/charmbracelet/x/ansi v0.11.8
+	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20260913004009-c615ff2f7805
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/landlock-lsm/go-landlock v0.10.1
 	github.com/richardwooding/llmkit v0.3.0
@@ -20,6 +21,7 @@ require (
 require (
 	github.com/alecthomas/chroma/v2 v2.14.0 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
+	github.com/aymanbagabas/go-udiff v0.4.1 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
 	github.com/charmbracelet/ultraviolet v0.0.0-20260811164956-006e29f97886 // indirect

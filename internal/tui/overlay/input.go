@@ -13,12 +13,13 @@ type Input struct {
 	title  string
 	prompt string
 	th     theme.Theme
-	submit func(string)
+	submit func(string) tea.Cmd
 	value  string
 }
 
-// NewInput builds the prompt with an initial value; submit gets the trimmed text.
-func NewInput(title, prompt, initial string, th theme.Theme, submit func(string)) *Input {
+// NewInput builds the prompt with an initial value; submit turns the trimmed
+// text into a message for the caller's Update.
+func NewInput(title, prompt, initial string, th theme.Theme, submit func(string) tea.Cmd) *Input {
 	return &Input{title: title, prompt: prompt, th: th, submit: submit, value: initial}
 }
 
@@ -35,24 +36,25 @@ func (p *Input) Update(msg tea.Msg) (Overlay, tea.Cmd, bool) {
 		p.value += strings.ReplaceAll(m.Content, "\n", "")
 		return p, nil, false
 	case tea.KeyPressMsg:
-		return p, nil, p.key(m)
+		cmd, done := p.key(m)
+		return p, cmd, done
 	}
 	return p, nil, false
 }
 
-func (p *Input) key(key tea.KeyPressMsg) bool {
+func (p *Input) key(key tea.KeyPressMsg) (tea.Cmd, bool) {
 	switch key.String() {
 	case keyEsc:
-		return true
+		return nil, true
 	case keyEnter:
 		v := strings.TrimSpace(p.value)
 		if v == "" {
-			return false
+			return nil, false
 		}
 		if p.submit != nil {
-			p.submit(v)
+			return p.submit(v), true
 		}
-		return true
+		return nil, true
 	case "ctrl+u":
 		p.value = ""
 	case "backspace":
@@ -64,7 +66,7 @@ func (p *Input) key(key tea.KeyPressMsg) bool {
 			p.value += key.Text
 		}
 	}
-	return false
+	return nil, false
 }
 
 // View shows the prompt and the line being edited.

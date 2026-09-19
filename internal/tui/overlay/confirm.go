@@ -13,13 +13,14 @@ type Confirm struct {
 	prompt  string
 	word    string
 	th      theme.Theme
-	confirm func()
+	confirm func() tea.Cmd
 	typed   string
 	wrong   bool
 }
 
-// NewConfirm builds the prompt; confirm runs only when word is typed exactly.
-func NewConfirm(title, prompt, word string, th theme.Theme, confirm func()) *Confirm {
+// NewConfirm builds the prompt; confirm runs only when word is typed exactly
+// and returns the message that carries out the action.
+func NewConfirm(title, prompt, word string, th theme.Theme, confirm func() tea.Cmd) *Confirm {
 	return &Confirm{title: title, prompt: prompt, word: word, th: th, confirm: confirm}
 }
 
@@ -37,10 +38,11 @@ func (c *Confirm) Update(msg tea.Msg) (Overlay, tea.Cmd, bool) {
 		return c, nil, true
 	case keyEnter:
 		if c.typed == c.word {
+			var cmd tea.Cmd
 			if c.confirm != nil {
-				c.confirm()
+				cmd = c.confirm()
 			}
-			return c, nil, true
+			return c, cmd, true
 		}
 		c.wrong = true
 		c.typed = ""

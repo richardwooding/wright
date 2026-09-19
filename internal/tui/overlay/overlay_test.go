@@ -304,7 +304,7 @@ func TestQuestionOptionsAndFreeText(t *testing.T) {
 func TestPickerFiltersAndPicks(t *testing.T) {
 	var got *overlay.Item
 	items := []overlay.Item{{Label: "claude-opus", Value: "opus"}, {Label: "claude-sonnet", Value: "sonnet"}, {Label: "gpt-5", Value: "gpt"}}
-	var o overlay.Overlay = overlay.NewPicker("model", items, th, func(it overlay.Item) { got = &it })
+	var o overlay.Overlay = overlay.NewPicker("model", items, th, func(it overlay.Item) tea.Cmd { got = &it; return nil })
 	o = typeText(o, "son")
 	view := plain(o.View(60, 20))
 	if !strings.Contains(view, "claude-sonnet") || strings.Contains(view, "gpt-5") {
@@ -315,7 +315,7 @@ func TestPickerFiltersAndPicks(t *testing.T) {
 		t.Fatalf("pick: done=%v %+v", done, got)
 	}
 	got = nil
-	_, done = press(overlay.NewPicker("model", items, th, func(it overlay.Item) { got = &it }), "esc")
+	_, done = press(overlay.NewPicker("model", items, th, func(it overlay.Item) tea.Cmd { got = &it; return nil }), "esc")
 	if !done || got != nil {
 		t.Fatal("esc picked something")
 	}
@@ -323,7 +323,7 @@ func TestPickerFiltersAndPicks(t *testing.T) {
 
 func TestConfirmRequiresExactWord(t *testing.T) {
 	confirmed := false
-	var o overlay.Overlay = overlay.NewConfirm("bypass permissions", "This disables approval prompts.", "yes", th, func() { confirmed = true })
+	var o overlay.Overlay = overlay.NewConfirm("bypass permissions", "This disables approval prompts.", "yes", th, func() tea.Cmd { confirmed = true; return nil })
 	o = typeText(o, "y")
 	o, done := press(o, "enter")
 	if done || confirmed {
@@ -338,7 +338,7 @@ func TestConfirmRequiresExactWord(t *testing.T) {
 		t.Fatal("exact word not confirmed")
 	}
 	confirmed = false
-	_, done = press(overlay.NewConfirm("t", "p", "yes", th, func() { confirmed = true }), "esc")
+	_, done = press(overlay.NewConfirm("t", "p", "yes", th, func() tea.Cmd { confirmed = true; return nil }), "esc")
 	if !done || confirmed {
 		t.Fatal("esc confirmed")
 	}
@@ -346,7 +346,7 @@ func TestConfirmRequiresExactWord(t *testing.T) {
 
 func TestInputSubmits(t *testing.T) {
 	var got string
-	var o overlay.Overlay = overlay.NewInput("export", "Path to write:", "out.md", th, func(s string) { got = s })
+	var o overlay.Overlay = overlay.NewInput("export", "Path to write:", "out.md", th, func(s string) tea.Cmd { got = s; return nil })
 	o, _ = press(o, "backspace", "backspace")
 	o = typeText(o, "txt")
 	o, _, _ = o.Update(tea.PasteMsg{Content: "-x"})
