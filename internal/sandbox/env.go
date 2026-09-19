@@ -12,9 +12,16 @@ import (
 // envAllow is the allowlist of variable names (glob syntax, matched with
 // path.Match semantics on the name) that reach sandboxed commands. Anything
 // not listed — and not passed through by trusted settings — is dropped.
+// The Go and Node variables are named one by one rather than globbed: a
+// blanket GO* passed GOPROXY (which routinely carries https://user:pass@host
+// credentials) and GOFLAGS, which can inject -toolexec or -ldflags into any
+// build and so turn an allowed `go build` into arbitrary execution without
+// the command line ever saying so. NODE_OPTIONS can inject --require the same
+// way. They are locations and target selectors only.
 var envAllow = []string{
 	"PATH", "HOME", "LANG", "LC_*", "TERM", "XDG_*",
-	"GO*", "CARGO_HOME", "NODE_OPTIONS", "npm_config_cache",
+	"GOPATH", "GOMODCACHE", "GOCACHE", "GOOS", "GOARCH", "GOTOOLCHAIN", "GOROOT",
+	"CARGO_HOME", "npm_config_cache",
 	"PYTHONPATH", "VIRTUAL_ENV", "JAVA_HOME", "CI", "NO_COLOR",
 	"USER", "LOGNAME", "SHELL", "TMPDIR", "TZ", "COLORTERM",
 }
@@ -30,6 +37,12 @@ var envStrip = []*regexp.Regexp{
 	regexp.MustCompile(`^LLMKIT_`),
 	regexp.MustCompile(`^DATABASE_URL$`),
 	regexp.MustCompile(`^(NPM_TOKEN|PYPI_TOKEN|DOCKER_AUTH_CONFIG|KUBECONFIG|SSH_AUTH_SOCK|GPG_AGENT_INFO)$`),
+	// Code injection through a build or runtime variable: GOFLAGS carries
+	// -toolexec/-ldflags, NODE_OPTIONS carries --require, GOPROXY carries
+	// credentials, GOPRIVATE/GONOSUMDB/GONOSUMCHECK/GOSUMDB turn module
+	// checksum verification off. sandbox.passEnv must not reinstate them.
+	regexp.MustCompile(`^(GOFLAGS|GOEXPERIMENT|GOPROXY|GOPRIVATE|GONOSUMDB|GONOSUMCHECK|GOSUMDB|GONOSUMVERIFY|GCCGO|CC|CXX)$`),
+	regexp.MustCompile(`^(NODE_OPTIONS|BASH_ENV|ENV|LD_PRELOAD|LD_LIBRARY_PATH|LD_AUDIT|DYLD_INSERT_LIBRARIES|PERL5OPT|RUBYOPT|PYTHONSTARTUP)$`),
 }
 
 // Env builds the sandbox environment from the process environment: allowlist

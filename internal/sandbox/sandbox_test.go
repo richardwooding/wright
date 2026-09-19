@@ -38,8 +38,14 @@ func TestEnvFrom(t *testing.T) {
 		"LANG=en",
 		"TERM=xterm",
 		"XDG_CACHE_HOME=/c",
-		"GOFLAGS=-mod=mod",
+		"GOFLAGS=-toolexec=/tmp/evil",
+		"GOPROXY=https://user:pass@proxy.example",
+		"GOPRIVATE=*",
+		"NODE_OPTIONS=--require /tmp/evil.js",
+		"LD_PRELOAD=/tmp/evil.so",
+		"BASH_ENV=/tmp/evil.sh",
 		"GOPATH=/go",
+		"GOCACHE=/go/cache",
 		"ANTHROPIC_API_KEY=sk-ant-x",
 		"OPENAI_API_KEY=x",
 		"AWS_ACCESS_KEY_ID=x",
@@ -66,14 +72,21 @@ func TestEnvFrom(t *testing.T) {
 	}{
 		{
 			name: "allowlist only",
-			want: []string{"PATH=/usr/bin", "HOME=/home/u", "LC_ALL=C", "LANG=en", "TERM=xterm", "XDG_CACHE_HOME=/c", "GOFLAGS=-mod=mod", "GOPATH=/go"},
+			want: []string{"PATH=/usr/bin", "HOME=/home/u", "LC_ALL=C", "LANG=en", "TERM=xterm", "XDG_CACHE_HOME=/c", "GOPATH=/go", "GOCACHE=/go/cache"},
 			deny: []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "AWS_ACCESS_KEY_ID", "AWS_REGION", "GITHUB_TOKEN", "GH_TOKEN", "MY_SECRET", "DB_PASSWORD", "SERVICE_CREDENTIALS", "LLMKIT_DEBUG", "DATABASE_URL", "SSH_AUTH_SOCK", "RANDOM_VAR", "CUSTOM_OK", "MALFORMED"},
 		},
 		{
+			// A variable that injects code into an allowed build or run is
+			// as good as an allowed command: GOFLAGS carries -toolexec,
+			// NODE_OPTIONS --require, and GOPROXY carries credentials.
+			name: "code-injecting build variables never pass",
+			deny: []string{"GOFLAGS", "GOPROXY", "GOPRIVATE", "NODE_OPTIONS", "LD_PRELOAD", "BASH_ENV"},
+		},
+		{
 			name: "passthrough adds but cannot override strip",
-			pass: []string{"CUSTOM_OK", "RANDOM_*", "ANTHROPIC_API_KEY", "AWS_REGION", "MY_SECRET"},
+			pass: []string{"CUSTOM_OK", "RANDOM_*", "ANTHROPIC_API_KEY", "AWS_REGION", "MY_SECRET", "GOFLAGS", "GOPROXY", "NODE_OPTIONS", "LD_PRELOAD"},
 			want: []string{"CUSTOM_OK=yes", "RANDOM_VAR=1", "PATH=/usr/bin"},
-			deny: []string{"ANTHROPIC_API_KEY", "AWS_REGION", "MY_SECRET"},
+			deny: []string{"ANTHROPIC_API_KEY", "AWS_REGION", "MY_SECRET", "GOFLAGS", "GOPROXY", "NODE_OPTIONS", "LD_PRELOAD"},
 		},
 		{
 			name:  "extra replaces and is stripped too",
@@ -168,7 +181,7 @@ func TestEmptyArgvRejected(t *testing.T) {
 func TestBwrapArgs(t *testing.T) {
 	ws := t.TempDir()
 	spec := sandbox.Spec{
-		Argv:      []string{"bash", "-lc", "echo hi"},
+		Argv:      []string{"bash", "-c", "echo hi"},
 		Dir:       ws,
 		Env:       []string{"PATH=/usr/bin", "HOME=/home/u"},
 		ReadWrite: []string{ws},
@@ -184,7 +197,7 @@ func TestBwrapArgs(t *testing.T) {
 		" --ro-bind / / ", " --tmpfs /tmp ", " --tmpfs /home/u ",
 		" --bind " + ws + " " + ws + " ", " --ro-bind /opt /opt ",
 		" --clearenv ", " --setenv PATH /usr/bin ", " --setenv HOME /home/u ",
-		" --chdir " + ws + " ", " -- bash -lc echo hi ",
+		" --chdir " + ws + " ", " -- bash -c echo hi ",
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("missing %q in %v", want, args)
@@ -223,7 +236,7 @@ func TestSeatbeltProfile(t *testing.T) {
 }
 
 func TestHelperArgsRoundTrip(t *testing.T) {
-	h := sandbox.Helper{Dir: "/w", RW: []string{"/w", "/c"}, RO: []string{"/o"}, Net: true, Argv: []string{"bash", "-lc", "echo --net"}}
+	h := sandbox.Helper{Dir: "/w", RW: []string{"/w", "/c"}, RO: []string{"/o"}, Net: true, Argv: []string{"bash", "-c", "echo --net"}}
 	got, err := sandbox.ParseHelperArgs(h.Args())
 	if err != nil {
 		t.Fatal(err)

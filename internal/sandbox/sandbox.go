@@ -20,7 +20,7 @@ import (
 
 // Spec describes one sandboxed command.
 type Spec struct {
-	Argv      []string      // command and arguments, e.g. {"bash", "-lc", script}
+	Argv      []string      // command and arguments, e.g. {"bash", "-c", script} — never -lc, which sources profiles
 	Dir       string        // working directory (must be inside a ReadWrite root)
 	Env       []string      // full environment, already filtered by Env()
 	ReadWrite []string      // directories bound read-write (workspace roots, caches)
