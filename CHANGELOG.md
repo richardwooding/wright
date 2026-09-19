@@ -155,6 +155,11 @@ redaction and a tamper-evident audit log between the model and the machine.
   are written as a prefix, through `env`, or exported. They are exported as
   `shellclass.InjectingEnvVars` so the sandbox's environment strip and the
   classifier cannot drift apart.
+- `git bisect run <cmd>` runs a program of the caller's choosing at every
+  step of the search and was classified safe-read, so it ran with no approval
+  at all. `bisect` now has a handler: `run` is opaque and privileged,
+  `replay` declares the log file it reads, the subcommands that move HEAD are
+  mutating, and only `log`/`view`/`terms` stay read-only.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a

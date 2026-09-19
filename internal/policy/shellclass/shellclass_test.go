@@ -327,6 +327,19 @@ var table = []row{
 	{cmd: `env GOFLAGS=-toolexec=/tmp/evil go build ./...`, class: shellclass.MutatingWorkspace, unknown: true},
 	{cmd: `export GOFLAGS=-toolexec=/tmp/evil`, class: shellclass.SafeRead, unknown: true},
 	{cmd: `GOCACHE=/tmp/cache go build ./...`, class: shellclass.MutatingWorkspace},
+	// --- git bisect run executes a program at every step (adversarial review C2)
+	{cmd: `git bisect run sh -c 'id > /tmp/pwned'`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git bisect run ./pwn.sh`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git bisect run make test`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git bisect start HEAD HEAD~2`, class: shellclass.MutatingWorkspace},
+	{cmd: `git bisect good`, class: shellclass.MutatingWorkspace},
+	{cmd: `git bisect bad HEAD~1`, class: shellclass.MutatingWorkspace},
+	{cmd: `git bisect skip`, class: shellclass.MutatingWorkspace},
+	{cmd: `git bisect reset`, class: shellclass.MutatingWorkspace},
+	{cmd: `git bisect replay bisect.log`, class: shellclass.MutatingWorkspace},
+	{cmd: `git bisect log`, class: shellclass.SafeRead},
+	{cmd: `git bisect view`, class: shellclass.SafeRead},
+	{cmd: `git bisect`, class: shellclass.SafeRead},
 }
 
 func TestAnalyzeTable(t *testing.T) {

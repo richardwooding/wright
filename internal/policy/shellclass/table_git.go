@@ -17,7 +17,7 @@ var (
 		"grep": true, "help": true, "version": true, "--version": true, "check-ignore": true, "check-attr": true,
 		"merge-base": true, "diff-tree": true, "diff-index": true, "diff-files": true, "for-each-ref": true, "var": true,
 		"count-objects": true, "fsck": true, "whatchanged": true, "range-diff": true, "show-ref": true, "verify-commit": true,
-		"verify-tag": true, "cherry": true, "bisect": true, "annotate": true, "show-branch": true, "status-porcelain": true,
+		"verify-tag": true, "cherry": true, "annotate": true, "show-branch": true, "status-porcelain": true,
 	}
 	gitMutating = map[string]bool{
 		"add": true, "commit": true, "switch": true, "merge": true, "rebase": true, "cherry-pick": true, "revert": true,
@@ -231,6 +231,7 @@ var gitSubcommands = map[string]func(a *analyzer, rest []word) result{
 	"worktree":   gitWorktree,
 	"tag":        gitTag,
 	"update-ref": gitUpdateRef,
+	"bisect":     gitBisect,
 }
 
 // gitPush: a plain push is Network(+mutating remote). Forced or deleting
@@ -436,6 +437,39 @@ func gitTag(a *analyzer, rest []word) result {
 		return safe("git tag list")
 	}
 	return mutating("git tag create")
+}
+
+// gitBisectSafe are the bisect subcommands that only report the search's
+// state, and gitBisectMoves those that move HEAD to another commit.
+var (
+	gitBisectSafe  = []string{"", "log", "view", "visualize", "terms", "help"}
+	gitBisectMoves = []string{"start", "good", "bad", "new", "old", "skip", "reset"}
+)
+
+// gitBisect: `git bisect run <cmd>` runs a program of the caller's choosing
+// at every step of the search, so it is arbitrary code execution wearing the
+// name of a history command — it was auto-allowed as a safe read. It is
+// opaque as well as Privilege: an argv-prefix allow rule must never cover a
+// command that names its own executor. The rest of bisect checks commits out,
+// which is a working-tree change.
+func gitBisect(a *analyzer, rest []word) result {
+	sub := first(rest)
+	label := strings.TrimRight("git bisect "+sub, " ")
+	switch {
+	case sub == "run":
+		return result{class: Privilege, unknown: true, reason: label + " executes a program at every step"}
+	case slices.Contains(gitBisectSafe, sub):
+		return safe(label)
+	case sub == "replay":
+		r := mutating(label)
+		if nf := nonFlags(rest); len(nf) > 1 {
+			a.readFiles(&r, nf[1:2])
+		}
+		return r
+	case slices.Contains(gitBisectMoves, sub):
+		return mutating(label)
+	}
+	return opaque("unknown git bisect subcommand " + sub)
 }
 
 func gitUpdateRef(a *analyzer, rest []word) result {
