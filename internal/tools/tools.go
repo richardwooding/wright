@@ -237,6 +237,18 @@ func New(deps Deps) agentkit.Toolset {
 	if d.Sandbox != nil {
 		ts = append(ts, d.bash())
 	}
+	if d.Fetch != nil {
+		ts = append(ts, d.webFetch())
+	}
+	if d.Search != nil {
+		ts = append(ts, d.webSearch())
+	}
+	if d.Todos != nil {
+		ts = append(ts, d.todoWrite())
+	}
+	if d.Asker != nil {
+		ts = append(ts, d.askUser())
+	}
 	return ts
 }
 
