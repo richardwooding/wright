@@ -26,7 +26,7 @@ func (m Model) onEvent(ev engine.Event) (tea.Model, tea.Cmd) {
 		}
 		return m, tea.Batch(cmds...)
 	case engine.KindRunStarted:
-		cmds = append(cmds, m.applyRunStarted(ev))
+		cmds = append(cmds, m.applyRunStarted())
 	default:
 		m.applyEvent(ev)
 	}
@@ -50,7 +50,7 @@ func (m *Model) applyDelta(ev engine.Event) {
 }
 
 // applyRunStarted opens a run: a fresh live block and a spinner.
-func (m *Model) applyRunStarted(ev engine.Event) tea.Cmd {
+func (m *Model) applyRunStarted() tea.Cmd {
 	m.running = true
 	m.pending = nil
 	m.follow = true
@@ -58,7 +58,6 @@ func (m *Model) applyRunStarted(ev engine.Event) tea.Cmd {
 	m.live = &transcript.Assistant{Live: true}
 	m.tr.Append(m.live)
 	m.status = m.ctl.Status()
-	_ = ev
 	return m.spin.Tick
 }
 
