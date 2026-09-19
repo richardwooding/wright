@@ -291,6 +291,27 @@ var table = []row{
 	{cmd: `go test -gcflags=all=-toolexec=/tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
 	{cmd: `go build -ldflags '-s -w' ./...`, class: shellclass.MutatingWorkspace},
 	{cmd: `go test -run TestX ./...`, class: shellclass.MutatingWorkspace},
+	// --- readers with output and value-taking flags (adversarial review M5)
+	{cmd: `sort main.go -o main.go`, class: shellclass.Destructive},
+	{cmd: `sort /dev/null -o newfile.txt`, class: shellclass.MutatingWorkspace},
+	{cmd: `sort --output=main.go go.mod`, class: shellclass.Destructive},
+	{cmd: `sort -o .env go.mod`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `sort --compress-program=/tmp/evil main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `rg --pre /tmp/evil foo .`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `tree -o out.txt`, class: shellclass.MutatingWorkspace},
+	{cmd: `xxd main.go out.bin`, class: shellclass.MutatingWorkspace},
+	{cmd: `uniq main.go out.txt`, class: shellclass.MutatingWorkspace},
+	{cmd: `head -n 20 main.go`, class: shellclass.SafeRead},
+	{cmd: `sort -k 2 -t : main.go`, class: shellclass.SafeRead},
+	{cmd: `join -o 1.1 main.go go.mod`, class: shellclass.SafeRead},
+	{cmd: `grep -e pattern .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `grep -m 5 pattern main.go`, class: shellclass.SafeRead},
+	// A value-taking option must not swallow the file operand.
+	{cmd: `head -n 20 .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `sort -k 2 -t : .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `jq -r '.a' .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `yq -i '.a = 1' conf.yaml`, class: shellclass.MutatingWorkspace},
+	{cmd: `yq '.a' conf.yaml`, class: shellclass.SafeRead},
 }
 
 func TestAnalyzeTable(t *testing.T) {

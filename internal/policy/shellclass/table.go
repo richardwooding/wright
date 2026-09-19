@@ -171,30 +171,172 @@ func (v verbs) lookup(args []word, def result) result {
 
 // ---- readers ------------------------------------------------------------------
 
-// reader builds a handler for commands that only read their file arguments;
-// skip positional arguments (e.g. the grep pattern) are not treated as files.
-func reader(skip int) handler {
+// readerSpec describes a command that reads its file arguments, in enough
+// detail to notice the options that make it do something else. Without it an
+// option *value* looks like a positional file: `sort main.go -o main.go` read
+// as two file reads and classified SafeRead while truncating a tracked file.
+type readerSpec struct {
+	// skip is how many leading positionals are not files (grep's pattern).
+	skip int
+	// pattern lists the options that supply that positional themselves, so
+	// nothing is skipped when one of them is present (grep -e PAT FILE).
+	pattern []string
+	// value maps an option to the number of following words it consumes.
+	value map[string]int
+	// output lists the options whose value is a file the command writes.
+	output []string
+	// exec lists the options whose value is a program the command runs.
+	exec []string
+	// outputPositional, when non-zero, is the index (after skip) of the first
+	// positional that is an output file rather than an input (xxd in out).
+	outputPositional int
+}
+
+// reader builds a handler for commands that only read their file arguments.
+func reader(skip int) handler { return readerFrom(readerSpec{skip: skip}) }
+
+// readerFrom builds a handler from a spec: option values are not mistaken for
+// files, an output option's value becomes a declared write (raising the
+// class), and an option naming a program makes the command opaque.
+func readerFrom(spec readerSpec) handler {
 	return func(a *analyzer, name string, args []word) result {
+		files, writes, exec := spec.split(args)
+		if exec != "" {
+			return opaque(name + " " + exec + " runs a program of the caller's choosing")
+		}
 		r := safe("")
-		files := nonFlags(args)
-		if len(files) > skip {
-			a.readFiles(&r, files[skip:])
+		a.readFiles(&r, files)
+		if len(writes) > 0 {
+			r.reason = joinReason(r.reason, name+" writes its output file")
+			a.writeFiles(&r, writes, true)
 		}
 		return r
 	}
 }
 
+// split separates the input files from the output files. exec names the first
+// program-running option found, if any.
+func (s readerSpec) split(args []word) (files, writes []word, exec string) {
+	var positional []word
+	skip, i := s.skip, 0
+	for i < len(args) {
+		t := args[i].text
+		switch {
+		case t == "--":
+			positional = append(positional, args[i+1:]...)
+			i = len(args)
+		case !isFlag(t):
+			positional = append(positional, args[i])
+			i++
+		default:
+			opt, _, _ := strings.Cut(t, "=")
+			if slices.Contains(s.exec, opt) {
+				return nil, nil, opt
+			}
+			if slices.Contains(s.pattern, opt) {
+				skip = 0
+			}
+			val, ok, next := optionArg(args, i, s.value[opt])
+			if ok && slices.Contains(s.output, opt) {
+				writes = append(writes, val)
+			}
+			i = next
+		}
+	}
+	return s.operands(positional, skip, writes)
+}
+
+// operands applies skip and outputPositional to the positional arguments.
+func (s readerSpec) operands(positional []word, skip int, writes []word) (files, out []word, exec string) {
+	if len(positional) <= skip {
+		return nil, writes, ""
+	}
+	rest := positional[skip:]
+	if n := s.outputPositional; n > 0 && len(rest) > n {
+		writes = append(writes, rest[n:]...)
+		rest = rest[:n]
+	}
+	return rest, writes, ""
+}
+
+// optionArg returns the value of the option at i — `--opt=value` or, when the
+// option consumes n following words, `-o value` — and the index after it.
+func optionArg(args []word, i, n int) (val word, ok bool, next int) {
+	if _, v, eq := strings.Cut(args[i].text, "="); eq {
+		return word{text: v, dynamic: args[i].dynamic}, true, i + 1
+	}
+	if n > 0 && i+1 < len(args) {
+		return args[i+1], true, i + 1 + n
+	}
+	return word{}, false, i + 1
+}
+
+// vals builds a value map where each option consumes one following word.
+func vals(flags ...string) map[string]int {
+	m := make(map[string]int, len(flags))
+	for _, f := range flags {
+		m[f] = 1
+	}
+	return m
+}
+
 // noFiles is for commands whose positional arguments are not files.
 func noFiles(a *analyzer, name string, args []word) result { return safe("") }
 
+// readerSpecs are the readers whose options need inspecting: a value that
+// looks like a file, a file they write, or a program they run.
+var readerSpecs = map[string]readerSpec{
+	"head":     {value: vals("-n", "-c", "--lines", "--bytes")},
+	"tail":     {value: vals("-n", "-c", "-s", "--lines", "--bytes", "--sleep-interval", "--pid", "--max-unchanged-stats")},
+	"nl":       {value: vals("-b", "-d", "-f", "-h", "-i", "-l", "-n", "-s", "-v", "-w")},
+	"od":       {value: vals("-A", "-j", "-N", "-S", "-w", "-t", "--address-radix", "--skip-bytes", "--read-bytes", "--strings", "--width", "--format")},
+	"hexdump":  {value: vals("-e", "-f", "-n", "-s")},
+	"xxd":      {value: vals("-c", "-g", "-l", "-o", "-s"), outputPositional: 1},
+	"strings":  {value: vals("-n", "-t", "-e", "-T", "--bytes", "--radix", "--encoding", "--target")},
+	"file":     {value: vals("-f", "-m", "-F", "--files-from", "--magic-file", "--separator")},
+	"stat":     {value: vals("-c", "--format", "--printf")},
+	"less":     {value: vals("-o", "-O", "-b", "-h", "-j", "-k", "-P", "-x", "-y", "-z", "--log-file"), output: []string{"-o", "-O", "--log-file"}},
+	"sort":     {value: vals("-o", "-k", "-t", "-S", "-T", "--output", "--key", "--field-separator", "--buffer-size", "--temporary-directory", "--files0-from", "--compress-program"), output: []string{"-o", "--output"}, exec: []string{"--compress-program"}},
+	"uniq":     {value: vals("-f", "-s", "-w", "--skip-fields", "--skip-chars", "--check-chars", "--group", "--all-repeated"), outputPositional: 1},
+	"cut":      {value: vals("-b", "-c", "-d", "-f", "--bytes", "--characters", "--delimiter", "--fields", "--output-delimiter")},
+	"paste":    {value: vals("-d", "--delimiters")},
+	"join":     {value: vals("-1", "-2", "-a", "-e", "-o", "-t", "-v", "--output-delimiter")},
+	"comm":     {value: vals("--output-delimiter")},
+	"column":   {value: vals("-c", "-s", "-o", "-N", "-l", "-W", "-R", "-H", "-T", "--columns", "--separator", "--output-separator", "--table-columns")},
+	"fold":     {value: vals("-w", "--width")},
+	"fmt":      {value: vals("-w", "-p", "--width", "--prefix")},
+	"expand":   {value: vals("-t", "--tabs")},
+	"unexpand": {value: vals("-t", "--tabs")},
+	"diff":     {value: vals("-U", "-C", "-W", "-S", "-X", "-D", "--unified", "--context", "--width", "--label", "--starting-file", "--exclude", "--exclude-from", "--ifdef", "--from-file", "--to-file", "--horizon-lines")},
+	"cmp":      {value: vals("-i", "-n", "--ignore-initial", "--bytes")},
+	"ls":       {value: vals("-I", "-w", "-T", "--ignore", "--hide", "--width", "--tabsize", "--block-size", "--format", "--time-style", "--sort", "--indicator-style", "--quoting-style")},
+	"tree":     {value: vals("-L", "-P", "-I", "-o", "-H", "-T", "--filelimit"), output: []string{"-o"}},
+	"du":       {value: vals("-d", "-B", "-t", "--max-depth", "--block-size", "--threshold", "--exclude", "--files0-from")},
+	"df":       {value: vals("-B", "-t", "-x", "--block-size", "--type", "--exclude-type", "--output")},
+	"base64":   {value: vals("-w", "--wrap")},
+	"base32":   {value: vals("-w", "--wrap")},
+	"jq":       {value: map[string]int{"-f": 1, "--indent": 1, "--arg": 2, "--argjson": 2, "--slurpfile": 2, "--rawfile": 2}, skip: 1},
+	"grep":     {skip: 1, pattern: []string{"-e", "-f", "--regexp", "--file"}, value: vals("-e", "-f", "-m", "-A", "-B", "-C", "-d", "-D", "--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context", "--include", "--exclude", "--exclude-dir", "--exclude-from", "--label", "--binary-files", "--devices", "--directories")},
+	"rg": {
+		skip: 1, pattern: []string{"-e", "-f", "--regexp", "--file"},
+		value: vals("-e", "-f", "-m", "-A", "-B", "-C", "-g", "-t", "-T", "-r", "-j", "-E", "--regexp", "--file", "--max-count", "--after-context", "--before-context", "--context", "--glob", "--iglob", "--type", "--type-not", "--type-add", "--replace", "--threads", "--max-depth", "--max-filesize", "--encoding", "--ignore-file", "--path-separator", "--colors", "--sort", "--sortr", "--engine", "--pre", "--pre-glob", "--hostname-bin"),
+		exec:  []string{"--pre", "--hostname-bin"},
+	},
+	"ag":  {skip: 1, pattern: []string{"-G", "--file-search-regex"}, value: vals("-A", "-B", "-C", "-m", "-p", "--pager", "--ignore", "--path-to-ignore", "--depth", "--workers"), exec: []string{"--pager"}},
+	"ack": {skip: 1, pattern: []string{"--match"}, value: vals("-A", "-B", "-C", "-m", "--match", "--pager", "--ignore-dir", "--ignore-file", "--type-add", "--type-set"), exec: []string{"--pager"}},
+}
+
 func registerReaders() {
 	register(reader(0),
-		"cat", "head", "tail", "less", "more", "wc", "tac", "rev", "nl", "od", "hexdump", "xxd", "strings",
-		"file", "stat", "md5sum", "sha1sum", "sha256sum", "sha512sum", "b2sum", "cksum", "sum",
-		"sort", "uniq", "cut", "paste", "join", "comm", "column", "fold", "fmt", "expand", "unexpand",
-		"diff", "cmp", "ls", "tree", "du", "df", "base64", "base32", "jq", "yq", "readelf", "objdump", "nm", "ldd", "gzip -l",
+		"cat", "more", "wc", "tac", "rev",
+		"md5sum", "sha1sum", "sha256sum", "sha512sum", "b2sum", "cksum", "sum",
+		"readelf", "objdump", "nm", "ldd",
 	)
-	register(reader(1), "grep", "egrep", "fgrep", "rg", "ag", "ack")
+	for name, spec := range readerSpecs {
+		register(readerFrom(spec), name)
+	}
+	register(readerFrom(readerSpecs["grep"]), "egrep", "fgrep")
+	register(handleYq, "yq")
 	// awk is not a reader: its first argument is a program that can run
 	// shell commands and write files.
 	register(handleAwk, "awk", "gawk", "mawk", "nawk", "busybox-awk")
@@ -213,6 +355,30 @@ func registerReaders() {
 	register(handleTee, "tee")
 	register(handleFind, "find", "fd")
 	register(handleSplit, "split", "csplit")
+}
+
+// yqVerbs are the subcommands that precede the expression.
+var yqVerbs = []string{"e", "eval", "ea", "eval-all", "r", "read", "w", "write"}
+
+// handleYq: yq's first positional is an expression, not a file, and -i edits
+// the files it is given in place — as a plain reader it was a SafeRead that
+// rewrote tracked files.
+func handleYq(a *analyzer, name string, args []word) result {
+	files := nonFlags(args)
+	if len(files) > 0 && slices.Contains(yqVerbs, files[0].text) {
+		files = files[1:]
+	}
+	if len(files) > 0 {
+		files = files[1:] // the expression
+	}
+	if !hasFlag(args, "-i", "--inplace", "--in-place") {
+		r := safe("yq evaluates an expression")
+		a.readFiles(&r, files)
+		return r
+	}
+	r := mutating("yq edits files in place")
+	a.writeFiles(&r, files, false)
+	return r
 }
 
 // handleUnset: unsetting PATH/IFS changes command resolution.
