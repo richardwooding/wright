@@ -11,6 +11,7 @@ require (
 	github.com/landlock-lsm/go-landlock v0.10.1
 	github.com/richardwooding/agentkit v0.3.0
 	github.com/richardwooding/llmkit v0.3.0
+	github.com/richardwooding/ssrfguard v0.2.2
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	golang.org/x/net v0.59.0
 	golang.org/x/time v0.16.0

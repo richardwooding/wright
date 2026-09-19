@@ -66,10 +66,11 @@ func TestImportDAG(t *testing.T) {
 			}
 		}
 	}
-	// cli is the only internal package allowed to import app.
+	// cli is the only internal package allowed to import app; package main
+	// may too, to hand app the TUI's Interactive hook.
 	for p, imports := range graph {
-		if slices.Contains(imports, pkg("app")) && p != pkg("cli") {
-			t.Errorf("%s imports internal/app; only internal/cli may", p)
+		if slices.Contains(imports, pkg("app")) && p != pkg("cli") && p != module+"/cmd/wright" {
+			t.Errorf("%s imports internal/app; only internal/cli and cmd/wright may", p)
 		}
 	}
 }
@@ -83,6 +84,7 @@ func TestNoUnexpectedNetwork(t *testing.T) {
 	allow := []string{
 		pkg("model"), // Ollama loopback probe (/api/tags) — added in Phase 1
 		pkg("tools"), // web_fetch takes the ssrfguard *http.Client and builds its requests
+		pkg("app"),   // constructs that client (ssrfguard.New().Client() + CheckRedirect re-validation)
 	}
 	graph := importGraph(t)
 	for p, imports := range graph {
