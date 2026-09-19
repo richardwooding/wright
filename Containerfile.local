@@ -1,0 +1,25 @@
+# Local image for podman testing: build the binary first, then this file
+# copies it in. GoReleaser's dockers_v2 stages binaries differently (see
+# Containerfile), so the two files stay separate.
+#
+#   CGO_ENABLED=0 GOOS=linux go build -trimpath -o dist/wright-local ./cmd/wright
+#   podman build -f Containerfile.local -t wright:dev .
+#   podman run --rm -it -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY wright:dev
+FROM cgr.dev/chainguard/wolfi-base:latest
+
+RUN apk add --no-cache \
+    bash git coreutils findutils grep sed diffutils ripgrep \
+    ca-certificates-bundle curl jq \
+ && adduser -D -h /home/wright -u 1000 wright \
+ && mkdir -p /workspace \
+ && chown wright:wright /workspace
+
+COPY dist/wright-local /usr/local/bin/wright
+
+USER wright
+WORKDIR /workspace
+ENV HOME=/home/wright \
+    WRIGHT_SANDBOX=landlock \
+    WRIGHT_CONTAINER=1
+
+ENTRYPOINT ["wright"]

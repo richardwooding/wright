@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    name: Build & Test (linux)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install sandbox tooling
+        # bubblewrap so the bwrap backend tests run for real; ripgrep for the
+        # grep tool tests. Landlock needs only the kernel (ubuntu-latest has it).
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap ripgrep
+      - name: Download dependencies
+        run: go mod download
+      - name: Build
+        run: go build ./...
+      - name: go fix (check)
+        run: go fix -diff ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Verify go fix is clean
+        run: |
+          go fix ./...
+          git diff --exit-code
+      - name: Test
+        # -timeout 300s caps a single test at 5 minutes: enough for the
+        # fuzz-seed sweeps and sandbox probes under the race detector, short
+        # enough that a hung sandbox dumps goroutines instead of waiting out
+        # the default 10m.
+        run: go test -race -timeout 300s -coverprofile=coverage.out ./...
+
+  build-macos:
+    name: Build & Test (macOS)
+    runs-on: macos-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build
+        run: go build ./...
+      - name: Test
+        run: go test -race -short -timeout 300s ./...
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+  release-check:
+    name: GoReleaser check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: check
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: "~> v2"
+          args: build --snapshot --clean

@@ -1,0 +1,153 @@
+# GoReleaser configuration for wright.
+# Docs: https://goreleaser.com
+#
+# Container images use dockers_v2 + a Containerfile rather than the house
+# `kos:` block: the agent needs git, bash, coreutils and ripgrep inside the
+# image, which a ko static base cannot provide. dockers_v2 needs GoReleaser
+# >= 2.12 and docker buildx (present on ubuntu-latest).
+version: 2
+
+project_name: wright
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: wright
+    main: ./cmd/wright
+    binary: wright
+    env:
+      - CGO_ENABLED=0 # pure Go: landlock/bwrap are syscalls and exec, no cgo
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+      - -X main.version={{ .Version }}
+      - -X main.commit={{ .Commit }}
+      - -X main.date={{ .Date }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+
+archives:
+  - id: archives
+    ids:
+      - wright
+    formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-snapshot"
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^chore:"
+      - "^ci:"
+      - "Merge pull request"
+      - "Merge branch"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\(.+\))??!?:.+$'
+      order: 0
+    - title: Bug fixes
+      regexp: '^.*?fix(\(.+\))??!?:.+$'
+      order: 1
+    - title: Others
+      order: 999
+
+# Multi-arch image on ghcr.io. GoReleaser stages the built binaries in the
+# build context as <os>/<arch>/wright; the Containerfile copies
+# $TARGETPLATFORM/wright.
+dockers_v2:
+  - id: wright
+    ids:
+      - wright
+    dockerfile: Containerfile
+    images:
+      - ghcr.io/richardwooding/wright
+    tags:
+      - "{{ .Version }}"
+      - "{{ .Major }}.{{ .Minor }}"
+      - "{{ if not .Prerelease }}latest{{ end }}"
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    sbom: "true"
+    labels:
+      org.opencontainers.image.title: "{{ .ProjectName }}"
+      org.opencontainers.image.description: "A coding-agent terminal harness: approval-first permissions, OS sandbox, local secrets, audit trail"
+      org.opencontainers.image.source: "https://github.com/richardwooding/wright"
+      org.opencontainers.image.url: "https://richardwooding.github.io/wright/"
+      org.opencontainers.image.licenses: "MIT"
+      org.opencontainers.image.version: "{{ .Version }}"
+      org.opencontainers.image.revision: "{{ .Commit }}"
+      org.opencontainers.image.created: "{{ .Date }}"
+    annotations:
+      org.opencontainers.image.description: "A coding-agent terminal harness: approval-first permissions, OS sandbox, local secrets, audit trail"
+      org.opencontainers.image.source: "https://github.com/richardwooding/wright"
+      org.opencontainers.image.licenses: "MIT"
+
+# Homebrew cask (macOS + Linuxbrew) in the shared tap.
+homebrew_casks:
+  - name: wright
+    binaries:
+      - wright
+    repository:
+      owner: richardwooding
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    commit_msg_template: "Brew cask update for {{ .ProjectName }} {{ .Tag }}"
+    homepage: "https://richardwooding.github.io/wright/"
+    description: "Coding-agent terminal harness with approval-first permissions, an OS sandbox and an audit trail"
+    # The released binary is unsigned/un-notarized, so macOS Gatekeeper marks
+    # it with a quarantine attribute that blocks it on first run. Strip it on
+    # install so `wright` just works.
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/wright"]
+          end
+    caveats: |
+      wright is not yet signed/notarized with an Apple Developer ID; the cask
+      removes the quarantine attribute on install. If macOS still blocks it:
+        sudo xattr -dr com.apple.quarantine $(brew --prefix)/bin/wright
+
+      On macOS the OS sandbox backend is "none" in this release (seatbelt
+      profile ships in v0.1.x); shell commands are governed by policy only.
+      Run `wright doctor` to see what is active.
+
+release:
+  github:
+    owner: richardwooding
+    name: wright
+  header: |
+    ## Install
+
+    ```sh
+    brew install --cask richardwooding/tap/wright
+    go install github.com/richardwooding/wright/cmd/wright@{{ .Tag }}
+    podman run --rm -it -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY ghcr.io/richardwooding/wright:{{ .Version }}
+    ```
