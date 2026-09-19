@@ -6,50 +6,107 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+First working version of wright: an interactive TUI and a headless runner
+around an `agentkit` agent, with a permission engine, an OS sandbox, secret
+redaction and a tamper-evident audit log between the model and the machine.
+
 ### Added
 
-- `internal/headless`: `wright -p` runner with `text`, `json` and
-  `stream-json` output, the documented exit codes (0/1/2/3/4/130) and
-  interrupt handling through the engine.
-- `internal/app`: composition root — trust-gated settings, sandbox spec,
-  policy layers with `.wright/settings.local.json` persistence, model and
-  session selection, audit/snapshot/redaction wiring, the toolset with its
-  engine adapters (ask_user, redaction notices, todo push, ssrfguard
-  `web_fetch` client with redirect re-validation), `Run` with an
-  `Interactive` hook, slash-command hook (`/diff /audit /init /trust
-  /redaction`), `InitProject`; offline smoke tests against a fake
-  OpenAI-compatible provider.
-- `internal/cli`: `sessions list|show|export|delete|purge`, `models`,
-  `config show`, `audit [id] [--kind] [--json]`, `audit verify`, `init`;
-  `ExitError{Code}` maps headless exit codes to the process.
-- `internal/enginetest`: shared scripted model client for tests.
+**Interface**
 
-- Scaffold: kong CLI (`--version`, `doctor`, `config paths`, hidden
-  `__sandbox`), `internal/app` import-DAG and no-unexpected-network tests.
-- `internal/theme`: lipgloss v2 palette from the gloam tokens as light/dark pairs.
-- `internal/config`: layered settings (embedded defaults < user < project <
-  project.local < env) with append-dedupe rule lists and atomic 0600 saves.
-- `internal/workspace`: git-toplevel roots, symlink-safe `Resolve`,
-  `.gitignore`/`.wrightignore`/`.aiignore`/`.aiexclude`, secret and protected
-  path predicates.
-- `internal/policy/shellclass`: bash-AST command classifier with wrapper
-  peeling, `sh -c` recursion, opaque detection, hard-deny patterns and a
-  command table covering coreutils, build tools, git, files, system
-  administration, interpreters, containers, Kubernetes, IaC, databases and
-  cloud CLIs.
-- `internal/policy`: rule grammar, modes, verdict lattice, session/project
-  grants, child engines, grant suggestions, builtin rules.
-- `internal/redact`: high-confidence secret patterns with visible markers and
-  a line-buffered writer.
-- `internal/audit`: SHA-256-chained JSONL session log with `Verify` and an
-  end-of-run `Summary`.
-- `internal/snapshot`: content-addressed pre-edit snapshots per run with
-  restore and pruning.
-- `internal/trust`: accepted project settings and MCP servers by hash.
-- `internal/git`: status summary, diff and tracked lookup with a 2 s timeout.
-- `internal/sandbox`: backend detection (container, bwrap, landlock, seatbelt,
-  none), allowlisted environment, bubblewrap profile with hidden `$HOME`,
-  Landlock re-exec helper, macOS sandbox-exec profile generator.
-- Release plumbing: GoReleaser (archives, `dockers_v2` image on ghcr.io,
-  Homebrew cask), `Containerfile`, CI/release/pages/gloam-sync workflows,
-  Dependabot, gloam docs site placeholder.
+- Bubble Tea v2 TUI (`internal/tui`): transcript viewport with a per-block
+  render cache, markdown through a cached glamour renderer, collapsible tool
+  cards with unified diffs, an approval overlay that focuses *deny* for
+  destructive requests and shows the exact rule each "allow…" offer would
+  write, a composer with history, `@` file completion and `/` command
+  completion, and a status bar carrying model, mode, context %, tokens, cost,
+  sandbox, git and session.
+- Slash commands `/help /clear /compact /cost /diff /mode /model /sessions
+  /resume /export /undo /init /mcp /skills /todos /audit /redaction
+  /reasoning /trust /plain /quit`, and keys `enter`, `shift+enter`,
+  `alt+enter`, `ctrl+j`, `esc`, `ctrl+c ctrl+c`, `ctrl+d`, `ctrl+o`,
+  `ctrl+t`, `shift+tab`, `pgup`/`pgdn`, `ctrl+u`, `ctrl+l`.
+- `--plain` path (implied by `NO_COLOR`, `TERM=dumb` or a non-TTY): no
+  alternate screen, events as lines, numbered prompts on stdin, and any
+  prompt still open when stdin closes is denied.
+- `internal/headless`: `wright -p` with `text`, `json` and `stream-json`
+  output, a documented `Line` schema, exit codes 0/1/2/3/4/130, stdin fenced
+  as `<stdin>`, and interrupt handling through the engine.
+- `internal/cli` (kong): `run`, `sessions list|show|export|delete|purge`,
+  `models`, `config show|paths`, `audit show|verify`, `init`, `doctor`, and
+  the hidden `__sandbox` Landlock helper; `ExitError{Code}` carries headless
+  exit codes to the process.
+
+**Agent**
+
+- `internal/engine`: the seam between `agentkit` and the UI — runs, a fan-in
+  event channel, the policy-backed `Approver`, the tools' `Asker`, inbox
+  steering while a run is in flight, mode and model switching, compaction,
+  `/undo`, cost and context accounting.
+- `internal/tools`: `read_file`, `write_file`, `edit_file`, `glob`, `grep`
+  (`rg --json` when present, Go regexp otherwise), `list_dir`, `bash`,
+  `web_fetch`, `web_search`, `todo_write`, `ask_user` — each with a
+  `Describer` that resolves the policy request and a preview (diff, or
+  command plus class summary). `bash` tracks cwd across calls, streams output
+  as progress, appends the attribution trailer to `git commit`, and clips
+  large output to a spill file.
+- `internal/prompt`: the system prompt split into a byte-stable, cacheable
+  half (identity, operating principles, codebase rules, tool guidance, an
+  ethics section and project instructions) and a dynamic environment block;
+  `AGENTS.md` discovery with a `.wright/instructions.md` companion and a
+  consented `CLAUDE.md` fallback; `WrapUntrusted` and `ScanInjection`.
+- `internal/model`: model choice from flag > `WRIGHT_MODEL` > settings >
+  credential detection (Anthropic → OpenAI → Vertex → xAI → DeepSeek →
+  OpenRouter → Groq) > a loopback Ollama probe; `Best`, `Fast` and `List`
+  from the llmkit catalog.
+- `internal/cost`: usage per model priced through the catalog; unknown models
+  render as `—` rather than a guess.
+
+**Safety**
+
+- `internal/policy`: rule grammar (path globs, bash argv prefixes, `re:`,
+  `domain:`, the `+net` bash suffix), the four modes, the verdict lattice,
+  the hard-deny floor, session and project-local grants, grant suggestions,
+  clamped child engines, and the builtin rule lists.
+- `internal/policy/shellclass`: a `mvdan.cc/sh` AST classifier — wrapper
+  peeling, `sh -c` recursion, opaque detection, hard-deny patterns, and a
+  command table covering coreutils, build tools, git, system administration,
+  interpreters, containers, Kubernetes, IaC, databases and cloud CLIs.
+- `internal/sandbox`: backend detection (container, bwrap, Landlock,
+  seatbelt, none), an allowlisted environment with a hard strip for anything
+  key-shaped, a bubblewrap profile that hides `$HOME` behind a tmpfs, the
+  Landlock re-exec helper, and a macOS `sandbox-exec` profile generator.
+- `internal/workspace`: git-toplevel roots plus `--add-dir`, symlink-safe
+  `Resolve`, `.gitignore`/`.wrightignore`/`.aiignore`/`.aiexclude`, and the
+  secret- and protected-path predicates.
+- `internal/redact`: high-confidence secret patterns (private keys, provider
+  keys, GitHub tokens, AWS, Google, Slack, Stripe, npm, PyPI, Hugging Face,
+  JWTs, auth headers, URL userinfo) with a visible marker and a
+  line-buffered writer.
+- `internal/trust`: project settings and MCP servers accepted by hash, so a
+  project's `allow`, `additionalDirectories`, `passEnv` and `mcpServers` stay
+  inert until you accept them; its `ask`/`deny` always apply.
+
+**State**
+
+- `internal/session`: `agentkit` FileStore plus `sessions/meta/<id>.meta.json`
+  sidecars — list, get, touch, latest, export to Markdown, delete and purge;
+  `--resume` and `--continue`.
+- `internal/audit`: a SHA-256-chained JSONL log per session with redacted and
+  capped arguments, `Verify`, and an end-of-run `Summary`.
+- `internal/snapshot`: content-addressed pre-edit snapshots per run, with
+  restore and pruning, behind `/undo`.
+- `internal/config`: layered settings (embedded `defaults.json` < user <
+  project < project.local < `WRIGHT_*` environment < flags) with
+  append-and-dedupe rule lists and atomic 0600 saves; `internal/git` status,
+  diff and tracked lookups with a 2 s timeout; `internal/theme` lipgloss v2
+  palette from the gloam tokens.
+- `internal/app`: the composition root that wires all of the above, and the
+  `TestImportDAG` and `TestNoUnexpectedNetwork` guards over it.
+
+**Release plumbing**
+
+- GoReleaser (archives, checksums, `dockers_v2` image on ghcr.io, Homebrew
+  cask), `Containerfile` on wolfi-base plus `Containerfile.local` for podman,
+  CI / release / pages / gloam-sync workflows, Dependabot, and the gloam
+  documentation site under `docs/`.
