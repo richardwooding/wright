@@ -43,7 +43,7 @@ internal/
   engine/     (next) wraps agentkit: runs, fan-in Event channel, Approver, Inbox steering
   tui/        (next) Bubble Tea v2 root model; imports engine/theme/config/session/model/cost/git only
   headless/   (next) -p mode: text | json | stream-json
-  tools/      (next) agentkit.Func tools + Describer (policy.Request + Preview)
+  tools/      agentkit.Func tools + Describer (resolved policy.Request + Preview); bash cwd/trailer, rg|Go grep, web_fetch robots/rate limit, Clip spill
   policy/     rule grammar, modes, verdict lattice, hard-deny set, grants, child engines
   policy/shellclass/  mvdan.cc/sh AST → per-command class; Unknown/HardDeny; leaf package (interface Workspace)
   sandbox/    Backend: container | bwrap | landlock | seatbelt | none; filtered Env(); __sandbox Helper
@@ -64,7 +64,8 @@ or `engine`; `policy` never imports `tui`, `engine`, `tools`; `shellclass`
 imports nothing internal (it takes a small `Workspace` interface that
 `policy.NewShellWorkspace` adapts). `engine` is the seam between agent and UI.
 `TestNoUnexpectedNetwork` allowlists the internal packages that may import
-`net/http` (only `model`, for the Ollama loopback probe).
+`net/http` (`model` for the Ollama loopback probe, `tools` for `web_fetch`, which
+is handed the ssrfguard client by `app`).
 
 ### Things that are non-obvious and easy to break
 
