@@ -207,3 +207,79 @@ func TestWebFetchSpillIsRedacted(t *testing.T) {
 		t.Errorf("spill file %s has no redaction marker", path)
 	}
 }
+
+// TestWebFetchRefusesLocalHosts pins the tool-side host check. The guarded
+// client refuses these at dial time too; this is the cheap, early half of
+// the defence, and it covers the spellings a text glob misses.
+func TestWebFetchRefusesLocalHosts(t *testing.T) {
+	f := newFixture(t, func(d *tools.Deps) {
+		d.Fetch = http.DefaultClient
+		d.AllowLocalFetch = false
+	})
+	d, ok := tools.Lookup(f.ts, tools.NameWebFetch)
+	if !ok {
+		t.Fatal("web_fetch has no Describer")
+	}
+	blocked := []string{
+		"http://localhost:8080/x",
+		"http://LOCALHOST./x",
+		"http://app.localhost/x",
+		"http://127.0.0.1/x",
+		"http://127.1.2.3/x",
+		"http://[::1]/x",
+		"http://[::ffff:127.0.0.1]/x",
+		"http://0.0.0.0/x",
+		"http://[::]/x",
+		"http://2130706433/x",
+		"http://0x7f000001/x",
+		"http://0177.0.0.1/x",
+		"http://169.254.169.254/latest/meta-data/",
+		"http://metadata.google.internal/computeMetadata/v1/",
+		"http://10.0.0.5/x",
+		"http://192.168.1.1/x",
+		"http://172.16.9.9/x",
+		"http://100.100.100.200/x",
+	}
+	// Describe is where the refusal has to land: the approval prompt must
+	// never show a URL the tool would refuse, and it makes no request, so
+	// the whole table runs offline.
+	for _, raw := range blocked {
+		_, _, err := d.Describe(json.RawMessage(jsonArgs(map[string]any{"url": raw})))
+		if err == nil {
+			t.Errorf("%s described without a refusal", raw)
+		} else if !errors.Is(err, tools.ErrRefused) {
+			t.Errorf("%s: err = %v, want a refusal", raw, err)
+		}
+	}
+	// The run path refuses too, before any request is made. Port 9 on the
+	// loopback is the cheap case: without the check this fails to connect
+	// rather than being refused.
+	if _, err := f.text(tools.NameWebFetch, jsonArgs(map[string]any{"url": "http://127.0.0.1:9/x"})); !errors.Is(err, tools.ErrRefused) {
+		t.Errorf("run path err = %v, want a refusal", err)
+	}
+	for _, raw := range []string{"https://example.com/x", "https://8.8.8.8/x", "https://not-localhost.example/x"} {
+		if _, _, err := d.Describe(json.RawMessage(jsonArgs(map[string]any{"url": raw}))); err != nil {
+			t.Errorf("public url %s refused: %v", raw, err)
+		}
+	}
+}
+
+// TestWebFetchRobotsProductTokenIsExact pins that a group naming another
+// crawler whose token merely starts with ours does not bind us.
+func TestWebFetchRobotsProductTokenIsExact(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/robots.txt", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("User-agent: wrightbot\nDisallow: /\n\nUser-agent: *\nDisallow: /nope\n"))
+	})
+	mux.HandleFunc("/page", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	f := newFixture(t, func(d *tools.Deps) { d.Fetch = srv.Client() })
+	got, err := f.text(tools.NameWebFetch, jsonArgs(map[string]any{"url": srv.URL + "/page"}))
+	if err != nil || !strings.Contains(got, "ok") {
+		t.Errorf("wrightbot's group captured wright: got %q, %v", got, err)
+	}
+	if _, err := f.text(tools.NameWebFetch, jsonArgs(map[string]any{"url": srv.URL + "/nope"})); err == nil {
+		t.Error("the * group's disallow was not applied")
+	}
+}
