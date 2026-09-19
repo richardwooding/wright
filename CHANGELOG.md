@@ -160,6 +160,14 @@ redaction and a tamper-evident audit log between the model and the machine.
   at all. `bisect` now has a handler: `run` is opaque and privileged,
   `replay` declares the log file it reads, the subcommands that move HEAD are
   mutating, and only `log`/`view`/`terms` stay read-only.
+- `git grep --open-files-in-pager=<cmd>` (and the glued `-O<cmd>` spelling)
+  runs that program on every matching file, which made a search that
+  classified safe-read arbitrary code execution. `grep` now has a handler:
+  the pager options are opaque and privileged, option values are no longer
+  mistaken for pathspecs, and the operands that really are files — everything
+  after a `--` separator, and with `--no-index` the operands after the
+  pattern — are declared reads, so `git grep --no-index -e . -- .env` meets
+  the secret-file deny instead of printing the file.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a

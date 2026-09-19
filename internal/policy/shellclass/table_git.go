@@ -14,7 +14,7 @@ var (
 	gitSafeRead = map[string]bool{
 		"status": true, "diff": true, "log": true, "show": true, "blame": true, "rev-parse": true, "describe": true,
 		"shortlog": true, "ls-files": true, "ls-tree": true, "cat-file": true, "rev-list": true, "name-rev": true,
-		"grep": true, "help": true, "version": true, "--version": true, "check-ignore": true, "check-attr": true,
+		"help": true, "version": true, "--version": true, "check-ignore": true, "check-attr": true,
 		"merge-base": true, "diff-tree": true, "diff-index": true, "diff-files": true, "for-each-ref": true, "var": true,
 		"count-objects": true, "fsck": true, "whatchanged": true, "range-diff": true, "show-ref": true, "verify-commit": true,
 		"verify-tag": true, "cherry": true, "annotate": true, "show-branch": true, "status-porcelain": true,
@@ -232,6 +232,7 @@ var gitSubcommands = map[string]func(a *analyzer, rest []word) result{
 	"tag":        gitTag,
 	"update-ref": gitUpdateRef,
 	"bisect":     gitBisect,
+	"grep":       gitGrep,
 }
 
 // gitPush: a plain push is Network(+mutating remote). Forced or deleting
@@ -437,6 +438,66 @@ func gitTag(a *analyzer, rest []word) result {
 		return safe("git tag list")
 	}
 	return mutating("git tag create")
+}
+
+// gitGrepSpec reads git grep's options with the reader machinery so that an
+// option value is never mistaken for a pathspec, and names the option that
+// runs a program.
+var gitGrepSpec = readerSpec{
+	skip:    1,
+	pattern: []string{"-e", "-f", "--regexp", "--file"},
+	value: vals("-e", "-f", "--regexp", "--file", "-m", "--max-count", "-A", "-B", "-C",
+		"--after-context", "--before-context", "--context", "--threads", "--max-depth"),
+	exec: []string{"--open-files-in-pager"},
+}
+
+// gitGrep: `--open-files-in-pager=<cmd>` (and its glued `-O<cmd>` spelling)
+// runs that program on every matching file, so a search classified safe-read
+// was arbitrary code execution. The operands are pathspecs of tracked
+// content, except after a `--` separator or with `--no-index`, which searches
+// the working tree instead of the index and so will happily print a file the
+// repository never tracked: `git grep --no-index -e . -- .env` read a secret
+// the declared-read checks never saw.
+func gitGrep(a *analyzer, rest []word) result {
+	files, _, exec := gitGrepSpec.split(rest)
+	if exec == "" && gitGrepPagerShort(rest) {
+		exec = "-O"
+	}
+	if exec != "" {
+		return result{class: Privilege, unknown: true, reason: "git grep " + exec + " runs a program of the caller's choosing"}
+	}
+	r := safe("git grep")
+	a.readFiles(&r, gitGrepPaths(rest, files))
+	return r
+}
+
+// gitGrepPagerShort reports the `-O[<pager>]` form. Its argument is optional,
+// so git only accepts it glued to the option, where it never looks like a
+// known option name.
+func gitGrepPagerShort(args []word) bool {
+	for _, w := range args {
+		t := w.text
+		if strings.HasPrefix(t, "-") && !strings.HasPrefix(t, "--") && strings.ContainsRune(t[1:], 'O') {
+			return true
+		}
+	}
+	return false
+}
+
+// gitGrepPaths are the operands that name files on disk: everything after a
+// `--` separator, and, under --no-index, the positional operands left after
+// the pattern. Without either, the operands are revisions and pathspecs
+// resolved against the object database, not paths to open.
+func gitGrepPaths(args, positional []word) []word {
+	for i, w := range args {
+		if w.text == "--" {
+			return args[i+1:]
+		}
+	}
+	if hasFlag(args, "--no-index") {
+		return positional
+	}
+	return nil
 }
 
 // gitBisectSafe are the bisect subcommands that only report the search's

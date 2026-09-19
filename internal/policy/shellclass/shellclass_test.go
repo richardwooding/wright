@@ -340,6 +340,18 @@ var table = []row{
 	{cmd: `git bisect log`, class: shellclass.SafeRead},
 	{cmd: `git bisect view`, class: shellclass.SafeRead},
 	{cmd: `git bisect`, class: shellclass.SafeRead},
+	// --- git grep runs the pager it is given, and --no-index reads any file
+	// in the tree, secret or not (adversarial review C3)
+	{cmd: `git grep -O/tmp/evil pattern`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git grep --open-files-in-pager=/tmp/evil pattern`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git grep --open-files-in-pager /tmp/evil pattern`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git grep -O TODO`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git grep --no-index -e . -- .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git grep --no-index . .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git grep TODO -- .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git grep -n TODO`, class: shellclass.SafeRead},
+	{cmd: `git grep -C 3 TODO -- main.go`, class: shellclass.SafeRead},
+	{cmd: `git grep --no-index -e TODO main.go`, class: shellclass.SafeRead},
 }
 
 func TestAnalyzeTable(t *testing.T) {
