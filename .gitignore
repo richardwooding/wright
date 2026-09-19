@@ -1,0 +1,9 @@
+# GoReleaser output
+dist/
+
+# Per-developer wright settings and scratch space (never committed).
+.wright/settings.local.json
+.wright/tmp/
+
+# Test artefacts
+coverage.out

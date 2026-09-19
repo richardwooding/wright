@@ -1,0 +1,28 @@
+# golangci-lint configuration (v2). The repo relies on the default linter
+# set; this file exists for two targeted adjustments.
+#
+# 1. staticcheck SA5011 ("possible nil pointer dereference") produces
+#    nondeterministic false positives in test files around the standard
+#    table-test guard (`if got == nil { t.Fatal(...) }; use(got)`): t.Fatal
+#    ends the goroutine, so the deref is unreachable, but the nilness facts
+#    propagate whole-program and which sites get flagged shifts as unrelated
+#    code changes. It stays enabled for non-test code.
+#
+# 2. errcheck: output is written to injected io.Writers (so tests can
+#    capture it), which defeats errcheck's built-in os.Stdout/os.Stderr
+#    exemption for fmt.Fprint*. A failed write to the terminal is not
+#    something a CLI can act on, so those calls are excluded explicitly.
+version: "2"
+linters:
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+  exclusions:
+    rules:
+      - path: _test\.go
+        linters:
+          - staticcheck
+        text: SA5011
