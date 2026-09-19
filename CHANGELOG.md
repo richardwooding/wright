@@ -50,6 +50,18 @@ redaction and a tamper-evident audit log between the model and the machine.
   command plus class summary). `bash` tracks cwd across calls, streams output
   as progress, appends the attribution trailer to `git commit`, and clips
   large output to a spill file.
+- `internal/agents`: the built-in read-only `explore` sub-agent and custom
+  agents from `.wright/agents/*.md` (frontmatter `name`, `description`,
+  `tools`, `model`, `read-only`; the body is the instructions). Sub-agents run
+  through the engine's own middleware chain and are approved at depth 1 by a
+  child policy engine, so a child can never widen what the parent may do.
+  Their events carry a depth and render indented. `/agents`.
+- `internal/skillsdir`: Agent Skills discovery — merges
+  `~/.config/wright/skills`, `<ws>/.agents/skills`, `<ws>/.wright/skills`,
+  `skills.extraDirs` and (opt-in) `<ws>/.claude/skills`, later directories
+  winning; a malformed `SKILL.md` is reported as a problem, not a failure.
+  A skill's scripts still run only through `bash`, under policy.
+  `wright skills` and `/skills`.
 - `internal/prompt`: the system prompt split into a byte-stable, cacheable
   half (identity, operating principles, codebase rules, tool guidance, an
   ethics section and project instructions) and a dynamic environment block;
@@ -83,6 +95,15 @@ redaction and a tamper-evident audit log between the model and the machine.
   keys, GitHub tokens, AWS, Google, Slack, Stripe, npm, PyPI, Hugging Face,
   JWTs, auth headers, URL userinfo) with a visible marker and a
   line-buffered writer.
+- `internal/mcpclient`: MCP servers behind consent and a trust record. Stdio
+  servers run inside the OS sandbox with the filtered environment and no
+  network unless declared; HTTP servers go through the ssrfguard client. The
+  first connection shows the command or URL and every tool with its
+  annotations, then records the binary hash, arguments, URL and tool list;
+  any change re-asks with a diff. Tools register as `mcp_<server>_<tool>`,
+  are addressed by policy as `mcp:<server>:<tool>` and default to asking,
+  with `readOnlyHint` carried through as advisory only.
+  `wright mcp list|add|remove` and `/mcp`.
 - `internal/trust`: project settings and MCP servers accepted by hash, so a
   project's `allow`, `additionalDirectories`, `passEnv` and `mcpServers` stay
   inert until you accept them; its `ask`/`deny` always apply.

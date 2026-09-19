@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/richardwooding/wright/internal/agents"
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/git"
+	"github.com/richardwooding/wright/internal/skillsdir"
 	"github.com/richardwooding/wright/internal/trust"
 )
 
@@ -34,12 +36,77 @@ func (b *Built) Command(ctx context.Context, name string, args []string) (string
 	case "trust":
 		return b.trustProject()
 	case "mcp":
-		return "MCP servers are not configured yet (Phase 3).", nil
+		return b.mcpStatus(), nil
 	case "skills":
-		return "Skills are not configured yet (Phase 3).", nil
+		return b.skillsStatus(), nil
+	case "agents":
+		return b.agentsStatus(), nil
 	default:
 		return "", fmt.Errorf("unknown command /%s", name)
 	}
+}
+
+// mcpStatus is /mcp: what this session connected, and what it did not.
+func (b *Built) mcpStatus() string {
+	if b.MCP == nil || len(b.MCP.Servers) == 0 {
+		return "no MCP servers configured (add one with `wright mcp add`; they take effect next session)"
+	}
+	var lines []string
+	for _, s := range b.MCP.Servers {
+		switch {
+		case s.Err != nil:
+			lines = append(lines, fmt.Sprintf("✗ %s (%s): %v", s.Name, s.Transport, s.Err))
+		case s.Trusted:
+			lines = append(lines, fmt.Sprintf("✓ %s (%s): %d tool(s), accepted", s.Name, s.Transport, s.ToolCount))
+		default:
+			lines = append(lines, fmt.Sprintf("✓ %s (%s): %d tool(s), this session only", s.Name, s.Transport, s.ToolCount))
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// skillsStatus is /skills: the catalog the model was given.
+func (b *Built) skillsStatus() string {
+	rows := skillsdir.Describe(b.Skills)
+	if len(rows) == 0 {
+		return "no skills found (looked in " + strings.Join(b.skillDirs(), ", ") + ")"
+	}
+	lines := make([]string, 0, len(rows))
+	for _, r := range rows {
+		lines = append(lines, fmt.Sprintf("%s — %s\n  %s", r.Name, firstLine(r.Description), b.WS.Rel(r.Source)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// skillDirs is the search path, relative to the workspace where it helps.
+func (b *Built) skillDirs() []string {
+	dirs := skillsdir.Dirs(b.WS, b.Layered.Paths.UserConfig, b.Settings.Skills)
+	out := make([]string, 0, len(dirs))
+	for _, d := range dirs {
+		out = append(out, b.WS.Rel(d))
+	}
+	return out
+}
+
+// agentsStatus is /agents: the sub-agents the model can delegate to.
+func (b *Built) agentsStatus() string {
+	lines := []string{fmt.Sprintf("%s — %s (built in, read-only)", agents.ExploreName, "research the codebase and report back")}
+	for _, d := range b.Agents {
+		kind := "read-only"
+		if !d.ReadOnly {
+			kind = "read-write"
+		}
+		lines = append(lines, fmt.Sprintf("%s — %s (%s)\n  %s", d.Name, firstLine(d.Description), kind, b.WS.Rel(d.Source)))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func firstLine(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		return s[:i] + "…"
+	}
+	return s
 }
 
 func (b *Built) auditSummary() (string, error) {

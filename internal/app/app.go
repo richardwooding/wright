@@ -11,9 +11,13 @@ import (
 	"errors"
 	"io"
 
+	akskills "github.com/richardwooding/agentkit/skills"
+
+	"github.com/richardwooding/wright/internal/agents"
 	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/engine"
 	"github.com/richardwooding/wright/internal/git"
+	"github.com/richardwooding/wright/internal/mcpclient"
 	"github.com/richardwooding/wright/internal/model"
 	"github.com/richardwooding/wright/internal/sandbox"
 	"github.com/richardwooding/wright/internal/session"
@@ -84,7 +88,13 @@ type Built struct {
 	Choice    model.Choice
 	SessionID string
 	Trusted   bool // project settings were accepted (or there are none)
-	Close     func() error
+	// Skills is the merged skill set the agent was given (possibly empty).
+	Skills *akskills.Set
+	// MCP holds the connected servers and their tools; Close ends them.
+	MCP *mcpclient.Set
+	// Agents are the custom sub-agent definitions that were loaded.
+	Agents []agents.Definition
+	Close  func() error
 
 	opts RunOptions
 }

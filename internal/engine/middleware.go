@@ -13,6 +13,15 @@ import (
 	"github.com/richardwooding/wright/internal/prompt"
 )
 
+// Middleware is the chain every tool call runs through, at any depth: panic
+// recovery, the approval gate (which evaluates sub-agent calls against a
+// child policy engine), the audit log and the untrusted-content fence. The
+// app gives sub-agents the same chain, so a child's calls are approved,
+// audited and fenced exactly like the main agent's.
+func (e *Engine) Middleware() []agentkit.Middleware {
+	return []agentkit.Middleware{agentkit.Recover(), agentkit.ApproveWith(e), e.auditMiddleware(), e.untrustedMiddleware()}
+}
+
 // maxAuditArgs bounds the argument text kept in the audit log.
 const maxAuditArgs = 4096
 

@@ -64,12 +64,26 @@ type Sandbox struct {
 }
 
 // MCPServer describes one MCP server: a stdio command or an HTTP URL.
+//
+// Env values are passed to a stdio server verbatim; an empty value means
+// "take this variable from wright's own environment", so a settings file
+// that is committed names credentials without carrying them. Trusted marks a
+// server the user has already vouched for in settings, which is why it only
+// takes effect when the settings file itself is trusted.
 type MCPServer struct {
 	Transport string            `json:"transport,omitempty"`
 	Command   string            `json:"command,omitempty"`
 	Args      []string          `json:"args,omitempty"`
 	Env       map[string]string `json:"env,omitempty"`
 	URL       string            `json:"url,omitempty"`
+	Headers   map[string]string `json:"headers,omitempty"`
+	// Prefix overrides the "mcp_<name>_" tool-name prefix.
+	Prefix string `json:"prefix,omitempty"`
+	// Network lets a stdio server reach the network from inside the sandbox.
+	Network bool `json:"network,omitempty"`
+	// Trusted connects the server without asking, as if it had been accepted
+	// once already. It is honoured only from a trusted settings layer.
+	Trusted bool `json:"trusted,omitempty"`
 }
 
 // Skills configures where skills are discovered.
@@ -332,6 +346,14 @@ func xdg(name, fallback string) string {
 // applies mutate and writes it back atomically with mode 0600.
 func (l *Layered) SaveProjectLocal(mutate func(*Settings)) error {
 	return saveFile(l.Paths.ProjectLocalFile(), mutate)
+}
+
+// SaveProject does the same for the shared project settings file. Writing
+// it changes the file's hash, so the caller is responsible for re-recording
+// the project's trust (a user who runs `wright mcp add` has just vouched for
+// the change themselves).
+func (l *Layered) SaveProject(mutate func(*Settings)) error {
+	return saveFile(l.Paths.ProjectSettingsFile(), mutate)
 }
 
 // SaveUser does the same for the user config file.

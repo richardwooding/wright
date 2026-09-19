@@ -148,6 +148,7 @@ gitignored), and on the command line with `--allow` / `--deny` (repeatable).
 rule    := tool [ "(" spec ")" ] [ "+net" ]
 tool    := read_file | write_file | edit_file | glob | grep | list_dir | bash
          | web_fetch | web_search | todo_write | ask_user
+         | explore | <agent> | skill | skill_file
          | "mcp:" server [ ":" toolglob ] | "*"
 spec    := pathglob                    doublestar; relative = workspace-relative; "~/" and "$WORKSPACE/" expand
          | argv-prefix [ "*" ]         bash: matched per simple command after the AST split
@@ -236,6 +237,81 @@ running as root outside a container, and refused when no sandbox backend is
 available unless you also pass `--allow-unsandboxed-bypass`. In the TUI it
 needs a typed confirmation, the mode segment turns hot red, and the hard-deny
 floor still applies.
+
+## MCP servers
+
+```sh
+wright mcp add docs --command docs-mcp-server --arg=--stdio --env DOCS_TOKEN
+wright mcp add issues --type http --url https://example.test/mcp
+wright mcp list
+wright mcp remove docs
+```
+
+`add` writes the server into `.wright/settings.json`; `--env` takes variable
+**names**, whose values are read from wright's own environment when the server
+starts, so a committed settings file never carries a secret. A stdio server
+runs inside the OS sandbox with the filtered environment, the workspace as its
+working directory and no network unless the entry says `"network": true`.
+
+On the first connection wright lists the server's command (or URL) and every
+tool it offers, with the annotations the server claims, and records what it
+showed — the server binary's hash, its arguments, the URL and the tool list —
+in `~/.config/wright/trust.json` once accepted. Any change to those re-asks and
+says what changed. Tools appear to the model as `mcp_<server>_<tool>` and to
+the permission rules as `mcp:<server>:<tool>`, which the builtin `mcp:*` ask
+rule covers; `readOnlyHint` and friends are the server's claims, so they are
+shown to you and can only *tighten* what plan mode allows, never approve
+anything. `/mcp` shows what the current session connected.
+
+The interactive consent prompt is not built yet: until it lands, an
+unaccepted server is reported in full and declined, and you accept it by
+adding `"trusted": true` to its entry in a settings file that is itself
+trusted.
+
+## Skills
+
+[Agent Skills](https://agentskills.io) are Markdown instructions (plus files)
+that the model loads on demand. wright looks in, lowest precedence first:
+
+```
+~/.config/wright/skills   <ws>/.agents/skills   <ws>/.wright/skills
+skills.extraDirs          <ws>/.claude/skills   (only with "loadClaudeSkills": true)
+```
+
+The catalog of names and descriptions goes in the system prompt; the `skill`
+tool returns a skill's full text and `skill_file` reads the files it ships.
+Neither can change anything: a script a skill ships runs only if the model
+calls `bash`, where the permission engine and the sandbox apply as usual.
+`wright skills` and `/skills` list what was found, and a malformed `SKILL.md`
+is reported without costing you the others.
+
+## Sub-agents
+
+`explore` is built in: a read-only research agent (read tools only, the fast
+model, a short budget) that answers a question about the codebase and reports
+back, keeping a long search out of the main transcript. Its work appears
+indented in the transcript, one level deeper.
+
+Custom agents are Markdown files in `.wright/agents/` or
+`~/.config/wright/agents/`:
+
+```markdown
+---
+name: reviewer
+description: Review a diff for correctness and house style
+tools: read_file, grep, glob, list_dir
+model: anthropic/claude-haiku-4-5
+read-only: true
+---
+
+Review the change. Report findings with file paths and line ranges…
+```
+
+`tools` limits the agent to those tools; without it a read-only agent gets the
+read tools and a `read-only: false` agent gets everything except `bash`. A
+sub-agent is never a way around permissions: every call it makes is evaluated
+again, one level deeper, by a child policy engine that clamps bypass back to
+the default mode and cannot grant anything. `/agents` lists them.
 
 ## Sandbox
 
@@ -514,16 +590,17 @@ wright is pre-1.0 and not yet tagged. Working end to end today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,
 `edit_file`, `glob`, `grep`, `list_dir`, `bash`, `web_fetch`, `todo_write`,
-`ask_user`), sessions and resume, snapshots and `/undo`, redaction, the audit
-log, model detection and cost, trust-gated project settings, and the release
-plumbing.
+`ask_user`), skills discovery, MCP servers behind consent, the `explore`
+sub-agent and custom agents, sessions and resume, snapshots and `/undo`,
+redaction, the audit log, model detection and cost, trust-gated project
+settings, and the release plumbing.
 
-Landing next: the MCP consent UI (`wright mcp` and `/mcp` are stubs until
-then), skills discovery, the `explore` sub-agent and custom agents,
-`multi_edit`, background `bash` jobs, and a `web_search` provider. A macOS
-seatbelt profile ships but macOS is treated conservatively until it has more
-mileage. **Not planned:** an LSP client — wright uses your repository's own
-tools instead.
+Landing next: the interactive MCP consent prompt (until then an unaccepted
+server is declined with a full report of what it asked for), `multi_edit`,
+background `bash` jobs, and a `web_search` provider. A macOS seatbelt profile
+ships but macOS is treated conservatively until it has more mileage.
+**Not planned:** an LSP client — wright uses your repository's own tools
+instead.
 
 ## Built on
 

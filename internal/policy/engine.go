@@ -175,7 +175,11 @@ const (
 var (
 	readTools  = map[string]bool{"read_file": true, "glob": true, "grep": true, "list_dir": true}
 	writeTools = map[string]bool{"write_file": true, "edit_file": true, "multi_edit": true}
-	otherTools = map[string]bool{"explore": true, "skill": true, "todo_write": true, "ask_user": true}
+	// otherTools have no side effects of their own: activating a skill or
+	// reading a file bundled with it only puts text in the transcript, and
+	// anything the skill then *does* goes through bash, edit_file and the
+	// rest, which are evaluated on their own.
+	otherTools = map[string]bool{"explore": true, "skill": true, "skill_file": true, "todo_write": true, "ask_user": true}
 )
 
 func kindOf(tool string) reqKind {

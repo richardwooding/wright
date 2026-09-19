@@ -155,7 +155,7 @@ func (e *Engine) buildAgent(ctx context.Context) (*agentkit.Agent, error) {
 		agentkit.WithInstructions(stable),
 		agentkit.WithAdditionalInstructions(dynamic),
 		agentkit.WithTools(tools...),
-		agentkit.WithMiddleware(agentkit.Recover(), agentkit.ApproveWith(e), e.auditMiddleware(), e.untrustedMiddleware()),
+		agentkit.WithMiddleware(e.Middleware()...),
 		agentkit.WithParallel(4),
 		agentkit.WithBudget(agentkit.Budget{MaxSteps: e.opts.MaxSteps, Timeout: e.opts.Timeout}),
 		agentkit.WithHooks(e.hooks()),

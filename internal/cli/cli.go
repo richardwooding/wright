@@ -29,11 +29,6 @@ const (
 	ExitInterrupted = headless.ExitInterrupted
 )
 
-// errNotImplemented marks commands that exist in the CLI surface but are
-// delivered in a later phase. Declaring the full tree now keeps help output,
-// docs and scripts stable while the implementation lands.
-var errNotImplemented = errors.New("not implemented yet (Phase 3)")
-
 // ExitError carries a specific process exit code out of a command. Err is
 // optional: a headless run that ends with exit 3 has already reported itself
 // and needs no extra message from main.
@@ -279,31 +274,26 @@ type MCPCmd struct {
 // MCPListCmd lists MCP servers.
 type MCPListCmd struct{}
 
-// Run lists servers (Phase 3).
-func (c *MCPListCmd) Run(_ *Globals) error { return fmt.Errorf("mcp list: %w", errNotImplemented) }
-
-// MCPAddCmd adds an MCP server.
+// MCPAddCmd adds an MCP server to .wright/settings.json. Env names a
+// variable to pass through; its value is read from wright's environment when
+// the server starts, so nothing secret is written to the file.
 type MCPAddCmd struct {
-	Name    string   `arg:"" help:"Server name."`
-	Command []string `arg:"" optional:"" passthrough:"" help:"Command and arguments, or a URL for HTTP transports."`
+	Name    string   `arg:"" help:"Server name (tools appear as mcp_<name>_<tool>)."`
+	Type    string   `enum:"stdio,http," default:"" help:"Transport: stdio or http (inferred from --command/--url when omitted)."`
+	Command string   `help:"Program to run for a stdio server."`
+	Arg     []string `help:"Argument for the stdio command (repeatable; use --arg=--flag for arguments that start with a dash)."`
+	URL     string   `name:"url" help:"Endpoint for an http server."`
+	Env     []string `help:"Environment variable NAME to pass to a stdio server (repeatable; names only, never values)."`
+	Network bool     `help:"Let the stdio server reach the network from inside the sandbox."`
 }
-
-// Run adds a server (Phase 3).
-func (c *MCPAddCmd) Run(_ *Globals) error { return fmt.Errorf("mcp add: %w", errNotImplemented) }
 
 // MCPRemoveCmd removes an MCP server.
 type MCPRemoveCmd struct {
 	Name string `arg:"" help:"Server name."`
 }
 
-// Run removes a server (Phase 3).
-func (c *MCPRemoveCmd) Run(_ *Globals) error { return fmt.Errorf("mcp remove: %w", errNotImplemented) }
-
 // SkillsCmd lists discovered skills.
 type SkillsCmd struct{}
-
-// Run lists skills (Phase 3).
-func (c *SkillsCmd) Run(_ *Globals) error { return fmt.Errorf("skills: %w", errNotImplemented) }
 
 // InitCmd scaffolds AGENTS.md and project settings.
 type InitCmd struct{}

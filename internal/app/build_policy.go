@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/richardwooding/wright/internal/agents"
 	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/sandbox"
@@ -89,7 +90,7 @@ func (b *builder) ruleLayers() ([][]policy.Rule, error) {
 		{b.layered.ProjectLocal.Permissions, policy.SourceProjectLocal},
 		{config.Permissions{Allow: b.o.Allow, Deny: b.o.Deny}, policy.SourceFlag},
 	}
-	layers := [][]policy.Rule{policy.Builtin()}
+	layers := [][]policy.Rule{policy.Builtin(), subAgentRules(b.agentDefs)}
 	for _, st := range steps {
 		rules, err := parsePermissions(st.perms, st.src)
 		if err != nil {
@@ -98,6 +99,25 @@ func (b *builder) ruleLayers() ([][]policy.Rule, error) {
 		layers = append(layers, rules)
 	}
 	return layers, nil
+}
+
+// subAgentRules allows the sub-agent tools themselves. Delegating is not an
+// effect: the child's every call is evaluated again, one level deeper, by a
+// child policy engine that cannot inherit bypass or grant anything. An
+// explicit ask or deny rule for an agent's name still outranks this, because
+// tightening always wins.
+func subAgentRules(defs []agents.Definition) []policy.Rule {
+	names := agents.Names(defs)
+	rules := make([]policy.Rule, 0, len(names))
+	for _, n := range names {
+		r, err := policy.ParseRule(n, policy.SourceBuiltin)
+		if err != nil {
+			continue // a name that cannot be a rule simply gets asked about
+		}
+		r.Decision = policy.Allow
+		rules = append(rules, r)
+	}
+	return rules
 }
 
 func parsePermissions(p config.Permissions, src policy.Source) ([]policy.Rule, error) {
