@@ -3,6 +3,7 @@ package workspace
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -113,10 +114,5 @@ func (w *Workspace) rootOf(abs string) string {
 
 // isGitDir reports whether abs is a .git directory or inside one.
 func isGitDir(abs string) bool {
-	for _, part := range strings.Split(abs, string(filepath.Separator)) {
-		if part == ".git" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(strings.Split(abs, string(filepath.Separator)), ".git")
 }
