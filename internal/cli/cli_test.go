@@ -141,3 +141,18 @@ func TestDoctorNeverPrintsCredentialValues(t *testing.T) {
 		t.Errorf("expected presence line, got:\n%s", stdout)
 	}
 }
+
+// Rules and paths routinely contain commas (`sed -e 1,5d`, a `re:` bound like
+// `{1,3}`). kong splits repeated string flags on commas unless told not to, so
+// a rule must survive parsing whole rather than becoming two broken halves.
+func TestRuleFlagsAreNotSplitOnCommas(t *testing.T) {
+	ws := isolate(t)
+	for _, flag := range []string{"--allow", "--deny"} {
+		t.Run(flag, func(t *testing.T) {
+			_, _, _, err := run(t, "", "-p", "hi", "--cwd", ws, "-m", "nonexistent-provider/nope", flag, "bash(sed -e 1,5d *)")
+			if err != nil && strings.Contains(err.Error(), "bash(sed -e 1") {
+				t.Fatalf("rule was split on the comma: %v", err)
+			}
+		})
+	}
+}

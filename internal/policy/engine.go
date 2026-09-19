@@ -602,18 +602,24 @@ func (ev *eval) modeBash() {
 		ev.decide(Deny, "privilege/system command: "+summary, nil)
 		return
 	}
+	// Paths outside the workspace are checked in every mode. Plan mode is
+	// meant to be the most restrictive one, so a read-only command must not
+	// reach a protected file there just because writes are off; bypass turns
+	// prompts off, not the hard-deny floor.
+	deny, ask := ev.outsideShell(sh)
+	if deny != "" {
+		ev.decide(Deny, deny, nil)
+		return
+	}
 	if ev.mode == ModePlan {
-		ev.modeBashPlan(sh, summary)
+		ev.modeBashPlan(sh, summary, ask)
 		return
 	}
 	if ev.mode == ModeBypass {
 		ev.decide(Allow, "bypass mode (network stays off unless --allow-network): "+summary, nil)
 		return
 	}
-	deny, ask := ev.outsideShell(sh)
 	switch {
-	case deny != "":
-		ev.decide(Deny, deny, nil)
 	case sh.Unknown:
 		ev.decide(Ask, "opaque shell (cannot be auto-allowed): "+summary, nil)
 	case ev.req.Network:
@@ -627,12 +633,17 @@ func (ev *eval) modeBash() {
 	}
 }
 
-func (ev *eval) modeBashPlan(sh *shellclass.Analysis, summary string) {
-	if sh.Class == shellclass.SafeRead && !sh.Unknown {
+func (ev *eval) modeBashPlan(sh *shellclass.Analysis, summary, ask string) {
+	switch {
+	case sh.Class != shellclass.SafeRead || sh.Unknown:
+		ev.decide(Deny, "plan mode: only read-only commands: "+summary, nil)
+	case ask != "":
+		// A read-only command touching paths outside the workspace prompts,
+		// exactly as the read tools do in plan mode.
+		ev.decide(Ask, ask+": "+summary, nil)
+	default:
 		ev.decide(Allow, "read-only command: "+summary, nil)
-		return
 	}
-	ev.decide(Deny, "plan mode: only read-only commands: "+summary, nil)
 }
 
 // outsideShell applies the outside-workspace rules to declared shell paths.

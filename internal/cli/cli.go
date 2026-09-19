@@ -82,9 +82,9 @@ type CLI struct {
 	Resume                 string           `short:"r" help:"Resume the session with this ID."`
 	Continue               bool             `short:"c" help:"Resume the most recent session for this workspace."`
 	Cwd                    string           `type:"existingdir" help:"Working directory (defaults to the current directory)."`
-	AddDir                 []string         `name:"add-dir" help:"Additional directory the agent may access (repeatable)."`
-	Allow                  []string         `help:"Permission rule to allow for this run, e.g. 'bash(go test *)' (repeatable)."`
-	Deny                   []string         `help:"Permission rule to deny for this run (repeatable)."`
+	AddDir                 []string         `name:"add-dir" sep:"none" help:"Additional directory the agent may access (repeatable)."`
+	Allow                  []string         `sep:"none" help:"Permission rule to allow for this run, e.g. 'bash(go test *)' (repeatable)."`
+	Deny                   []string         `sep:"none" help:"Permission rule to deny for this run (repeatable)."`
 	Sandbox                string           `enum:"auto,bwrap,landlock,seatbelt,none" default:"auto" env:"WRIGHT_SANDBOX" help:"OS sandbox backend (${enum})."`
 	AllowNetwork           bool             `help:"Let sandboxed shell commands reach the network without asking."`
 	MaxSteps               int              `help:"Maximum agent steps per run (0 = default budget)."`

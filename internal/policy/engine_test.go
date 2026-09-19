@@ -201,6 +201,9 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "allow rule without +net does not cover a network command", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(go get *)")}, req: f.bash("go get x"), want: policy.Ask, reason: "network"},
 		{name: "allow rule with +net covers and grants network", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(go get *) +net")}, req: f.bash("go get x"), want: policy.Allow, network: true},
 		{name: "bash plan safe read allowed", mode: policy.ModePlan, req: f.bash("git log"), want: policy.Allow},
+		{name: "bash plan read protected denies", mode: policy.ModePlan, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
+		{name: "bash plan read outside asks", mode: policy.ModePlan, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
+		{name: "bash bypass read protected denies", mode: policy.ModeBypass, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
 		{name: "bash plan network denied", mode: policy.ModePlan, req: f.bash("go get x"), want: policy.Deny},
 		{name: "bash without analysis denied", mode: policy.ModeBypass, req: policy.Request{Tool: "bash"}, want: policy.Deny},
 		// --- web / mcp / other
