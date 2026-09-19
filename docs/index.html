@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wright — a coding agent that asks first</title>
+<meta name="description" content="wright is a coding-agent terminal harness: approval-first permissions, an OS sandbox around every shell command, secrets that never leave your machine, no telemetry, and a tamper-evident audit trail.">
+<meta property="og:url" content="https://richardwooding.github.io/wright/">
+<meta property="og:site_name" content="Richard Wooding">
+<meta property="og:title" content="wright">
+<meta property="og:description" content="A coding agent that asks first: approval-first permissions, OS sandbox, local secrets, no telemetry, audit trail.">
+<meta property="og:type" content="website">
+<link rel="canonical" href="https://richardwooding.github.io/wright/">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><rect width='24' height='24' rx='6' fill='%23161b22'/><path d='M6 7l3 10 3-7 3 7 3-10' fill='none' stroke='%23a371f7' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/></svg>">
+<script>try{var t=localStorage.getItem("gl-theme");if(t)document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
+<link rel="stylesheet" href="gloam.css">
+</head>
+<body class="gl">
+<a class="gl-skip" href="#main">Skip to content</a>
+
+<header class="gl-nav">
+  <div class="gl-wrap">
+    <span class="gl-brand">
+      <svg width="26" height="26" viewBox="0 0 24 24" aria-hidden="true">
+        <rect width="24" height="24" rx="6" fill="var(--gl-panel-2)"/>
+        <path d="M6 7l3 10 3-7 3 7 3-10" fill="none" stroke="var(--gl-accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+      wright
+    </span>
+    <button class="gl-nav-toggle" aria-label="Toggle navigation" data-gl-nav-toggle="nav" aria-expanded="false">☰</button>
+    <nav id="nav">
+      <a href="#safety">Safety model</a>
+      <a href="#install">Install</a>
+      <button class="gl-theme-toggle" data-gl-theme-toggle aria-label="Toggle color theme" aria-pressed="true">
+        <svg class="gl-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <svg class="gl-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"/></svg>
+      </button>
+      <a class="gl-btn ghost" href="https://github.com/richardwooding/wright">GitHub ★</a>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <section class="gl-hero">
+    <div class="gl-wrap gl-hero-grid">
+      <div>
+        <p class="gl-eyebrow">under construction · terminal coding agent · Go</p>
+        <h1>A coding agent that <span class="gl-grad">asks first.</span></h1>
+        <p class="sub"><code>wright</code> runs a coding agent in your terminal with approval-first permissions, an OS sandbox around every shell command, secrets that never leave your machine, <strong>no telemetry</strong>, and an audit trail you can verify.</p>
+        <div class="gl-cta">
+          <a class="gl-btn primary" href="#install">Install</a>
+          <a class="gl-btn ghost" href="https://github.com/richardwooding/wright">View on GitHub</a>
+        </div>
+        <p class="gl-hint">MIT · single static binary, no cgo · built on <a href="https://github.com/richardwooding/agentkit">agentkit</a> + <a href="https://github.com/richardwooding/llmkit">llmkit</a></p>
+      </div>
+      <div class="gl-term">
+        <div class="bar">
+          <span class="dot" style="background:#ff5f56"></span>
+          <span class="dot" style="background:#ffbd2e"></span>
+          <span class="dot" style="background:#27c93f"></span>
+          <span class="t">wright doctor</span>
+        </div>
+<pre aria-label="Example wright doctor output"><span class="pr">$</span> <span class="cmd">wright doctor</span>
+<span class="hd">Sandbox</span>
+  <span class="ok">✓</span> bwrap        bubblewrap 0.11.0
+  <span class="ok">✓</span> landlock     available
+  · landlock ABI v8 (network restriction needs v4+)
+  <span class="ok">✓</span> selected     bwrap
+
+<span class="hd">Credentials (names only)</span>
+  <span class="ok">✓</span> ANTHROPIC_API_KEY present
+  · OPENAI_API_KEY    absent</pre>
+      </div>
+    </div>
+  </section>
+
+  <section class="gl-section" id="safety">
+    <div class="gl-wrap">
+      <p class="gl-eyebrow">safety model</p>
+      <h2>Policy decides <em>whether</em>. The sandbox limits <em>what</em>.</h2>
+      <div class="gl-grid feat" style="margin-top:32px">
+        <article class="gl-card">
+          <h3>Approval first</h3>
+          <p>Every tool call is evaluated against a permission lattice: hard-deny → deny rules → ask rules → allow rules → mode table. Shell commands are classified from a real bash AST, never by string matching, and anything opaque (<code>eval</code>, <code>$(…)</code>, <code>sh -c "$X"</code>) can never match an allow rule.</p>
+        </article>
+        <article class="gl-card">
+          <h3>Sandboxed by default</h3>
+          <p>bubblewrap or Landlock on Linux, sandbox-exec on macOS: the workspace is writable, the system is read-only, <code>$HOME</code> is hidden and the network is off unless you grant it. When no sandbox is available the status bar says so in red.</p>
+        </article>
+        <article class="gl-card">
+          <h3>Secrets stay local</h3>
+          <p>Credential files are refused, API keys are stripped from the sandbox environment, and secret-looking strings in tool output are redacted before the model sees them. There is no telemetry and no update check unless you turn it on.</p>
+        </article>
+        <article class="gl-card">
+          <h3>Auditable</h3>
+          <p>Every call, decision, file change and command is appended to a SHA-256-chained JSONL log per session; <code>wright audit verify</code> proves it was not edited.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="gl-section" id="install">
+    <div class="gl-wrap">
+      <p class="gl-eyebrow">install</p>
+      <h2>Homebrew, Go, or a container.</h2>
+      <div class="gl-term" style="margin-top:24px">
+        <div class="bar"><span class="dot" style="background:#ff5f56"></span><span class="dot" style="background:#ffbd2e"></span><span class="dot" style="background:#27c93f"></span><span class="t">install</span></div>
+<pre><span class="pr">$</span> <span class="cmd">brew install --cask richardwooding/tap/wright</span>
+<span class="pr">$</span> <span class="cmd">go install github.com/richardwooding/wright/cmd/wright@latest</span>
+<span class="pr">$</span> <span class="cmd">podman run --rm -it -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY ghcr.io/richardwooding/wright</span></pre>
+      </div>
+      <p class="gl-hint" style="margin-top:14px">wright is under construction; the first tagged release will be v0.1.0.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="gl-footer">
+  <div class="gl-wrap">
+    <span class="gl-brand" style="font-size:.98rem">wright · MIT · <span data-gl-year></span></span>
+    <nav class="gl-fnav">
+      <a href="https://richardwooding.github.io/">Richard Wooding</a>
+      <a href="https://github.com/richardwooding/wright">GitHub</a>
+      <a href="https://github.com/richardwooding/wright/blob/main/LICENSE">License</a>
+      <a class="gl-sponsor" href="https://github.com/sponsors/richardwooding">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1.1a5.5 5.5 0 0 0-7.8 7.8L12 21l8.8-8.6a5.5 5.5 0 0 0 0-7.8z"/></svg>
+        Sponsor
+      </a>
+    </nav>
+  </div>
+</footer>
+
+<script src="gloam.js" defer></script>
+</body>
+</html>
