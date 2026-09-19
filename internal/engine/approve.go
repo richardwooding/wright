@@ -28,7 +28,7 @@ func (e *Engine) Approve(ctx context.Context, c agentkit.Call) (agentkit.Decisio
 		return agentkit.Deny("could not evaluate this call: " + err.Error()), nil
 	}
 	req.Depth = c.Depth
-	verdict := e.policy.Evaluate(req)
+	verdict := e.policyFor(c.Depth).Evaluate(req)
 	switch verdict.Decision {
 	case policy.Allow:
 		e.auditDecision(c, verdict, "policy", nil)
@@ -42,6 +42,18 @@ func (e *Engine) Approve(ctx context.Context, c agentkit.Call) (agentkit.Decisio
 	default:
 		return e.ask(ctx, c, req, verdict, preview)
 	}
+}
+
+// policyFor returns the engine that decides a call at depth. Depth 0 is the
+// main agent and uses the session's engine; a sub-agent call is evaluated by
+// a child engine, which clamps bypass back to the default mode and refuses
+// grants, so a child can never be more permissive than its parent. The child
+// is derived per call so grants made meanwhile are visible to it.
+func (e *Engine) policyFor(depth int) *policy.Engine {
+	if depth <= 0 {
+		return e.policy
+	}
+	return e.policy.Child(depth)
 }
 
 func (e *Engine) describe(c agentkit.Call) (policy.Request, Preview, error) {

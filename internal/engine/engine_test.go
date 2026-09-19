@@ -33,6 +33,9 @@ func echoTool(name string) agentkit.Tool {
 
 func describer(ws *workspace.Workspace) engine.DescribeFunc {
 	return func(name string, args []byte) (policy.Request, engine.Preview, bool, error) {
+		if name != "read_file" && name != "edit_file" {
+			return policy.Request{}, engine.Preview{}, false, nil // sub-agents are evaluated by name
+		}
 		var in echoArgs
 		if err := json.Unmarshal(args, &in); err != nil {
 			return policy.Request{}, engine.Preview{}, false, err
@@ -293,6 +296,65 @@ func TestCancelStopsRun(t *testing.T) {
 		t.Fatalf("finish = %+v", fin)
 	}
 	close(block)
+}
+
+// lateApprover hands sub-agent calls to an engine that does not exist yet
+// when the sub-agent is built, the way the app wires its own children.
+type lateApprover struct{ eng *engine.Engine }
+
+func (l *lateApprover) Approve(ctx context.Context, c agentkit.Call) (agentkit.Decision, error) {
+	return l.eng.Approve(ctx, c)
+}
+
+// TestSubAgentDoesNotInheritBypass pins the child clamp: the parent runs in
+// bypass mode, where an edit is allowed without a prompt, but the same edit
+// attempted by a depth-1 sub-agent is evaluated by a child policy engine
+// (mode clamped to default), so it needs approval — and headless has none.
+func TestSubAgentDoesNotInheritBypass(t *testing.T) {
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.CallResp("c1", "child", `{"input":"edit a.go"}`),
+		enginetest.CallResp("c2", "edit_file", `{"path":"a.go"}`),
+		enginetest.TextResp("could not edit"),
+		enginetest.TextResp("done"),
+	}}
+	late := &lateApprover{}
+	child, err := agentkit.NewFromClient(client,
+		agentkit.WithName("child"),
+		agentkit.WithTools(echoTool("edit_file")),
+		agentkit.WithMiddleware(agentkit.ApproveWith(late)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub := agentkit.AsTool(child, "child", "delegate", agentkit.WithForwardEvents())
+	f := newFixture(t, client, func(o *engine.Options) {
+		o.Mode, o.Bypass, o.Headless = policy.ModeBypass, true, true
+		o.Tools = append(o.Tools, sub)
+	})
+	late.eng = f.eng
+
+	_ = f.eng.Submit("delegate the edit")
+	evs := f.collect(t, nil)
+
+	var denied, deep bool
+	for _, ev := range evs {
+		if ev.Depth == 1 {
+			deep = true
+		}
+		if ev.Kind == engine.KindToolResult && ev.Depth == 1 && ev.Result != nil &&
+			strings.Contains(ev.Result.Text(), engine.HeadlessDenialMarker) {
+			denied = true
+		}
+	}
+	if !deep {
+		t.Fatalf("no depth-1 events were forwarded: %s", kinds(evs))
+	}
+	if !denied {
+		t.Fatalf("the sub-agent's edit was not stopped by the child policy: %s", kinds(evs))
+	}
+	if hasKind(evs, engine.KindApprovalRequest) {
+		t.Fatal("headless must not prompt")
+	}
 }
 
 func TestSetModeRejectsBypass(t *testing.T) {
