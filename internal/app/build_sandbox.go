@@ -1,6 +1,7 @@
 package app
 
 import (
+	"github.com/richardwooding/wright/internal/git"
 	"github.com/richardwooding/wright/internal/sandbox"
 )
 
@@ -29,9 +30,12 @@ func (b *builder) sandboxing() error {
 	// that does not cannot be bound read-only, and a payload would simply
 	// create it and write into the directory it just made.
 	sandbox.EnsureProtected(b.ws.Roots)
+	// Resolve the commit identity on the host, where the user's global git
+	// config is readable and includeIf still applies: the sandbox masks it,
+	// so without this git would commit as user@hostname.
 	b.spec = sandbox.Spec{
 		Dir:       b.ws.Root(),
-		Env:       sandbox.Env(pass, nil),
+		Env:       sandbox.Env(pass, git.WhoAmI(b.ctx, b.ws.Root()).Env()),
 		ReadWrite: rw,
 		Roots:     b.ws.Roots,
 		ReadOnly:  expandAll(b.ws, b.settings.Sandbox.ExtraRO),

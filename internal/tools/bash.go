@@ -77,7 +77,7 @@ func (d *Deps) describeBash(args json.RawMessage) (policy.Request, Preview, erro
 		return policy.Request{}, Preview{}, errors.New("command is required")
 	}
 	an := shellclass.Analyze(a.Command, d.shellWorkspace())
-	req := policy.Request{Tool: NameBash, Args: args, Shell: &an, Network: a.Network}
+	req := policy.Request{Tool: NameBash, Args: args, Shell: &an, Network: a.Network, Cwd: d.Cwd.Get()}
 	for _, c := range an.Commands {
 		req.Writes = append(req.Writes, c.Writes...)
 		req.Paths = append(req.Paths, c.Reads...)

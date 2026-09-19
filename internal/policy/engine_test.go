@@ -81,7 +81,7 @@ func (f *fixture) abs(rel string) string {
 
 func (f *fixture) bash(script string) policy.Request {
 	a := shellclass.Analyze(script, f.sh)
-	return policy.Request{Tool: "bash", Shell: &a}
+	return policy.Request{Tool: "bash", Shell: &a, Cwd: f.ws.Root()}
 }
 
 func (f *fixture) read(rel string) policy.Request {
@@ -199,6 +199,13 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "allow rule cannot cover a protected read", mode: policy.ModeDefault, req: f.bash("head -c 200 /etc/passwd"), want: policy.Deny, reason: "protected"},
 		{name: "allow rule cannot cover a read outside the workspace", mode: policy.ModeDefault, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
 		{name: "recursive read exposing a secret asks", mode: policy.ModeDefault, req: f.bash(`grep -r "" .`), want: policy.Ask, reason: "credential"},
+		// A recursive reader with no path operand walks the working
+		// directory while naming nothing; the scan has to notice anyway.
+		{name: "recursive read with an implied cwd asks", mode: policy.ModeDefault, req: f.bash("grep -rI SECRET"), want: policy.Ask, reason: "credential"},
+		{name: "recursive rg with an implied cwd asks", mode: policy.ModeDefault, req: f.bash("rg -n SECRET"), want: policy.Ask, reason: "credential"},
+		{name: "find with an implied cwd asks", mode: policy.ModeDefault, req: f.bash("find -name '*.go'"), want: policy.Ask, reason: "credential"},
+		{name: "non-recursive grep of one file stays allowed", mode: policy.ModeDefault, req: f.bash("grep SECRET main.go"), want: policy.Allow},
+		{name: "echo is not a directory reader", mode: policy.ModeDefault, req: f.bash("echo hello"), want: policy.Allow},
 		{name: "recursive read of a clean subtree stays allowed", mode: policy.ModeDefault, req: f.bash("grep -r x internal"), want: policy.Allow},
 		// A submodule's hooks run outside the sandbox just like the root's.
 		{name: "nested .git hooks are protected", mode: policy.ModeDefault, req: f.bash("echo x > internal/.git/hooks/pre-commit"), want: policy.Deny, reason: "protected", hard: true},

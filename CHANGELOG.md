@@ -134,6 +134,18 @@ redaction and a tamper-evident audit log between the model and the machine.
 
 ### Security
 
+- A recursive reader given no path operand reads the working directory while
+  naming nothing, so the credential scan had nothing to look at: `grep -r ""
+  .` asked, but `grep -rI SECRET` returned `.env` to the model with no
+  prompt. The scan now treats the working directory as an implied read for
+  the readers that default to it.
+- Commits made inside the sandbox were attributed to `user@hostname`. Both
+  backends put the user's global git config out of reach — bwrap replaces
+  `$HOME` with a tmpfs, landlock grants it no rule — so git invented an
+  identity, and under landlock an unreadable `~/.gitconfig` made `git commit`
+  fail outright. wright now resolves the commit identity on the host, where
+  `includeIf` still applies, and carries it in, so a commit is attributed to
+  the address the user actually configured or is not made at all.
 - The shell classifier called several commands that execute arbitrary code
   "safe-read", and a safe-read command is auto-allowed with no prompt:
   `awk 'BEGIN{system("…")}'` (the program text was never inspected),

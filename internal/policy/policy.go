@@ -154,6 +154,10 @@ type Request struct {
 	// ReadOnly carries an MCP server's readOnlyHint annotation. It is
 	// advisory: it only decides whether plan mode asks or denies.
 	ReadOnly bool
+	// Cwd is the directory a shell command will run in. A recursive reader
+	// given no path operand reads it, and nothing in the command names it,
+	// so the credential scan needs it to see what the command would sweep up.
+	Cwd string
 }
 
 // Verdict is the evaluation result.

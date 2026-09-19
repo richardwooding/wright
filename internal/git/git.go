@@ -6,6 +6,7 @@ package git
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -141,4 +142,46 @@ func Diff(ctx context.Context, dir string, staged bool) (string, error) {
 func IsTracked(ctx context.Context, dir, path string) bool {
 	_, err := run(ctx, dir, "ls-files", "--error-unmatch", "--", path)
 	return err == nil
+}
+
+// Identity is the commit identity git would use in a directory, resolved on
+// the host so conditional includes (includeIf) apply. Either field may be
+// empty when the user has not configured one.
+type Identity struct{ Name, Email string }
+
+// WhoAmI resolves the commit identity for dir. It runs on the host before the
+// sandbox is built: inside the sandbox the user's global config is either
+// masked (bwrap replaces $HOME with a tmpfs) or unreadable (landlock grants
+// no rule for it), so git would otherwise invent user@hostname and commit
+// under an address the user never chose.
+func WhoAmI(ctx context.Context, dir string) Identity {
+	var id Identity
+	if out, err := run(ctx, dir, "config", "--get", "user.name"); err == nil {
+		id.Name = strings.TrimSpace(out)
+	}
+	if out, err := run(ctx, dir, "config", "--get", "user.email"); err == nil {
+		id.Email = strings.TrimSpace(out)
+	}
+	return id
+}
+
+// Env returns the environment entries that carry id into a sandboxed git,
+// along with the settings that stop git reading a config it cannot see.
+// It is empty when the user has no configured identity, so git keeps its own
+// behaviour rather than committing under a name wright made up.
+func (id Identity) Env() map[string]string {
+	if id.Name == "" || id.Email == "" {
+		return nil
+	}
+	return map[string]string{
+		"GIT_AUTHOR_NAME":     id.Name,
+		"GIT_AUTHOR_EMAIL":    id.Email,
+		"GIT_COMMITTER_NAME":  id.Name,
+		"GIT_COMMITTER_EMAIL": id.Email,
+		// The global and system files are unreadable inside the sandbox;
+		// pointing git at an empty one turns a warning (or a fatal error
+		// under landlock) into ordinary "no global config".
+		"GIT_CONFIG_GLOBAL": os.DevNull,
+		"GIT_CONFIG_SYSTEM": os.DevNull,
+	}
 }

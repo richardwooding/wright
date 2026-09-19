@@ -889,6 +889,11 @@ func (ev *eval) declaredDirs() []string {
 			paths = append(paths, c.Reads...)
 		}
 	}
+	// A recursive reader given no path operand walks the working directory
+	// while naming nothing, so nothing above would have added it.
+	if ev.req.Cwd != "" && readsImpliedCwd(ev.req.Shell) {
+		paths = append(paths, ev.req.Cwd)
+	}
 	dirs := make([]string, 0, len(paths))
 	for _, p := range paths {
 		if fi, err := os.Stat(p); err == nil && fi.IsDir() {

@@ -141,3 +141,40 @@ func TestSummaryString(t *testing.T) {
 		})
 	}
 }
+
+// A sandboxed git cannot read the user's global config, so wright resolves
+// the identity on the host and carries it in. Without this a commit is
+// attributed to user@hostname, which the user never chose.
+func TestWhoAmIAndEnv(t *testing.T) {
+	dir := repo(t)
+	for _, args := range [][]string{{"config", "user.name", "Ada Lovelace"}, {"config", "user.email", "ada@example.test"}} {
+		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+
+	id := git.WhoAmI(context.Background(), dir)
+	if id.Name != "Ada Lovelace" || id.Email != "ada@example.test" {
+		t.Fatalf("WhoAmI = %+v", id)
+	}
+	env := id.Env()
+	for k, want := range map[string]string{
+		"GIT_AUTHOR_NAME":     "Ada Lovelace",
+		"GIT_AUTHOR_EMAIL":    "ada@example.test",
+		"GIT_COMMITTER_NAME":  "Ada Lovelace",
+		"GIT_COMMITTER_EMAIL": "ada@example.test",
+	} {
+		if env[k] != want {
+			t.Errorf("Env()[%s] = %q, want %q", k, env[k], want)
+		}
+	}
+	if env["GIT_CONFIG_GLOBAL"] != os.DevNull {
+		t.Errorf("GIT_CONFIG_GLOBAL = %q, want %q", env["GIT_CONFIG_GLOBAL"], os.DevNull)
+	}
+	// With no identity configured wright must not invent one.
+	if got := (git.Identity{Name: "Ada"}).Env(); got != nil {
+		t.Errorf("a half-configured identity produced %v, want nil", got)
+	}
+}
