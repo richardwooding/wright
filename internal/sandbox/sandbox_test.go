@@ -24,8 +24,11 @@ func TestMain(m *testing.M) {
 		if err == nil {
 			err = h.Exec()
 		}
-		fmt.Fprintln(os.Stderr, "helper:", err)
-		os.Exit(97)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "helper:", err)
+			os.Exit(97)
+		}
+		os.Exit(0) // only --probe returns without exec'ing a payload
 	}
 	os.Exit(m.Run())
 }

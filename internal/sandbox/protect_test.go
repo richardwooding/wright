@@ -1,12 +1,15 @@
 package sandbox_test
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/richardwooding/wright/internal/sandbox"
 )
@@ -26,6 +29,7 @@ func protectedWorkspace(t *testing.T, dir string) {
 	}
 	for _, f := range []string{
 		filepath.Join(gitName, "config"),
+		filepath.Join(gitName, "hooks", "keep"),
 		filepath.Join(gitName, "objects", "keep"),
 		filepath.Join(".wright", "settings.json"),
 		"README.md",
@@ -162,18 +166,29 @@ func workspaceOutsideTmp(t *testing.T) string {
 	return dir
 }
 
-func TestLandlockProtectedPathsAreNotWritable(t *testing.T) {
+// TestLandlockProtectsWithoutBreakingTheWorkspace pins both halves at once.
+// Landlock rules are additive, so keeping `.git/hooks` read-only by
+// *withholding* write on the workspace root would also stop the agent
+// creating a file or a directory there — which is not a usable coding agent,
+// and is exactly what the shipped container image (WRIGHT_SANDBOX=landlock,
+// no bwrap) would get. The read-only bind mounts in the helper's mount
+// namespace carry the protection instead, so the root stays writable.
+func TestLandlockProtectsWithoutBreakingTheWorkspace(t *testing.T) {
 	b := landlockOrSkip(t)
 	ws := workspaceOutsideTmp(t)
 	protectedWorkspace(t, ws)
+	script := probeScript(map[string]string{
+		"HOOK":     filepath.Join(ws, gitName, "hooks", "pre-commit"),
+		"GITCFG":   filepath.Join(ws, gitName, "config"),
+		"SETTINGS": filepath.Join(ws, ".wright", "settings.local.json"),
+		"EXISTING": filepath.Join(ws, "README.md"),
+		"GITINDEX": filepath.Join(ws, gitName, "index"),
+		"NEWFILE":  filepath.Join(ws, "NEWFILE"),
+	})
+	script += "(mkdir -p '" + filepath.Join(ws, "newdir") + "' 2>/dev/null && echo SUBDIR=WROTE || echo SUBDIR=BLOCKED)\n"
+	script += "(cat '" + filepath.Join(ws, gitName, "hooks", "keep") + "' >/dev/null 2>&1 && echo HOOKREAD=OK || echo HOOKREAD=DENIED)\n"
 	out, err := runSpec(t, b, sandbox.Spec{
-		Argv: []string{"bash", "-c", probeScript(map[string]string{
-			"HOOK":     filepath.Join(ws, gitName, "hooks", "pre-commit"),
-			"GITCFG":   filepath.Join(ws, gitName, "config"),
-			"SETTINGS": filepath.Join(ws, ".wright", "settings.local.json"),
-			"README":   filepath.Join(ws, "README.md"),
-			"OBJECT":   filepath.Join(ws, gitName, "objects", "new"),
-		})},
+		Argv:      []string{"bash", "-c", script},
 		Dir:       ws,
 		Env:       sandbox.Env(nil, nil),
 		ReadWrite: []string{ws},
@@ -181,9 +196,18 @@ func TestLandlockProtectedPathsAreNotWritable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("landlock run: %v\n%s", err, out)
 	}
-	for _, want := range []string{"HOOK=BLOCKED", "GITCFG=BLOCKED", "SETTINGS=BLOCKED", "README=WROTE", "OBJECT=WROTE"} {
-		if !strings.Contains(out, want) {
-			t.Errorf("want %s in output:\n%s", want, out)
+	want := []string{
+		// The workspace is a workspace: creation and edits work, and so do
+		// git's own writes inside .git.
+		"NEWFILE=WROTE", "SUBDIR=WROTE", "EXISTING=WROTE", "GITINDEX=WROTE",
+		// The paths that decide what happens outside the sandbox do not.
+		"HOOK=BLOCKED", "GITCFG=BLOCKED", "SETTINGS=BLOCKED",
+		// git still has to be able to *read* its hooks and config.
+		"HOOKREAD=OK",
+	}
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("want %s in output:\n%s", w, out)
 		}
 	}
 	if _, err := os.Stat(filepath.Join(ws, gitName, "hooks", "pre-commit")); err == nil {
@@ -207,6 +231,113 @@ func TestLandlockNetworkOffBlocksUDP(t *testing.T) {
 	}
 	if strings.Contains(out, "UDP_SENT") {
 		t.Errorf("UDP reachable with Network=false:\n%s", out)
+	}
+}
+
+// TestProtectedPathsThatDoNotExistYet covers the hole a "bind only what
+// exists" rule leaves: a payload creates the protected directory itself and
+// writes into the one it just made. The spec's roots get their protected
+// paths created before the sandbox is built, so there is always something to
+// bind read-only.
+func TestProtectedPathsThatDoNotExistYet(t *testing.T) {
+	backends := map[string]func(*testing.T) sandbox.Backend{
+		"bwrap":    bwrapOrSkip,
+		"landlock": landlockOrSkip,
+	}
+	for name, open := range backends {
+		t.Run(name, func(t *testing.T) {
+			b := open(t)
+			ws := workspaceOutsideTmp(t)
+			// A repository with no .wright at all, and a .git without hooks.
+			if err := os.MkdirAll(filepath.Join(ws, gitName), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			out, err := runSpec(t, b, sandbox.Spec{
+				Argv: []string{"bash", "-c", "" +
+					"(mkdir -p '" + filepath.Join(ws, ".wright") + "' 2>/dev/null && echo MKDIR=OK || echo MKDIR=BLOCKED)\n" +
+					probeScript(map[string]string{
+						"SETTINGS": filepath.Join(ws, ".wright", "settings.local.json"),
+						"HOOK":     filepath.Join(ws, gitName, "hooks", "pre-commit"),
+						"GITCFG":   filepath.Join(ws, gitName, "config"),
+					})},
+				Dir:       ws,
+				Env:       sandbox.Env(nil, nil),
+				ReadWrite: []string{ws},
+				Roots:     []string{ws},
+			})
+			if err != nil {
+				t.Fatalf("%s run: %v\n%s", name, err, out)
+			}
+			for _, want := range []string{"SETTINGS=BLOCKED", "HOOK=BLOCKED", "GITCFG=BLOCKED"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("want %s in output:\n%s", want, out)
+				}
+			}
+			if _, err := os.Stat(filepath.Join(ws, ".wright", "settings.local.json")); err == nil {
+				t.Error("settings.local.json was created on the host from inside the sandbox")
+			}
+		})
+	}
+}
+
+func TestEnsureProtectedOnlyBuildsInsideExistingStructures(t *testing.T) {
+	ws := t.TempDir()
+	sandbox.EnsureProtected([]string{ws})
+	if info, err := os.Stat(filepath.Join(ws, ".wright")); err != nil || !info.IsDir() {
+		t.Errorf(".wright not created: %v", err)
+	}
+	// A plain directory must not be turned into something git reads as a
+	// repository, so .git is never invented.
+	if _, err := os.Stat(filepath.Join(ws, gitName)); err == nil {
+		t.Error("EnsureProtected created a git directory in a plain directory")
+	}
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, gitName), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	sandbox.EnsureProtected([]string{repo})
+	for _, want := range []string{filepath.Join(gitName, "hooks"), filepath.Join(gitName, "config"), ".wright"} {
+		if _, err := os.Stat(filepath.Join(repo, want)); err != nil {
+			t.Errorf("%s not created: %v", want, err)
+		}
+	}
+}
+
+// TestHelperRefusesWhenTheNamespacesWereRemoved simulates a caller that
+// replaces the command's SysProcAttr after the backend set it — which the
+// bash tool did, to set a process group, and which silently cost the
+// landlock backend both its network namespace and its read-only bind
+// mounts while the status bar still said "landlock". The helper now
+// notices it is in the parent's namespaces and refuses to run the payload.
+func TestHelperRefusesWhenTheNamespacesWereRemoved(t *testing.T) {
+	b := landlockOrSkip(t)
+	ws := workspaceOutsideTmp(t)
+	protectedWorkspace(t, ws)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	cmd, err := b.Command(ctx, sandbox.Spec{
+		Argv:      []string{"bash", "-c", "echo PAYLOAD_RAN"},
+		Dir:       ws,
+		Env:       sandbox.Env(nil, nil),
+		ReadWrite: []string{ws},
+		Roots:     []string{ws},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cmd.SysProcAttr == nil {
+		t.Skip("no namespaces on this machine, so there is nothing to lose")
+	}
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true} // the old bash tool
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("the helper ran the payload unconfined: %s", out)
+	}
+	if strings.Contains(string(out), "PAYLOAD_RAN") {
+		t.Errorf("the payload ran anyway: %s", out)
+	}
+	if !strings.Contains(string(out), "parent network namespace") {
+		t.Errorf("the refusal should name what is missing: %s", out)
 	}
 }
 

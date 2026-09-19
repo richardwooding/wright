@@ -24,6 +24,7 @@ type Spec struct {
 	Dir       string        // working directory (must be inside a ReadWrite root)
 	Env       []string      // full environment, already filtered by Env()
 	ReadWrite []string      // directories bound read-write (workspace roots, caches)
+	Roots     []string      // the workspace roots among ReadWrite: the only paths where a missing protected directory is created
 	ReadOnly  []string      // extra directories bound read-only
 	Network   bool          // share the host network namespace
 	Timeout   time.Duration // 0 = caller manages the context
@@ -108,7 +109,7 @@ func Detect(ctx context.Context, want string) (Backend, []Warning) {
 			return b, []Warning{{Backend: NameNone, Message: "OS sandbox disabled by request: shell commands run unconfined (policy only)"}}
 		default:
 			if err := b.Available(ctx); err == nil {
-				return b, backendWarnings(b)
+				return b, nil
 			} else {
 				warnings = append(warnings, Warning{Backend: want, Message: "requested but unavailable: " + err.Error()})
 			}
@@ -119,7 +120,7 @@ func Detect(ctx context.Context, want string) (Backend, []Warning) {
 			if b.Name() == NameContainer {
 				warnings = append(warnings, Warning{Backend: NameContainer, Message: "running inside a container: the container is the sandbox boundary"})
 			}
-			return b, append(warnings, backendWarnings(b)...)
+			return b, warnings
 		}
 	}
 	warnings = append(warnings, Warning{Backend: NameNone, Message: "no OS sandbox available: shell commands run unconfined (policy only)"})
@@ -138,6 +139,21 @@ func backendWarnings(b Backend) []Warning {
 		return w.Warnings()
 	}
 	return nil
+}
+
+// specWarner is a backend whose limitations depend on what is being
+// confined: whether a workspace can be protected is a property of the
+// filesystem it sits on, not of the machine.
+type specWarner interface{ WarningsFor(Spec) []Warning }
+
+// SpecWarnings reports what the backend cannot enforce for this spec. The
+// caller builds the spec first and warns with what comes back, so the user
+// is never told a workspace is protected when this one is not.
+func SpecWarnings(b Backend, spec Spec) []Warning {
+	if w, ok := b.(specWarner); ok {
+		return w.WarningsFor(spec)
+	}
+	return backendWarnings(b)
 }
 
 // Probe reports the availability of every backend for `wright doctor`.

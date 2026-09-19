@@ -35,6 +35,7 @@ func (b seatbeltBackend) Command(ctx context.Context, spec Spec) (*exec.Cmd, err
 	if len(spec.Argv) == 0 {
 		return nil, errors.New("sandbox: empty argv")
 	}
+	EnsureProtected(spec.Roots)
 	home, _ := os.UserHomeDir()
 	profile := SeatbeltProfile(spec, home)
 	args := append([]string{"-p", profile}, spec.Argv...)

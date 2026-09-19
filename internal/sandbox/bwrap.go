@@ -63,6 +63,7 @@ func (bwrapBackend) Command(ctx context.Context, spec Spec) (*exec.Cmd, error) {
 	if len(spec.Argv) == 0 {
 		return nil, errors.New("sandbox: empty argv")
 	}
+	EnsureProtected(spec.Roots)
 	home, _ := os.UserHomeDir()
 	args, err := BwrapArgs(spec, home)
 	if err != nil {

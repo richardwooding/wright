@@ -25,12 +25,22 @@ func (b *builder) sandboxing() error {
 	if b.trusted {
 		pass = b.settings.Sandbox.PassEnv
 	}
+	// The protected paths have to exist before the sandbox is built: one
+	// that does not cannot be bound read-only, and a payload would simply
+	// create it and write into the directory it just made.
+	sandbox.EnsureProtected(b.ws.Roots)
 	b.spec = sandbox.Spec{
 		Dir:       b.ws.Root(),
 		Env:       sandbox.Env(pass, nil),
 		ReadWrite: rw,
+		Roots:     b.ws.Roots,
 		ReadOnly:  expandAll(b.ws, b.settings.Sandbox.ExtraRO),
 		Network:   b.o.AllowNetwork || b.settings.Sandbox.AllowNetwork,
+	}
+	// What the backend can enforce depends on this workspace, not just on
+	// the machine, so the limits are asked for with the spec in hand.
+	for _, w := range sandbox.SpecWarnings(backend, b.spec) {
+		b.warn("sandbox: %s", w)
 	}
 	return nil
 }
