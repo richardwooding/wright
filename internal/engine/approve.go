@@ -236,7 +236,11 @@ const HeadlessDenialMarker = "requires interactive approval in headless mode"
 func headlessReason(c agentkit.Call, v policy.Verdict) string {
 	hint := "re-run interactively"
 	if len(v.Offers) > 0 {
-		hint = "re-run with --allow '" + v.Offers[len(v.Offers)-1].Rule.String() + "'"
+		flags := make([]string, 0, len(v.Offers))
+		for _, o := range v.Offers {
+			flags = append(flags, "--allow '"+o.Rule.String()+"'")
+		}
+		hint = "re-run with " + strings.Join(flags, " ")
 	}
 	return fmt.Sprintf("%s %s (%s, or use --mode auto-edit for edits)", c.Call.Name, HeadlessDenialMarker, hint)
 }
