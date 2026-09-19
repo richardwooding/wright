@@ -168,10 +168,38 @@ client to HTTP MCP transports).
   helper lists system directories explicitly (`systemRO`) — never
   `RODirs("/")`, which would expose `/home`. Device nodes go through
   `RWFiles`, not `RWDirs` (Landlock rejects directory rights on files).
+- **A read-write root is not writable all the way down.** `.git/hooks`,
+  `.git/config`, `.git/config.worktree`, a `.git` *file* and `.wright` stay
+  read-only inside the sandbox (`sandbox.ProtectedIn`), and wright's own
+  config/state dirs (`sandbox.UserDirs`) are never bound read-write — a hook
+  written inside runs *outside*, on the next commit, and `.wright` decides
+  the next session's permissions. The rest of `.git` stays writable so `git
+  add`/`git commit` still work. bwrap `--ro-bind`s them *after* the root's
+  `--bind` (last operation wins) and tmpfs-masks the user dirs; seatbelt
+  denies after the allows (last SBPL rule wins). **Landlock rules are
+  additive** — the kernel unions every rule matching an ancestor, so a
+  subtree can never be subtracted from an RW rule; `splitReadWrite` grants
+  the root entry by entry instead, which is why new entries directly in the
+  workspace root or in `.git` cannot be created under landlock. The policy
+  layer already denies *declared* writes there (`workspace.IsProtected`);
+  this is the layer for writes it cannot see.
+- **Landlock "no network" is a network namespace.** `RestrictNet` covers TCP
+  bind/connect only, so it alone left UDP, ICMP and raw sockets open. The
+  backend re-execs the helper with `CLONE_NEWUSER|CLONE_NEWNET` and an
+  identity uid/gid map (`netnsAttr`); `execve` drops the capabilities the
+  namespace grants, so the payload gains nothing. When the kernel forbids
+  unprivileged user namespaces, `Warnings()` says the confinement is TCP
+  only — never leave a guarantee in the UI that the backend is not making.
+  Name resolution through a local resolver's unix socket survives under both
+  backends; that is a property of the host, not of the sandbox.
 - **`sandbox.Env` is an allowlist with a hard strip.** Passthrough from trusted
   settings can add names, but nothing matching the strip regexes
   (`_KEY|_TOKEN|_SECRET|_PASSWORD`, `AWS_`, provider prefixes…) ever reaches a
-  sandboxed command, even if passed through.
+  sandboxed command, even if passed through. A variable that injects code
+  into an allowed command is as good as an allowed command, so `GOFLAGS`
+  (`-toolexec`), `NODE_OPTIONS` (`--require`), `LD_PRELOAD`, `BASH_ENV`,
+  `GOPROXY` (credentials) and the checksum switches are stripped, and the Go
+  variables are named one by one rather than globbed as `GO*`.
 - **Redaction must be idempotent.** `Redact(Redact(x)) == Redact(x)` is
   fuzzed. Default patterns must not be able to match inside a marker: token
   character classes exclude `[`, and no vendor prefix appears in a marker
@@ -205,20 +233,37 @@ client to HTTP MCP transports).
 - **Audit lines are immutable.** `audit.Log.Write` sets `Seq` and `Prev` (the
   SHA-256 of the previous *line*), redacts `Text`/`Args`, caps `Args` at 4 KiB
   and records `ArgsSHA256` of the full value. Never log environment variables
-  or request bodies. `Verify` walks the chain; a whole-line truncation at the
-  tail is not detectable by the chain alone (the `run_end` event is the
-  witness), and the tests say so.
+  or request bodies. `Verify` walks the chain, which only proves the log is
+  self-consistent: the chain runs backwards, so a truncated log — or one
+  whose lines were edited and whose `prev`s were recomputed — verifies
+  perfectly. The witness is outside the file: every `Write` records the new
+  head (seq + line hash) through `audit.Anchors` in
+  `Paths.AuditAnchorDir()`, mode 0600, and `VerifyAnchored` reports
+  `ErrTruncated`, `ErrForged` and `ErrNoAnchor` as different things. Never
+  put the anchor beside the log, and never treat a missing anchor as
+  success — deleting it is the first step of the attack.
 - **Config lists accumulate.** `config.Merge` appends+dedupes `allow/ask/deny`
   (and other slices) and overrides scalars only when non-zero; booleans that
   default to true are `*bool` so a later layer can turn them off.
 - **Doctor prints credential *names* only.** Never print an environment value.
-- **Project settings are inert until trusted.** `app.effectiveSettings`
-  rebuilds the layers itself (defaults < user < project < project.local <
-  env) and drops the project's `allow`, `additionalDirectories`, `passEnv`
-  and `mcpServers` unless `trust.json` holds the hash of the current
-  `.wright/settings.json`; project `ask`/`deny` always apply. The same split
-  feeds `policy.New` (project allow rules only when trusted). `wright init`
-  trusts the file it writes; `/trust` accepts an existing one, effective from
+- **Project settings are inert until trusted — both files.**
+  `app.ProjectHash` hashes `.wright/settings.json` *and*
+  `.wright/settings.local.json` as a unit, so a repository shipping only the
+  local file cannot be trusted by default, and `checkTrust` falls through to
+  the hash check as soon as either exists. `app.effectiveSettings` rebuilds
+  the layers itself (defaults < user < project < project.local < env) and
+  runs *both* project layers through `tighteningOnly` unless `trust.json`
+  holds the current hash: what survives untrusted is `ask`, `deny` and
+  `redaction: true`; what waits for trust is `allow`, `mode`,
+  `additionalDirectories`, `passEnv`, `mcpServers`, every `sandbox.*` key,
+  `model`, `skills`, `git.trailer`, `instructions.files` and
+  `redaction: false`. Anything added to `Settings` that could *widen* has to
+  be kept out of `tighteningOnly` and named in `untrustedNote` — the note is
+  read as an assurance, so it must list everything that was dropped. The same
+  split feeds `policy.New` (project *and* project-local allow rules only when
+  trusted). `wright init` trusts the files it writes; a persisted grant
+  rewrites `settings.local.json` and re-records the hash, but only for an
+  already-trusted project. `/trust` accepts an existing pair, effective from
   the next session. `config show` prints the gated view.
 - **Headless exit 3 comes from the tool result.** With `Options.Headless`
   the engine answers every Ask verdict with a denial containing
@@ -339,9 +384,13 @@ client to HTTP MCP transports).
   pattern; `kong.Exit` panics a sentinel so `--version`/`--help` unwind through
   `cli.Main` and tests can drive it.
 - **Landlock via re-exec.** Landlock restricts the *calling* process, so the
-  backend re-executes the wright binary as `wright __sandbox … -- bash -lc SCRIPT`;
+  backend re-executes the wright binary as `wright __sandbox … -- bash -c SCRIPT`;
   the hidden subcommand applies `landlock.V5.BestEffort()` and `syscall.Exec`s
-  the payload. The sandbox tests use `TestMain` to make the test binary answer
+  the payload. The network namespace is created by the *backend*, as clone
+  flags on that re-exec, not by the helper: `unshare(CLONE_NEWUSER)` returns
+  EINVAL in a multi-threaded process, and every Go program is one. Running
+  `wright __sandbox` by hand therefore gets the filesystem rules but no
+  namespace. The sandbox tests use `TestMain` to make the test binary answer
   `__sandbox` too.
 
 ## Conventions

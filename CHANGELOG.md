@@ -185,3 +185,63 @@ redaction and a tamper-evident audit log between the model and the machine.
   `$HOME` is the user's own — `~/.bash_profile`, any of which can put back
   what the sandbox's filtered environment deliberately left out. The
   environment handed to the command is explicit and already carries `PATH`.
+- The sandbox keeps the paths that decide what happens *outside* it
+  read-only. Every workspace root was bound read-write as a whole, so any
+  code-execution primitive inside `bash` could write
+  `.git/hooks/pre-commit` — which then runs unsandboxed on the user's next
+  commit — or `.wright/settings.local.json`, which decides wright's own
+  permissions next session. bwrap re-binds `.git/hooks`, `.git/config`,
+  `.git/config.worktree`, a `.git` *file* (worktree or submodule pointer)
+  and `.wright` read-only after the read-write bind of the root, and masks
+  wright's own config and state directories with a tmpfs, so
+  `sandbox.extraReadWrite` naming a parent cannot re-expose them. Landlock
+  rules are additive — the kernel unions every rule matching an ancestor, so
+  a subtree can never be subtracted from a read-write rule — so the roots
+  are granted entry by entry instead, which also means a shell command under
+  Landlock cannot create new entries directly in the workspace root or in
+  `.git`; the backend says so rather than leaving it to be discovered.
+  seatbelt denies the same paths after the allows. The rest of `.git` stays
+  writable: `git add` and `git commit` have to keep working inside the
+  sandbox, and the hook is what escapes it.
+- Landlock's "no network" is a network namespace, not just `RestrictNet`.
+  Landlock governs TCP bind and connect only, so `Spec.Network=false` left
+  UDP, ICMP and raw sockets fully usable — a complete exfiltration channel
+  behind a status bar that said the network was off. The helper is now
+  re-executed in an empty network namespace (unprivileged user namespace,
+  identity uid/gid map, capabilities dropped by `execve`), the same
+  confinement bwrap gets from `--unshare-all`. Where the kernel forbids
+  unprivileged user namespaces the backend reports that it restricts TCP
+  only instead of claiming more, and `wright doctor` prints what actually
+  confines the network rather than quoting the ABI version.
+- `.wright/settings.local.json` is trust-gated with `.wright/settings.json`.
+  `checkTrust` returned "trusted" when `settings.json` was absent, and the
+  project-local layer was merged unconditionally on top of the gated one, so
+  a repository shipping only `settings.local.json` chose the permission
+  mode, added blanket allow rules, extra directories, sandbox mounts, the
+  network switch and `redaction: false` — while stderr printed a note about
+  `settings.json` "not being trusted" that read as an assurance and was not
+  one. The two files are now hashed and accepted as a unit, both go through
+  the tightening-only filter when untrusted, and the note names everything
+  that was dropped. An untrusted layer may still tighten: `ask` and `deny`
+  rules and `redaction: true` always apply.
+- The audit hash chain is anchored outside the log. `Verify` recomputed
+  `prev` from the file it was checking, so it only ever proved the log was
+  self-consistent: whoever could write the file could cut the tail off (the
+  chain runs backwards, so a shorter log verifies perfectly) or edit a line
+  and recompute every `prev` after it. Each written line now records the new
+  head — sequence number and line hash — in a 0600 file under the user's
+  config directory, and `wright audit verify` checks the log against it,
+  reporting truncation and a recomputed chain as different things. A log
+  with no recorded head reports that rather than "intact", because deleting
+  the anchor is the first step of the attack.
+- The sandbox environment no longer passes variables that inject code into
+  an allowed command. `GO*` was globbed and `NODE_OPTIONS` was listed:
+  `GOFLAGS` carries `-toolexec` and `-ldflags`, so an allowed `go build`
+  could run an arbitrary binary with nothing in the script the policy engine
+  saw; `NODE_OPTIONS` carries `--require`; `GOPROXY` routinely carries
+  `https://user:pass@host` credentials; `GOPRIVATE`/`GONOSUMDB`/`GOSUMDB`
+  turn module checksum verification off. The Go and Node variables are named
+  one by one now (locations and target selectors), and the injecting ones —
+  with `LD_PRELOAD`, `BASH_ENV`, `PERL5OPT` and their relatives — are in the
+  hard-strip set, so `sandbox.passEnv` from a trusted settings file cannot
+  reinstate them either.
