@@ -39,11 +39,15 @@ exist. Never add `replace` directives.
 ```
 cmd/wright/main.go        kong parse, signal.NotifyContext, exit codes; version/commit/date via ldflags
 internal/
-  cli/        kong CLI struct + Run methods; the only importer of app; hidden `__sandbox` landlock helper
-  app/        composition root (config → model → tools → policy → engine → tui | headless); DAG/network tests
-  engine/     (next) wraps agentkit: runs, fan-in Event channel, Approver, Inbox steering
+  cli/        kong CLI struct + Run methods (run, sessions, models, config, audit, init, doctor; mcp/skills are Phase 3 stubs);
+              the only importer of app; ExitError{Code} carries headless codes to main; hidden `__sandbox` landlock helper
+  app/        composition root: Build = workspaceAndConfig → sandboxing → permissions → modelAndSession → toolsAndEngine;
+              Run → headless.Run | Interactive hook (tui wired in cmd/wright); Command hook for /diff /audit /init /trust
+              /redaction /mcp /skills; InitProject, LoadEffective, OpenStore for the read-only commands; DAG/network tests
+  engine/     wraps agentkit: runs, fan-in Event channel, Approver, Asker, Inbox steering, mode/model switch, Compact, Undo
+  enginetest/ Scripted core.Chatter + TextResp/CallResp shared by the engine, headless and app tests
   tui/        (next) Bubble Tea v2 root model; imports engine/theme/config/session/model/cost/git only
-  headless/   (next) -p mode: text | json | stream-json
+  headless/   -p runner: Format text | json | stream-json (Line schema), exit codes 0/1/2/3/4/130, ctx cancel → Engine.Cancel
   tools/      agentkit.Func tools + Describer (resolved policy.Request + Preview); bash cwd/trailer, rg|Go grep, web_fetch robots/rate limit, Clip spill
   policy/     rule grammar, modes, verdict lattice, hard-deny set, grants, child engines
   policy/shellclass/  mvdan.cc/sh AST → per-command class; Unknown/HardDeny; leaf package (interface Workspace)
@@ -123,6 +127,25 @@ is handed the ssrfguard client by `app`).
   (and other slices) and overrides scalars only when non-zero; booleans that
   default to true are `*bool` so a later layer can turn them off.
 - **Doctor prints credential *names* only.** Never print an environment value.
+- **Project settings are inert until trusted.** `app.effectiveSettings`
+  rebuilds the layers itself (defaults < user < project < project.local <
+  env) and drops the project's `allow`, `additionalDirectories`, `passEnv`
+  and `mcpServers` unless `trust.json` holds the hash of the current
+  `.wright/settings.json`; project `ask`/`deny` always apply. The same split
+  feeds `policy.New` (project allow rules only when trusted). `wright init`
+  trusts the file it writes; `/trust` accepts an existing one, effective from
+  the next session. `config show` prints the gated view.
+- **Headless exit 3 comes from the tool result.** With `Options.Headless`
+  the engine answers every Ask verdict with a denial containing
+  `engine.HeadlessDenialMarker`; `headless.Run` scans `KindToolResult` text
+  for it. Budget stops (`max_steps`, `deadline`, …) arrive with `Finish.Err`
+  set too, so `exitCode` checks them before the generic error case.
+- **`app` never imports `tui`.** `app.Run` takes an `Interactive` func;
+  `cmd/wright` passes the TUI's entry point (nil today → `ErrNoInteractive`).
+  Tools reach the engine through `lateEngine` (Asker, OnRedacted, todo
+  push) because the toolset is built before `engine.New` needs it. The
+  `cli.ExitError` *type* carries exit codes, so the code constant is
+  `cli.ExitFailure`, not `ExitError`.
 - **The stable prompt must stay stable.** `prompt.System` returns two strings:
   the stable half is sent with `WithInstructions` + `WithCache` and must be
   byte-identical across turns and sessions (no date, cwd, model, mode, git);
