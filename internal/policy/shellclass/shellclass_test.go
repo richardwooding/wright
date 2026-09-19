@@ -226,6 +226,17 @@ var table = []row{
 	{cmd: "sh -c 'rm -rf ~'", class: shellclass.Destructive, hardDeny: true},
 	{cmd: "bash -c 'sh -c \"rm -rf ~\"'", class: shellclass.Destructive, hardDeny: true},
 	{cmd: "ls; ((", class: shellclass.SafeRead, unknown: true},
+	// --- awk programs are code, not file arguments (adversarial review C1)
+	{cmd: `awk 'BEGIN{system("id > /tmp/pwned")}'`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `awk 'BEGIN{while(("id"|getline l)>0) print l}'`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `awk '{print $1 > "/tmp/x"}' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `gawk 'BEGIN{print ENVIRON["HOME"]}'`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `mawk '{print $1}' -f prog.awk main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `awk -f prog.awk main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `awk '{print $1}' main.go`, class: shellclass.SafeRead},
+	{cmd: `awk -F: '{print $2, $1}' main.go go.mod`, class: shellclass.SafeRead},
+	{cmd: `awk -v n=2 'NR==1{print $n}' main.go`, class: shellclass.SafeRead},
+	{cmd: `awk '{print}' .env`, class: shellclass.Destructive, hardDeny: true},
 }
 
 func TestAnalyzeTable(t *testing.T) {

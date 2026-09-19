@@ -194,7 +194,10 @@ func registerReaders() {
 		"sort", "uniq", "cut", "paste", "join", "comm", "column", "fold", "fmt", "expand", "unexpand",
 		"diff", "cmp", "ls", "tree", "du", "df", "base64", "base32", "jq", "yq", "readelf", "objdump", "nm", "ldd", "gzip -l",
 	)
-	register(reader(1), "grep", "egrep", "fgrep", "rg", "ag", "ack", "awk", "gawk", "mawk", "nawk")
+	register(reader(1), "grep", "egrep", "fgrep", "rg", "ag", "ack")
+	// awk is not a reader: its first argument is a program that can run
+	// shell commands and write files.
+	register(handleAwk, "awk", "gawk", "mawk", "nawk", "busybox-awk")
 	register(noFiles,
 		"echo", "printf", "true", "false", ":", "pwd", "cd", "pushd", "popd", "dirs", "read", "return", "exit",
 		"break", "continue", "shift", "wait", "sleep", "date", "uname", "hostname", "id", "whoami", "groups",
