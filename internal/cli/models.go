@@ -40,8 +40,19 @@ func (c *ModelsCmd) Run(g *Globals) error {
 		if detectErr == nil && m.Model == choice.Model {
 			mark = "*"
 		}
-		ctxWin, _ := model.ContextWindow(m, 0)
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%dk\t%s\n", mark, m.Model, m.Provider, ctxWin/1000, m.Info.DisplayName)
+		// A model absent from the catalog gets a fallback window and no
+		// display name; show "?" rather than presenting the fallback as a
+		// known figure.
+		ctxWin, known := model.ContextWindow(m, 0)
+		window := "?"
+		if known {
+			window = fmt.Sprintf("%dk", ctxWin/1000)
+		}
+		name := m.Info.DisplayName
+		if name == "" {
+			name = "(not in catalog)"
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", mark, m.Model, m.Provider, window, name)
 	}
 	if err := tw.Flush(); err != nil {
 		return err
