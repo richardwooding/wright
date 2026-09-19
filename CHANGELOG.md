@@ -170,3 +170,18 @@ redaction and a tamper-evident audit log between the model and the machine.
   reads — could name a different file from the one the command opens. It
   failed safe with a single root; a second root at another depth
   (`--add-dir`) would have made it exploitable.
+- `web_fetch` refuses local, private and metadata hosts itself, before the
+  request and before the approval prompt shows a URL that could never work.
+  The ssrfguard client already blocked these at dial time; the tool-side
+  check now covers the spellings a text glob misses — `::1`,
+  `::ffff:127.0.0.1`, `0.0.0.0`, `[::]`, `2130706433`, `0x7f000001`,
+  `0177.0.0.1`, `*.localhost`, `*.internal`, `metadata.google.internal`,
+  link-local (169.254/16, fe80::/10), RFC1918 and carrier-grade NAT.
+- `web_fetch` matches the robots.txt product token exactly. It used a prefix
+  match, so a site's `User-agent: wrightbot` group captured `wright` and
+  applied another crawler's rules to us.
+- Sandboxed commands run as `bash -c`, not `bash -lc`. A login shell sources
+  `/etc/profile`, `/etc/profile.d/*` and — on the `none` backend, where
+  `$HOME` is the user's own — `~/.bash_profile`, any of which can put back
+  what the sandbox's filtered environment deliberately left out. The
+  environment handed to the command is explicit and already carries `PATH`.

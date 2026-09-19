@@ -148,7 +148,12 @@ func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error)
 	timeout = min(timeout, maxBashTimeout)
 	script, notes := d.prepareScript(a.Command)
 	spec := d.SandboxSpec
-	spec.Argv = []string{"bash", "-lc", script + "\nprintf '\\n" + cwdMarker + "%s\\n' \"$PWD\""}
+	// "-c", not "-lc": a login shell sources /etc/profile, /etc/profile.d/*
+	// and (on the none backend, where $HOME is real) the user's
+	// ~/.bash_profile, any of which can change PATH, define functions or
+	// export variables that the sandbox's filtered environment deliberately
+	// left out. The environment here is explicit and already carries PATH.
+	spec.Argv = []string{"bash", "-c", script + "\nprintf '\\n" + cwdMarker + "%s\\n' \"$PWD\""}
 	spec.Dir = d.Cwd.Get()
 	// a.Network is trustworthy only because the engine rewrites it to the
 	// policy verdict before the call reaches here; spec.Network carries the

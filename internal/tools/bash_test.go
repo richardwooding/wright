@@ -323,3 +323,28 @@ func contains(paths []string, want string) bool {
 	}
 	return false
 }
+
+// TestBashIsNotALoginShell pins that the tool runs `bash -c`, not `bash -lc`:
+// a login shell sources /etc/profile, /etc/profile.d/* and — on the none
+// backend, where $HOME is the user's own — ~/.bash_profile, any of which can
+// put back what the sandbox's filtered environment left out.
+func TestBashIsNotALoginShell(t *testing.T) {
+	home := t.TempDir()
+	profile := "export WRIGHT_LOGIN_SHELL=sourced\n"
+	for _, name := range []string{".bash_profile", ".profile", ".bash_login"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(profile), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := newFixture(t, func(d *tools.Deps) {
+		// os/exec keeps the last duplicate, so this replaces the fixture's HOME.
+		d.SandboxSpec.Env = append(d.SandboxSpec.Env, "HOME="+home)
+	})
+	got, err := f.text(tools.NameBash, `{"command":"echo login=[$WRIGHT_LOGIN_SHELL]"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "login=[]") {
+		t.Errorf("the shell sourced a profile:\n%s", got)
+	}
+}

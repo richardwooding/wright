@@ -191,6 +191,17 @@ client to HTTP MCP transports).
   against that directory. Anything that classifies a command has to use the
   same base the command will use, or the verdict and the approval preview
   describe a different file from the one that is opened.
+- **Sandboxed commands are `bash -c`.** Never `-lc`: a login shell sources
+  `/etc/profile`, `/etc/profile.d/*` and the user's `~/.bash_profile` (real
+  on the `none` backend), which can undo the filtered environment. The
+  environment is explicit and carries `PATH`.
+- **`web_fetch` checks the host itself.** ssrfguard validates every dial, but
+  the tool also refuses loopback, unspecified, link-local, RFC1918, CGNAT and
+  metadata hosts in `parseFetchURL` — including the integer, hex, octal and
+  IPv4-mapped spellings — so a URL that can never work is refused before the
+  request and before the approval prompt shows it. Only `Deps.AllowLocalFetch`
+  (tests serving from 127.0.0.1) lifts it. robots.txt product tokens match
+  exactly, never by prefix.
 - **Audit lines are immutable.** `audit.Log.Write` sets `Seq` and `Prev` (the
   SHA-256 of the previous *line*), redacts `Text`/`Args`, caps `Args` at 4 KiB
   and records `ArgsSHA256` of the full value. Never log environment variables
