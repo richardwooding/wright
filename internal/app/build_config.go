@@ -7,9 +7,13 @@ import (
 	"os"
 	"path/filepath"
 
+	akskills "github.com/richardwooding/agentkit/skills"
+
+	"github.com/richardwooding/wright/internal/agents"
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/engine"
+	"github.com/richardwooding/wright/internal/mcpclient"
 	"github.com/richardwooding/wright/internal/model"
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/redact"
@@ -39,6 +43,10 @@ type builder struct {
 	mode   policy.Mode
 	bypass bool
 	pol    *policy.Engine
+
+	agentDefs []agents.Definition
+	skills    *akskills.Set
+	mcp       *mcpclient.Set
 
 	choice    model.Choice
 	store     *session.Store
@@ -95,7 +103,24 @@ func (b *builder) workspaceAndConfig() error {
 			return fmt.Errorf("additionalDirectories: %w", err)
 		}
 	}
+	b.loadAgents()
 	return nil
+}
+
+// loadAgents reads the custom sub-agent definitions. They are loaded here,
+// before the permission rules are built, because each agent's name becomes
+// an allow rule: calling a sub-agent has no effect of its own, and every
+// tool the child then uses is evaluated again one level deeper.
+func (b *builder) loadAgents() {
+	defs, problems, err := agents.LoadCustom(b.ws, b.layered.Paths.UserConfig)
+	if err != nil {
+		b.warn("agents: %v", err)
+		return
+	}
+	for _, p := range problems {
+		b.warn("agent %s: %v", b.ws.Rel(p.Path), p.Err)
+	}
+	b.agentDefs = defs
 }
 
 // checkTrust decides whether the project layer applies. Without a settings

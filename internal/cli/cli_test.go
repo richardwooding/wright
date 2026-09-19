@@ -49,8 +49,11 @@ func TestRun(t *testing.T) {
 		{name: "help", args: []string{"--help"}, wantCode: cli.ExitOK, wantStdout: "doctor"},
 		{name: "unknown flag", args: []string{"--bogus"}, wantCode: cli.ExitUsage, wantStderr: "Run 'wright --help'"},
 		{name: "bad enum", args: []string{"--sandbox", "vm", "doctor"}, wantCode: cli.ExitUsage},
-		{name: "phase 3 stub", args: []string{"mcp", "list"}, wantCode: cli.ExitFailure, wantErr: "not implemented yet"},
-		{name: "skills stub", args: []string{"skills"}, wantCode: cli.ExitFailure, wantErr: "Phase 3"},
+		{name: "mcp list empty", args: []string{"mcp", "list"}, wantCode: cli.ExitOK, wantStdout: "no MCP servers configured"},
+		{name: "mcp add needs a target", args: []string{"mcp", "add", "demo"}, wantCode: cli.ExitFailure, wantErr: "--command"},
+		{name: "mcp add rejects env values", args: []string{"mcp", "add", "demo", "--command", "srv", "--env", "TOKEN=secret"}, wantCode: cli.ExitFailure, wantErr: "variable name, not a value"},
+		{name: "mcp remove unknown", args: []string{"mcp", "remove", "nope"}, wantCode: cli.ExitFailure, wantErr: "no such MCP server"},
+		{name: "skills empty", args: []string{"skills"}, wantCode: cli.ExitOK, wantStdout: "no skills found"},
 		{name: "interactive without a UI", args: []string{"fix the bug"}, wantCode: cli.ExitFailure, wantErr: "interactive UI not wired"},
 		{name: "print without a prompt", args: []string{"-p"}, wantCode: cli.ExitUsage, wantErr: "needs a prompt"},
 		{name: "doctor plain", args: []string{"doctor"}, wantCode: cli.ExitOK, wantStdout: "Credentials (names only)"},
@@ -103,6 +106,69 @@ func TestInitCreatesProjectFiles(t *testing.T) {
 	_, stdout, _, _ = run(t, "", "--cwd", cwd, "init")
 	if !strings.Contains(stdout, "nothing to do") {
 		t.Fatalf("second init: %q", stdout)
+	}
+}
+
+func TestMCPAddListRemove(t *testing.T) {
+	cwd := isolate(t)
+	code, stdout, _, err := run(t, "", "--cwd", cwd,
+		"mcp", "add", "docs", "--command", "docs-server", "--arg=--stdio", "--env", "DOCS_TOKEN")
+	if err != nil || code != cli.ExitOK {
+		t.Fatalf("mcp add: code=%d err=%v", code, err)
+	}
+	if !strings.Contains(stdout, "added MCP server") {
+		t.Fatalf("stdout = %q", stdout)
+	}
+	settings, err := os.ReadFile(filepath.Join(cwd, ".wright", "settings.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"docs"`, `"docs-server"`, `"--stdio"`, `"DOCS_TOKEN": ""`} {
+		if !strings.Contains(string(settings), want) {
+			t.Errorf("settings.json lacks %s:\n%s", want, settings)
+		}
+	}
+
+	_, stdout, _, err = run(t, "", "--cwd", cwd, "mcp", "list")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "docs") || !strings.Contains(stdout, "stdio") {
+		t.Fatalf("mcp list = %q", stdout)
+	}
+
+	_, stdout, _, err = run(t, "", "--cwd", cwd, "mcp", "remove", "docs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout, "removed MCP server") {
+		t.Fatalf("mcp remove = %q", stdout)
+	}
+	_, stdout, _, _ = run(t, "", "--cwd", cwd, "mcp", "list")
+	if !strings.Contains(stdout, "no MCP servers") {
+		t.Fatalf("server still listed: %q", stdout)
+	}
+}
+
+func TestSkillsListsWhatWasFound(t *testing.T) {
+	cwd := isolate(t)
+	dir := filepath.Join(cwd, ".wright", "skills", "changelog")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	md := "---\nname: changelog\ndescription: How this project writes changelog entries\n---\n\nUse keepachangelog style.\n"
+	if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(md), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, _, err := run(t, "", "--cwd", cwd, "skills")
+	if err != nil || code != cli.ExitOK {
+		t.Fatalf("skills: code=%d err=%v", code, err)
+	}
+	if !strings.Contains(stdout, "changelog") || !strings.Contains(stdout, "How this project") {
+		t.Fatalf("skills = %q", stdout)
+	}
+	if !strings.Contains(stdout, dir) {
+		t.Errorf("skills should name the directory it came from: %q", stdout)
 	}
 }
 

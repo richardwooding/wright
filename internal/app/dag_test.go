@@ -53,6 +53,14 @@ func TestImportDAG(t *testing.T) {
 		{"tools", []string{"tui", "engine"}},
 		{"policy", []string{"tui", "engine", "tools"}},
 		{"policy/shellclass", []string{"tui", "engine", "tools", "policy", "workspace"}},
+		// The Phase 3 feature packages are built by the app and know
+		// nothing about the UI or the engine: mcpclient and skillsdir
+		// produce tools and text, agents produces sub-agent tools. The
+		// engine reaches them only through Options (Tools, Extra,
+		// Describe), which is what keeps the seam intact.
+		{"mcpclient", []string{"tui", "engine", "tools", "app"}},
+		{"skillsdir", []string{"tui", "engine", "tools", "app"}},
+		{"agents", []string{"tui", "engine", "app"}},
 	}
 	for _, rule := range forbidden {
 		from := pkg(rule.from)
@@ -84,9 +92,10 @@ func TestImportDAG(t *testing.T) {
 // internal packages.
 func TestNoUnexpectedNetwork(t *testing.T) {
 	allow := []string{
-		pkg("model"), // Ollama loopback probe (/api/tags) — added in Phase 1
-		pkg("tools"), // web_fetch takes the ssrfguard *http.Client and builds its requests
-		pkg("app"),   // constructs that client (ssrfguard.New().Client() + CheckRedirect re-validation)
+		pkg("model"),     // Ollama loopback probe (/api/tags) — added in Phase 1
+		pkg("tools"),     // web_fetch takes the ssrfguard *http.Client and builds its requests
+		pkg("app"),       // constructs that client (ssrfguard.New().Client() + CheckRedirect re-validation)
+		pkg("mcpclient"), // takes that same client for HTTP MCP transports and adds the configured headers
 	}
 	graph := importGraph(t)
 	for p, imports := range graph {

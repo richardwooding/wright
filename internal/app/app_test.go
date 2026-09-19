@@ -349,3 +349,114 @@ func TestBuildDetectsBwrap(t *testing.T) {
 		t.Fatalf("sandbox = %s, status = %+v", b.Sandbox.Name(), b.Engine.Status())
 	}
 }
+
+// writeFile creates a file and the directories above it.
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestSkillsAgentsAndMCPAreWired covers the Phase 3 wiring end to end: a
+// skill is discovered, a custom sub-agent is loaded, and MCP servers from an
+// untrusted project settings file stay inert until the file is trusted.
+func TestSkillsAgentsAndMCPAreWired(t *testing.T) {
+	ws := isolate(t)
+	setScript(t, nil)
+	writeFile(t, filepath.Join(ws, ".wright", "skills", "changelog", "SKILL.md"),
+		"---\nname: changelog\ndescription: How this project writes changelog entries\n---\n\nUse keepachangelog style.\n")
+	writeFile(t, filepath.Join(ws, ".wright", "agents", "scout.md"),
+		"---\nname: scout\ndescription: Find prior art in the tree\n---\n\nSearch, then report.\n")
+	writeFile(t, filepath.Join(ws, ".wright", "settings.json"),
+		`{"mcpServers":{"demo":{"transport":"stdio","command":"wright-demo-server-that-does-not-exist"}}}`)
+
+	ctx := context.Background()
+	b, err := app.Build(ctx, baseOpts(ws))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+
+	skills, err := b.Command(ctx, "skills", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(skills, "changelog") {
+		t.Errorf("/skills = %q", skills)
+	}
+	if b.Skills.Len() != 1 {
+		t.Errorf("skill set has %d skills", b.Skills.Len())
+	}
+
+	agentList, err := b.Command(ctx, "agents", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(agentList, "explore") || !strings.Contains(agentList, "scout") {
+		t.Errorf("/agents = %q", agentList)
+	}
+
+	// The settings file is not trusted yet, so its MCP servers are ignored.
+	mcp, err := b.Command(ctx, "mcp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(mcp, "no MCP servers configured") {
+		t.Errorf("/mcp with untrusted settings = %q", mcp)
+	}
+
+	// Accept the file; now the server is configured — and reported as
+	// unusable, because its command does not exist.
+	if _, err := b.Command(ctx, "trust", nil); err != nil {
+		t.Fatal(err)
+	}
+	b2, err := app.Build(ctx, baseOpts(ws))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b2.Close() }()
+	mcp, err = b2.Command(ctx, "mcp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(mcp, "demo") {
+		t.Fatalf("/mcp after trusting = %q", mcp)
+	}
+	if !strings.Contains(strings.Join(b2.Warnings, "\n"), "demo") {
+		t.Errorf("a server that cannot start must be reported: %v", b2.Warnings)
+	}
+}
+
+// TestExploreSubAgentRuns checks that the explore tool is registered, that
+// delegating to it is allowed without a prompt (the call has no effect of
+// its own) and that the child's work is reported at depth 1.
+func TestExploreSubAgentRuns(t *testing.T) {
+	ws := isolate(t)
+	setScript(t, []step{
+		{tool: "explore", args: `{"input":"what is in a.txt"}`},
+		{tool: "read_file", args: `{"path":"a.txt"}`},
+		{text: "a.txt says hello world"},
+		{text: "the file greets you"},
+	})
+	o := baseOpts(ws)
+	o.Prompt = "what is in a.txt?"
+	var stdout, stderr bytes.Buffer
+	o.Stdout, o.Stderr = &stdout, &stderr
+	code, err := app.Run(context.Background(), o, nil)
+	if err != nil || code != headless.ExitOK {
+		t.Fatalf("Run = %d, %v\nstdout: %s\nstderr: %s", code, err, stdout.String(), stderr.String())
+	}
+	var sawChild bool
+	for _, l := range decodeLines(t, stdout.String()) {
+		if l.Type == "tool_result" && l.Depth == 1 {
+			sawChild = true
+		}
+	}
+	if !sawChild {
+		t.Fatalf("no depth-1 tool result from the sub-agent:\n%s", stdout.String())
+	}
+}

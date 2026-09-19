@@ -14,7 +14,9 @@ require (
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20260913004009-c615ff2f7805
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/landlock-lsm/go-landlock v0.10.1
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/richardwooding/agentkit v0.3.0
+	github.com/richardwooding/agentkit/mcp v0.3.0
 	github.com/richardwooding/llmkit v0.3.0
 	github.com/richardwooding/ssrfguard v0.2.2
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
@@ -42,9 +44,7 @@ require (
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
 	github.com/mattn/go-runewidth v0.0.27 // indirect
 	github.com/microcosm-cc/bluemonday v1.0.27 // indirect
-	github.com/modelcontextprotocol/go-sdk v1.8.0 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
-	github.com/richardwooding/agentkit/mcp v0.3.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/segmentio/asm v1.1.3 // indirect
 	github.com/segmentio/encoding v0.5.4 // indirect

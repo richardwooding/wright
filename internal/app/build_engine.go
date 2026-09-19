@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/richardwooding/wright/internal/engine"
 	"github.com/richardwooding/wright/internal/git"
+	"github.com/richardwooding/wright/internal/mcpclient"
 	"github.com/richardwooding/wright/internal/model"
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/prompt"
@@ -64,19 +66,25 @@ func (b *builder) toolsAndEngine() error {
 		settings.Model.Reasoning = b.o.Reasoning
 	}
 	cwd := b.cwd
+	skillSet := b.loadSkills()
+	b.connectMCP()
+	fast := b.fastClient()
+	registered := append(wrapTodos(base, todos, late), b.mcp.Tools...)
+	subs := b.subAgents(append(slices.Clone(base), b.mcp.Tools...), late, fast)
 	eng, err := engine.New(b.ctx, engine.Options{
 		Model:         b.choice,
-		FastClient:    b.fastClient(),
+		FastClient:    fast,
 		Settings:      settings,
 		WS:            b.ws,
 		Cwd:           cwd,
 		Mode:          b.mode,
 		Policy:        b.pol,
-		Tools:         wrapTodos(base, todos, late),
-		ReadOnlyTools: tools.ReadOnlyNames(),
-		Describe:      describeFunc(base),
+		Tools:         append(registered, subs...),
+		ReadOnlyTools: b.readOnlyTools(),
+		Describe:      describeFunc(base, b.mcp),
+		Extra:         b.engineExtras(skillSet),
 		Instructions:  instructions,
-		ToolDocs:      toolDocs(),
+		ToolDocs:      b.toolDocs(),
 		Store:         b.store,
 		SessionID:     b.sessionID,
 		Audit:         b.auditLog,
@@ -144,16 +152,29 @@ func (b *builder) spillDir() string {
 }
 
 func (b *builder) cleanup() {
+	if b.mcp != nil {
+		_ = b.mcp.Close()
+	}
 	if b.eng == nil && b.auditLog != nil {
 		_ = b.auditLog.Close()
 	}
 }
 
 func (b *builder) built() *Built {
+	eng, mcp := b.eng, b.mcp
 	return &Built{
-		Engine: b.eng, Store: b.store, WS: b.ws, Layered: b.layered, Settings: b.settings,
+		Engine: eng, Store: b.store, WS: b.ws, Layered: b.layered, Settings: b.settings,
 		Warnings: b.warnings, Sandbox: b.backend, Choice: b.choice, SessionID: b.sessionID,
-		Trusted: b.trusted, Close: b.eng.Close, opts: b.o,
+		Trusted: b.trusted, Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o,
+		// Closing the engine ends the run; closing the MCP set terminates
+		// the server processes it started.
+		Close: func() error {
+			err := eng.Close()
+			if cerr := mcp.Close(); err == nil {
+				err = cerr
+			}
+			return err
+		},
 	}
 }
 
@@ -175,6 +196,30 @@ func (l *lateEngine) get() *engine.Engine {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.e
+}
+
+// middleware is the engine's own chain — approval, audit, untrusted fence —
+// resolved at call time. Sub-agents are built before the engine exists, so
+// the chain cannot be applied when they are constructed; wrapping per call
+// costs nothing and guarantees a child is policed exactly like the main
+// agent. Before the engine is ready (which cannot happen during a run) the
+// call is refused rather than run unchecked.
+func (l *lateEngine) middleware() agentkit.Middleware {
+	return func(next agentkit.Tool) agentkit.Tool {
+		def := next.Definition()
+		return agentkit.Raw(def.Name, def.Description, def.Parameters, func(ctx context.Context, args json.RawMessage) (agentkit.Output, error) {
+			e := l.get()
+			if e == nil {
+				return agentkit.Errorf("%s is not available yet", def.Name), errors.New("engine not ready")
+			}
+			tool := next
+			chain := e.Middleware()
+			for i := len(chain) - 1; i >= 0; i-- {
+				tool = chain[i](tool)
+			}
+			return tool.Call(ctx, args)
+		})
+	}
 }
 
 // Ask implements tools.Asker.
@@ -241,11 +286,18 @@ func wrapTodos(ts agentkit.Toolset, list *tools.TodoList, late *lateEngine) agen
 
 // describeFunc adapts the tools' Describers to the engine. MCP tools
 // (mcp_<server>_<tool>) are addressed as mcp:<server>:<tool> so the builtin
-// "mcp:*" ask rule and per-server rules match them.
-func describeFunc(base agentkit.Toolset) engine.DescribeFunc {
+// "mcp:*" ask rule and per-server rules match them; the connected set is the
+// authority on which tool belongs to which server, because a server name may
+// itself contain an underscore. Its readOnlyHint rides along on the request:
+// plan mode is the only thing that reads it, and only to decide between
+// asking and refusing.
+func describeFunc(base agentkit.Toolset, mcp *mcpclient.Set) engine.DescribeFunc {
 	return func(name string, args []byte) (policy.Request, engine.Preview, bool, error) {
+		if server, tool, info, ok := mcp.Describe(name); ok {
+			return mcpRequest(server, tool, args, info.ReadOnly), mcpPreview(name, args, info), true, nil
+		}
 		if server, tool, ok := mcpName(name); ok {
-			return policy.Request{Tool: "mcp:" + server + ":" + tool, Args: args}, engine.Preview{Title: name, Body: string(args)}, true, nil
+			return mcpRequest(server, tool, args, false), engine.Preview{Title: name, Body: string(args)}, true, nil
 		}
 		d, ok := tools.Lookup(base, name)
 		if !ok {
@@ -259,6 +311,27 @@ func describeFunc(base agentkit.Toolset) engine.DescribeFunc {
 	}
 }
 
+// mcpRequest addresses an MCP tool for the policy engine.
+func mcpRequest(server, tool string, args []byte, readOnly bool) policy.Request {
+	return policy.Request{Tool: "mcp:" + server + ":" + tool, Args: args, ReadOnly: readOnly}
+}
+
+// mcpPreview is what the approval prompt shows for an MCP call: the server's
+// own description of the tool, its annotations (as claims) and the arguments.
+func mcpPreview(name string, args []byte, info mcpclient.ToolInfo) engine.Preview {
+	title := name
+	if info.ReadOnly {
+		title += " (server says: read-only)"
+	} else if info.Destructive {
+		title += " (server says: destructive)"
+	}
+	body := string(args)
+	if info.Description != "" {
+		body = info.Description + "\n\n" + body
+	}
+	return engine.Preview{Title: title, Body: body}
+}
+
 func mcpName(name string) (server, tool string, ok bool) {
 	rest, found := strings.CutPrefix(name, "mcp_")
 	if !found {
@@ -269,15 +342,6 @@ func mcpName(name string) (server, tool string, ok bool) {
 		return "", "", false
 	}
 	return server, tool, true
-}
-
-func toolDocs() []prompt.ToolDoc {
-	docs := tools.Docs()
-	out := make([]prompt.ToolDoc, 0, len(docs))
-	for _, d := range docs {
-		out = append(out, prompt.ToolDoc{Name: d.Name, When: d.When})
-	}
-	return out
 }
 
 // fetchClient is the web_fetch client: ssrfguard validates every dial (which
