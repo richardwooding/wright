@@ -144,6 +144,17 @@ redaction and a tamper-evident audit log between the model and the machine.
   the same way, `find -exec` hid its payload's paths from the deny rules, and
   `sort -o` truncated a file while classifying as a read. All of these now
   classify as opaque, privileged or writing, so none can be auto-allowed.
+- An environment-prefix assignment is invisible to an argv-prefix allow rule,
+  so `GOFLAGS=-toolexec=./pwn.sh go build ./...` matched the builtin
+  `bash(go build *)` rule and ran `pwn.sh` with no approval and no audit of
+  the variable. The classifier now treats the build and toolchain variables
+  whose value is code as opaque — `GOFLAGS`, `GOEXPERIMENT`, `GOPROXY`,
+  `GOPRIVATE`, `CC`/`CXX`/`CGO_*`, `RUSTFLAGS`, `RUSTC_WRAPPER`,
+  `CARGO_BUILD_RUSTFLAGS` and `CARGO_TARGET_*`, `MAKEFLAGS`, `PIP_INDEX_URL`,
+  the JVM `*_OPTS` agents and the Perl/Ruby option variables — whether they
+  are written as a prefix, through `env`, or exported. They are exported as
+  `shellclass.InjectingEnvVars` so the sandbox's environment strip and the
+  classifier cannot drift apart.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a
