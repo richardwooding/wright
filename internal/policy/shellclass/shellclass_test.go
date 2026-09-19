@@ -382,6 +382,12 @@ var table = []row{
 	{cmd: `git -C internal status`, class: shellclass.SafeRead},
 	{cmd: `git --git-dir=.git log`, class: shellclass.SafeRead},
 	{cmd: `git --namespace ns log`, class: shellclass.SafeRead},
+	// --- git config --file reads and writes an ordinary file (audit)
+	{cmd: `git config --file ~/.bashrc alias.x y`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git config -f /tmp/out.ini foo.bar baz`, class: shellclass.MutatingWorkspace},
+	{cmd: `git config --file .env --list`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git config --file=local.ini --list`, class: shellclass.SafeRead},
+	{cmd: `git config --file local.ini foo.bar baz`, class: shellclass.MutatingWorkspace},
 }
 
 func TestAnalyzeTable(t *testing.T) {

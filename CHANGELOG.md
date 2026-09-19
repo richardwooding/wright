@@ -190,6 +190,11 @@ redaction and a tamper-evident audit log between the model and the machine.
   is now opaque and can never ride an allow rule, and because the option
   taints the subcommand instead of replacing it, a hard deny the subcommand
   raises (`git -C … push --force origin main`) still stands.
+- `git config --file <path>` is an ordinary file reader and writer: it wrote
+  `~/.bashrc` as "git config write" and read a credential file as "git config
+  read", with the path invisible to both. The value of `--file`/`-f` is now
+  declared, and it is no longer counted as a config key when deciding whether
+  the command reads or writes.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a

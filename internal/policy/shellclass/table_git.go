@@ -377,9 +377,16 @@ func (a *analyzer) protectedBranch(ref string) bool {
 }
 
 // gitConfig: reads are safe; writes are mutating; global/system writes and
-// anything touching core.hooksPath are hard-denied.
+// anything touching core.hooksPath are hard-denied. `--file <path>` makes
+// the command an ordinary file reader or writer — `git config --file
+// ~/.bashrc alias.x y` wrote a startup file, and `--file <secret> --list`
+// opened one — so the path is declared and the usual checks apply.
 func gitConfig(a *analyzer, rest []word) result {
+	file, hasFile := flagValue(rest, "--file", "-f")
 	nf := texts(nonFlags(rest))
+	if hasFile && len(nf) > 0 && nf[0] == file.text {
+		nf = nf[1:] // the option's value, not a config key
+	}
 	if slices.ContainsFunc(nf, isHooksPath) {
 		return privilegeDeny("git config core.hooksPath overrides hooks")
 	}
@@ -387,12 +394,20 @@ func gitConfig(a *analyzer, rest []word) result {
 	writeFlag := hasFlag(rest, "--unset", "--unset-all", "--replace-all", "--add", "--remove-section", "--rename-section", "--edit", "-e", "set", "unset")
 	isWrite := writeFlag || (!readFlag && len(nf) >= 2) || (len(nf) >= 1 && (nf[0] == "set" || nf[0] == "unset"))
 	if !isWrite {
-		return safe("git config read")
+		r := safe("git config read")
+		if hasFile {
+			a.readFiles(&r, []word{file})
+		}
+		return r
 	}
 	if hasFlag(rest, "--global", "--system", "--worktree") {
 		return privilegeDeny("git config writes outside the repository")
 	}
-	return mutating("git config write")
+	r := mutating("git config write")
+	if hasFile {
+		a.writeFiles(&r, []word{file}, false)
+	}
+	return r
 }
 
 func gitBranch(a *analyzer, rest []word) result {
