@@ -194,6 +194,15 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "bash unknown bypass allows", mode: policy.ModeBypass, req: f.bash("frobnicate --all"), want: policy.Allow},
 		{name: "bash read outside asks", mode: policy.ModeDefault, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
 		{name: "bash read protected denies", mode: policy.ModeDefault, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
+		// A builtin allow rule matches argv alone, so the containment checks
+		// have to run first or `bash(cat *)` covers the whole filesystem.
+		{name: "allow rule cannot cover a protected read", mode: policy.ModeDefault, req: f.bash("head -c 200 /etc/passwd"), want: policy.Deny, reason: "protected"},
+		{name: "allow rule cannot cover a read outside the workspace", mode: policy.ModeDefault, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
+		{name: "recursive read exposing a secret asks", mode: policy.ModeDefault, req: f.bash(`grep -r "" .`), want: policy.Ask, reason: "credential"},
+		{name: "recursive read of a clean subtree stays allowed", mode: policy.ModeDefault, req: f.bash("grep -r x internal"), want: policy.Allow},
+		// A submodule's hooks run outside the sandbox just like the root's.
+		{name: "nested .git hooks are protected", mode: policy.ModeDefault, req: f.bash("echo x > internal/.git/hooks/pre-commit"), want: policy.Deny, reason: "protected", hard: true},
+		{name: "bypass still cannot read a protected path", mode: policy.ModeBypass, req: f.bash("head -c 200 /etc/passwd"), want: policy.Deny, reason: "protected"},
 		{name: "bash write outside asks", mode: policy.ModeDefault, req: f.bash("echo x > " + filepath.Join(f.home, "notes", "b.md")), want: policy.Ask, reason: "outside"},
 		{name: "bash bypass never grants network", mode: policy.ModeBypass, req: f.bash("go get x"), want: policy.Allow, network: false},
 		{name: "model network request asks even for reads", mode: policy.ModeDefault, req: withNet(f.bash("git status")), want: policy.Ask, reason: "network"},

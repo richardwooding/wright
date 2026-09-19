@@ -2,6 +2,7 @@ package shellclass_test
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -136,8 +137,10 @@ var table = []row{
 	{cmd: "git branch -D feature", class: shellclass.Destructive},
 	{cmd: "git push --force origin feature", class: shellclass.Destructive},
 	{cmd: "echo '' > main.go", class: shellclass.Destructive},
-	{cmd: "find . -name '*.tmp' -delete", class: shellclass.Destructive},
-	{cmd: "find . -name '*.log' -exec rm {} \\;", class: shellclass.Destructive},
+	// -delete and -exec carry a payload a bare `find *` prefix rule cannot
+	// see, so they are opaque as well as destructive.
+	{cmd: "find . -name '*.tmp' -delete", class: shellclass.Destructive, unknown: true},
+	{cmd: "find . -name '*.log' -exec rm {} \\;", class: shellclass.Destructive, unknown: true},
 	{cmd: "find . -name *.tmp -delete", class: shellclass.Destructive, unknown: true}, // unquoted glob
 	{cmd: "find . -type f | xargs rm", class: shellclass.Destructive},
 	{cmd: "docker system prune -af", class: shellclass.Destructive},
@@ -226,6 +229,89 @@ var table = []row{
 	{cmd: "sh -c 'rm -rf ~'", class: shellclass.Destructive, hardDeny: true},
 	{cmd: "bash -c 'sh -c \"rm -rf ~\"'", class: shellclass.Destructive, hardDeny: true},
 	{cmd: "ls; ((", class: shellclass.SafeRead, unknown: true},
+	// --- awk programs are code, not file arguments (adversarial review C1)
+	{cmd: `awk 'BEGIN{system("id > /tmp/pwned")}'`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `awk 'BEGIN{while(("id"|getline l)>0) print l}'`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `awk '{print $1 > "/tmp/x"}' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `gawk 'BEGIN{print ENVIRON["HOME"]}'`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `mawk '{print $1}' -f prog.awk main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `awk -f prog.awk main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `awk '{print $1}' main.go`, class: shellclass.SafeRead},
+	{cmd: `awk -F: '{print $2, $1}' main.go go.mod`, class: shellclass.SafeRead},
+	{cmd: `awk -v n=2 'NR==1{print $n}' main.go`, class: shellclass.SafeRead},
+	{cmd: `awk '{print}' .env`, class: shellclass.Destructive, hardDeny: true},
+	// --- sed scripts can execute the pattern space (adversarial review C1)
+	{cmd: `sed 's/.*/&/e' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed -e '1e touch /tmp/pwned' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed -n '/x/{s/.*/id/ep}' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed -i 's/a/b/e' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed -f script.sed main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed --file=script.sed main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed 's/a/b/' main.go`, class: shellclass.SafeRead},
+	{cmd: `sed -n '1,5p' main.go`, class: shellclass.SafeRead},
+	{cmd: `sed -E 's/(a|b)/x/g' main.go go.mod`, class: shellclass.SafeRead},
+	{cmd: `sed 's/a/b/w out.txt' main.go`, class: shellclass.MutatingWorkspace},
+	{cmd: `sed -n 'w main.go' go.mod`, class: shellclass.Destructive},
+	{cmd: `sed 's/a/b/' .env`, class: shellclass.Destructive, hardDeny: true},
+	// --- git -c can point git at a program to run (adversarial review C1)
+	{cmd: `git -c diff.external='sh -c "touch /tmp/pwned"' diff`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c core.pager=/tmp/evil log`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c core.sshCommand=/tmp/evil fetch`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c filter.lfs.clean=/tmp/evil status`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c diff.zip.textconv=/tmp/evil diff`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c alias.st='!sh -c id' st`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c credential.helper=/tmp/evil fetch`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c include.path=/tmp/evil.cfg status`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git --config-env=core.editor=EVIL commit`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c uploadpack.packObjectsHook=/tmp/evil log`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git --exec-path=/tmp/evil status`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git -c nosuch.key=1 status`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git -c user.name=x commit -m y`, class: shellclass.MutatingWorkspace},
+	{cmd: `git -c color.ui=false status`, class: shellclass.SafeRead},
+	{cmd: `git -c core.hooksPath=/tmp/h commit -m x`, class: shellclass.Privilege, hardDeny: true},
+	{cmd: `GIT_EXTERNAL_DIFF=/tmp/evil git diff`, class: shellclass.SafeRead, unknown: true},
+	{cmd: `GIT_PAGER=/tmp/evil git log`, class: shellclass.SafeRead, unknown: true},
+	{cmd: `GIT_CONFIG_COUNT=1 git status`, class: shellclass.SafeRead, unknown: true},
+	{cmd: `env GIT_EDITOR=/tmp/evil git commit`, class: shellclass.MutatingWorkspace, unknown: true},
+	// --- find -exec hides its payload from prefix rules (adversarial review H2)
+	{cmd: `find . -name x -exec awk 'BEGIN{system("id")}' {} \;`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -exec chmod 777 {} \;`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -exec mv main.go /tmp/x \;`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -execdir touch {} \;`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -name '*.go' -exec cat {} \;`, class: shellclass.MutatingWorkspace},
+	{cmd: `find . -name '*.go' -fprint out.txt`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -exec cp main.go .git/hooks/pre-commit \;`, class: shellclass.Destructive, hardDeny: true, unknown: true},
+	// --- go's exec-injection flags rode the `go test *` allow (review H5)
+	{cmd: `go test -exec /tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -toolexec=/tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go vet -vettool=/tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -overlay=/tmp/overlay.json ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -pkgdir /tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -ldflags '-extld /tmp/evil' ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go test -gcflags=all=-toolexec=/tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -ldflags '-s -w' ./...`, class: shellclass.MutatingWorkspace},
+	{cmd: `go test -run TestX ./...`, class: shellclass.MutatingWorkspace},
+	// --- readers with output and value-taking flags (adversarial review M5)
+	{cmd: `sort main.go -o main.go`, class: shellclass.Destructive},
+	{cmd: `sort /dev/null -o newfile.txt`, class: shellclass.MutatingWorkspace},
+	{cmd: `sort --output=main.go go.mod`, class: shellclass.Destructive},
+	{cmd: `sort -o .env go.mod`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `sort --compress-program=/tmp/evil main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `rg --pre /tmp/evil foo .`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `tree -o out.txt`, class: shellclass.MutatingWorkspace},
+	{cmd: `xxd main.go out.bin`, class: shellclass.MutatingWorkspace},
+	{cmd: `uniq main.go out.txt`, class: shellclass.MutatingWorkspace},
+	{cmd: `head -n 20 main.go`, class: shellclass.SafeRead},
+	{cmd: `sort -k 2 -t : main.go`, class: shellclass.SafeRead},
+	{cmd: `join -o 1.1 main.go go.mod`, class: shellclass.SafeRead},
+	{cmd: `grep -e pattern .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `grep -m 5 pattern main.go`, class: shellclass.SafeRead},
+	// A value-taking option must not swallow the file operand.
+	{cmd: `head -n 20 .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `sort -k 2 -t : .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `jq -r '.a' .env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `yq -i '.a = 1' conf.yaml`, class: shellclass.MutatingWorkspace},
+	{cmd: `yq '.a' conf.yaml`, class: shellclass.SafeRead},
 }
 
 func TestAnalyzeTable(t *testing.T) {
@@ -261,6 +347,37 @@ func TestCommandsAndWrites(t *testing.T) {
 	}
 	if a.Raw == "" {
 		t.Error("Raw not preserved")
+	}
+}
+
+// TestExecPayloadPathsAreDeclared pins that paths named inside a find -exec
+// or xargs payload reach the analysis: path deny rules match on the declared
+// reads and writes, so a payload that launders them past those rules is a
+// hole even when the class is right.
+func TestExecPayloadPathsAreDeclared(t *testing.T) {
+	tests := []struct {
+		cmd         string
+		read, write string
+	}{
+		{cmd: `find . -exec mv main.go /tmp/x \;`, read: root + "/main.go", write: "/tmp/x"},
+		{cmd: `find . -exec tee out.txt \;`, write: root + "/out.txt"},
+		{cmd: `find . -type f | xargs mv main.go /tmp/x`, read: root + "/main.go", write: "/tmp/x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			a := shellclass.Analyze(tt.cmd, fakeWS{})
+			var reads, writes []string
+			for _, c := range a.Commands {
+				reads = append(reads, c.Reads...)
+				writes = append(writes, c.Writes...)
+			}
+			if tt.read != "" && !slices.Contains(reads, tt.read) {
+				t.Errorf("reads = %v, want %q", reads, tt.read)
+			}
+			if tt.write != "" && !slices.Contains(writes, tt.write) {
+				t.Errorf("writes = %v, want %q", writes, tt.write)
+			}
+		})
 	}
 }
 
