@@ -234,6 +234,9 @@ func New(deps Deps) agentkit.Toolset {
 	ts := agentkit.Toolset{
 		d.readFile(), d.writeFile(), d.editFile(), d.glob(), d.grep(), d.listDir(),
 	}
+	if d.Sandbox != nil {
+		ts = append(ts, d.bash())
+	}
 	return ts
 }
 
