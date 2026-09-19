@@ -372,6 +372,16 @@ var table = []row{
 	{cmd: `git diff-tree --output=out.txt HEAD`, class: shellclass.MutatingWorkspace},
 	{cmd: `git diff --output-indicator-new=x HEAD`, class: shellclass.SafeRead},
 	{cmd: `git show HEAD`, class: shellclass.SafeRead},
+	// --- a repository outside the workspace brings its own config, and every
+	// path the rest of the command names is resolved against it (audit)
+	{cmd: `git -C /tmp/other status`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git --git-dir=/tmp/evil/.git log`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git --work-tree ~ checkout .`, class: shellclass.Destructive, unknown: true},
+	{cmd: `git -C $DIR status`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git -C /tmp/other push --force origin main`, class: shellclass.Destructive, hardDeny: true, unknown: true},
+	{cmd: `git -C internal status`, class: shellclass.SafeRead},
+	{cmd: `git --git-dir=.git log`, class: shellclass.SafeRead},
+	{cmd: `git --namespace ns log`, class: shellclass.SafeRead},
 }
 
 func TestAnalyzeTable(t *testing.T) {

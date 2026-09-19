@@ -182,6 +182,14 @@ redaction and a tamper-evident audit log between the model and the machine.
   `range-diff` and the `diff-tree`/`diff-index`/`diff-files` plumbing now
   declare that value as a write, the way the reader specs already treat
   `sort -o`.
+- `git -C <dir>`, `--git-dir=<dir>` and `--work-tree=<dir>` were skipped
+  without looking at the value. A repository outside the workspace brings its
+  own configuration with it — aliases, a hooks path, filter drivers — and
+  every path the rest of the command names is resolved against it, so the
+  analysis described a different tree from the one that ran. Such a command
+  is now opaque and can never ride an allow rule, and because the option
+  taints the subcommand instead of replacing it, a hard deny the subcommand
+  raises (`git -C … push --force origin main`) still stands.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a

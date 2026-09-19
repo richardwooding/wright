@@ -40,12 +40,26 @@ func registerGit() { register(handleGit, "git") }
 // handleGit peels global options (-C dir, -c key=value, --git-dir) and
 // dispatches on the subcommand. `-c core.hooksPath=…` is hard-denied because
 // a hook path pointed at the workspace turns the next `git commit` into
-// arbitrary code execution.
+// arbitrary code execution. A global option that only taints the command —
+// a repository outside the workspace — is merged into the subcommand's
+// result rather than replacing it, so a hard deny the subcommand would have
+// raised is not lost on the way.
 func handleGit(a *analyzer, name string, args []word) result {
-	i, r, done := gitGlobalOptions(args)
+	i, taint, done := a.gitGlobalOptions(args)
 	if done {
-		return r
+		return taint
 	}
+	r := a.gitSubcommand(args, i)
+	if taint.unknown {
+		r.unknown = true
+		r.raise(taint.class)
+		r.reason = joinReason(r.reason, taint.reason)
+	}
+	return r
+}
+
+// gitSubcommand classifies the subcommand at args[i] and its arguments.
+func (a *analyzer) gitSubcommand(args []word, i int) result {
 	if i >= len(args) {
 		return safe("git")
 	}
@@ -68,8 +82,10 @@ func handleGit(a *analyzer, name string, args []word) result {
 }
 
 // gitGlobalOptions skips git's global options and returns the index of the
-// subcommand. done is true when an option itself decided the outcome.
-func gitGlobalOptions(args []word) (i int, r result, done bool) {
+// subcommand. done is true when an option itself decided the outcome; when
+// it is false, a taint with unknown set still applies to whatever the
+// subcommand turns out to be.
+func (a *analyzer) gitGlobalOptions(args []word) (i int, taint result, done bool) {
 	for i < len(args) && isFlag(args[i].text) {
 		t := args[i].text
 		if setting, n, ok := gitConfigArg(args, i); ok {
@@ -79,16 +95,61 @@ func gitGlobalOptions(args []word) (i int, r result, done bool) {
 			i += n
 			continue
 		}
+		if opt, val, n, ok := gitLocationArg(args, i); ok {
+			if r, bad := a.gitLocation(opt, val); bad {
+				taint = r
+			}
+			i += n
+			continue
+		}
 		switch {
 		case t == "--exec-path" || strings.HasPrefix(t, "--exec-path="):
 			return i, opaque("git --exec-path overrides the git binaries"), true
-		case t == "-C" || t == "--git-dir" || t == "--work-tree" || t == "--namespace":
+		case t == "--namespace":
 			i += 2
 		default:
 			i++
 		}
 	}
-	return i, result{}, false
+	return i, taint, false
+}
+
+// gitLocationOptions point git at another repository or working tree.
+var gitLocationOptions = []string{"-C", "--git-dir", "--work-tree"}
+
+// gitLocationArg recognises the separate and glued spellings of those
+// options and returns how many argv words the option takes. A missing value
+// is reported as dynamic, which makes the command opaque.
+func gitLocationArg(args []word, i int) (opt string, val word, n int, ok bool) {
+	t := args[i].text
+	for _, o := range gitLocationOptions {
+		switch {
+		case t == o:
+			if i+1 < len(args) {
+				return o, args[i+1], 2, true
+			}
+			return o, word{dynamic: true}, 1, true
+		case strings.HasPrefix(t, o+"="):
+			return o, word{text: strings.TrimPrefix(t, o+"="), dynamic: args[i].dynamic}, 1, true
+		}
+	}
+	return "", word{}, 0, false
+}
+
+// gitLocation judges the value of -C/--git-dir/--work-tree. A repository or
+// working tree outside the workspace brings its own configuration with it —
+// aliases, a hooks path, filter drivers — and every path the rest of the
+// command names is resolved against it, so the analysis describes a
+// different tree from the one that runs. Such a command is not denied, but
+// it is opaque: it may never ride an allow rule.
+func (a *analyzer) gitLocation(opt string, v word) (result, bool) {
+	if v.dynamic {
+		return opaque("git " + opt + " with a dynamic path"), true
+	}
+	if _, inside, err := a.ws.Resolve(v.text); err != nil || !inside {
+		return opaque("git " + opt + " points outside the workspace"), true
+	}
+	return result{}, false
 }
 
 // gitConfigArg recognises the `-c key=value` forms (separate, glued and
