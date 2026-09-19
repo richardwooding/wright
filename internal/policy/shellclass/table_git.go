@@ -23,7 +23,7 @@ var (
 		"add": true, "commit": true, "switch": true, "merge": true, "rebase": true, "cherry-pick": true, "revert": true,
 		"mv": true, "rm": true, "apply": true, "am": true, "init": true, "notes": true, "update-index": true,
 		"replace": true, "commit-tree": true, "write-tree": true, "read-tree": true, "mktree": true, "hash-object": true,
-		"fast-import": true, "fast-export": true, "format-patch": true, "archive": true, "bundle": true, "mailinfo": true,
+		"fast-import": true, "fast-export": true, "mailinfo": true,
 		"rerere": true, "sparse-checkout": true, "maintenance": true, "symbolic-ref": true,
 		"pack-refs": true, "repack": true, "lfs": true,
 	}
