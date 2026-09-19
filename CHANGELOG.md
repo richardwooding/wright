@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `grep` with a limit could drop its truncation note. Ignored and hidden
+  files were filtered out *after* the limit was applied, so a match ripgrep
+  happened to emit first from an ignored directory consumed the limit and
+  then vanished, leaving too few matches to report that more existed.
+  ripgrep's file order varies by version, which made it look like a flake.
+  The visibility filter now runs inside the reader, so the limit only ever
+  counts matches the user will see.
+
 ## [0.1.0] - 2026-09-20
 
 First working version of wright: an interactive TUI and a headless runner

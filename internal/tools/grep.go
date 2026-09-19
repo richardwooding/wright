@@ -222,16 +222,22 @@ func (d *Deps) grepRipgrep(ctx context.Context, rg, base string, a grepArgs) ([]
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	lines := readRipgrep(out, a)
+	// The visibility filter runs inside the reader, not after it: an ignored
+	// or hidden file that rg happens to emit first would otherwise consume
+	// the limit and then be dropped, leaving too few matches to report the
+	// truncation. rg's file order varies by version, so that was a coin toss.
+	lines := readRipgrep(out, a, d.visible)
 	cancel()
 	_ = cmd.Wait() // exit status 1 means "no matches"; 2 with --no-messages means unreadable files
 	return lines, nil
 }
 
-// readRipgrep decodes rg's JSON stream until the limit is reached.
-func readRipgrep(r io.Reader, a grepArgs) []grepLine {
+// readRipgrep decodes rg's JSON stream until the limit is reached, keeping
+// only lines from paths visible accepts.
+func readRipgrep(r io.Reader, a grepArgs, visible func(string) bool) []grepLine {
 	var lines []grepLine
 	files := map[string]bool{}
+	shown := map[string]bool{}
 	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 64*1024), 4<<20)
 	matches := 0
@@ -244,6 +250,14 @@ func readRipgrep(r io.Reader, a grepArgs) []grepLine {
 			continue
 		}
 		path := m.Data.Path.Text
+		ok, cached := shown[path]
+		if !cached {
+			ok = visible == nil || visible(path)
+			shown[path] = ok
+		}
+		if !ok {
+			continue
+		}
 		if m.Type == "match" {
 			matches++
 			files[path] = true
