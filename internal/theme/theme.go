@@ -9,6 +9,19 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
+// Glyphs used next to status words. Every status is always rendered as
+// glyph + word so meaning never depends on colour alone.
+const (
+	GlyphOK        = "✓"
+	GlyphFail      = "✗"
+	GlyphAsk       = "?"
+	GlyphRunning   = "●"
+	GlyphWarn      = "⚠"
+	GlyphStop      = "⛔"
+	GlyphCollapsed = "▸"
+	GlyphExpanded  = "▾"
+)
+
 // Palette holds the resolved colours for one background (light or dark).
 type Palette struct {
 	Accent    color.Color // brand purple: titles, active elements
@@ -33,7 +46,17 @@ type Theme struct {
 	CardBorder lipgloss.Style // border-only variant for nested cards
 	DiffAdd    lipgloss.Style
 	DiffDel    lipgloss.Style
+	DiffHunk   lipgloss.Style // "@@ … @@" hunk headers
 	StatusBar  lipgloss.Style
+
+	Bold       lipgloss.Style
+	Accented   lipgloss.Style // accent foreground without bold
+	HotBold    lipgloss.Style // sandbox off, bypass: must be impossible to miss
+	Key        lipgloss.Style // "[y]" key hints in prompts
+	Selected   lipgloss.Style // focused list row
+	Overlay    lipgloss.Style // bordered, centred prompt box
+	UserPrompt lipgloss.Style // the "›" gutter of a user message
+	Badge      lipgloss.Style // inline warning badges (injection, redacted)
 }
 
 // NewPalette resolves the gloam tokens for the given background.
@@ -64,6 +87,15 @@ func New(isDark bool) Theme {
 		CardBorder: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(p.DimAccent),
 		DiffAdd:    lipgloss.NewStyle().Foreground(p.Good),
 		DiffDel:    lipgloss.NewStyle().Foreground(p.Hot),
+		DiffHunk:   lipgloss.NewStyle().Foreground(p.Accent),
 		StatusBar:  lipgloss.NewStyle().Foreground(p.Subtle).Padding(0, 1),
+		Bold:       lipgloss.NewStyle().Bold(true),
+		Accented:   lipgloss.NewStyle().Foreground(p.Accent),
+		HotBold:    lipgloss.NewStyle().Bold(true).Foreground(p.Hot),
+		Key:        lipgloss.NewStyle().Bold(true).Foreground(p.Accent),
+		Selected:   lipgloss.NewStyle().Bold(true).Foreground(p.Accent).Reverse(true),
+		Overlay:    lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(p.Accent).Padding(0, 1),
+		UserPrompt: lipgloss.NewStyle().Bold(true).Foreground(p.Accent),
+		Badge:      lipgloss.NewStyle().Bold(true).Foreground(p.Warm),
 	}
 }
