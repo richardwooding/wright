@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format follows
 
 ### Security
 
+- A recursive `chmod`/`chown` on a system root escaped the hard-deny set when
+  the root was a symlink. Paths reach the classifier already resolved, and
+  most modern Linux distributions point `/bin`, `/sbin` and `/lib` at `/usr`,
+  while macOS points `/etc`, `/var` and `/tmp` into `/private` — so
+  `chmod -R 777 /bin` was seen as an ordinary write to `/usr/bin` and was
+  allowed outright in bypass mode. Both spellings now match.
 - Protected paths were not protected on macOS. `/etc`, `/var` and `/tmp` are
   symlinks into `/private` there, and every path in a permission request is
   symlink-resolved, so `/etc/passwd` reached `workspace.IsProtected` as

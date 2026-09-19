@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 )
 
 func registerFiles() {
@@ -202,6 +203,28 @@ func handleTruncate(a *analyzer, name string, args []word) result {
 // systemDirs are the roots a recursive chmod/chown must never touch.
 var systemDirs = []string{"/", "/usr", "/etc", "/bin", "/sbin", "/lib", "/lib64", "/var", "/opt", "/boot", "/sys", "/proc", "/dev", "/home", "/root", "/Users", "/System", "/Library"}
 
+// resolvedSystemDirs adds each system root's symlink-resolved spelling. Paths
+// reach this table already resolved, and most of these roots are symlinks on
+// a real machine: merged-usr Linux points /bin at /usr/bin, macOS points /etc
+// and /var into /private. Matching only the configured spelling let
+// `chmod -R 777 /bin` through as an ordinary write to /usr/bin.
+var resolvedSystemDirs = sync.OnceValue(func() []string {
+	out := make([]string, 0, len(systemDirs))
+	for _, d := range systemDirs {
+		real, err := filepath.EvalSymlinks(d)
+		if err != nil || real == d || slices.Contains(systemDirs, real) {
+			continue
+		}
+		out = append(out, real)
+	}
+	return out
+})
+
+// isSystemDir reports whether abs names a system root in either spelling.
+func isSystemDir(abs string) bool {
+	return slices.Contains(systemDirs, abs) || slices.Contains(resolvedSystemDirs(), abs)
+}
+
 // handleChmod: permission changes write their targets; recursive changes on
 // system directories or $HOME are hard-denied.
 func handleChmod(a *analyzer, name string, args []word) result {
@@ -212,7 +235,7 @@ func handleChmod(a *analyzer, name string, args []word) result {
 	recursive := hasShort(args, 'R') || hasFlag(args, "--recursive")
 	r := mutating(name)
 	for _, abs := range a.pathWords(nf) {
-		if recursive && (slices.Contains(systemDirs, abs) || abs == a.ws.Home()) {
+		if recursive && (isSystemDir(abs) || abs == a.ws.Home()) {
 			return privilegeDeny(name + " -R on " + abs)
 		}
 	}

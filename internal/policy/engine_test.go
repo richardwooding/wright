@@ -475,3 +475,28 @@ func withNet(r policy.Request) policy.Request {
 	r.Network = true
 	return r
 }
+
+// Paths reach the classifier already symlink-resolved, and most system roots
+// are symlinks on a real machine: merged-usr Linux points /bin at /usr/bin,
+// macOS points /etc and /var into /private. Matching only the configured
+// spelling let `chmod -R 777 /bin` through as an ordinary write.
+func TestRecursiveChmodOnSystemRootsIsHardDenied(t *testing.T) {
+	f := newFixture(t)
+	for _, dir := range []string{"/", "/usr", "/etc", "/bin", "/sbin", "/lib", "/var"} {
+		if _, err := os.Stat(dir); err != nil {
+			continue // not every root exists on every platform
+		}
+		for _, spelling := range []string{dir, resolvedPath(t, dir)} {
+			e := policy.New(f.ws, policy.ModeBypass, policy.Builtin())
+			v := e.Evaluate(f.bash("chmod -R 777 " + spelling))
+			if v.Decision != policy.Deny || !v.HardDeny {
+				t.Errorf("chmod -R on %q (for %s) = %v hard=%v, want a hard deny", spelling, dir, v.Decision, v.HardDeny)
+			}
+		}
+	}
+	// An ordinary recursive chmod inside the workspace must still be fine.
+	e := policy.New(f.ws, policy.ModeAutoEdit, policy.Builtin())
+	if v := e.Evaluate(f.bash("chmod -R 755 sub")); v.HardDeny {
+		t.Errorf("chmod -R inside the workspace was hard-denied: %s", v.Reason)
+	}
+}
