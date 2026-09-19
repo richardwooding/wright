@@ -250,6 +250,26 @@ var table = []row{
 	{cmd: `sed 's/a/b/w out.txt' main.go`, class: shellclass.MutatingWorkspace},
 	{cmd: `sed -n 'w main.go' go.mod`, class: shellclass.Destructive},
 	{cmd: `sed 's/a/b/' .env`, class: shellclass.Destructive, hardDeny: true},
+	// --- git -c can point git at a program to run (adversarial review C1)
+	{cmd: `git -c diff.external='sh -c "touch /tmp/pwned"' diff`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c core.pager=/tmp/evil log`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c core.sshCommand=/tmp/evil fetch`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c filter.lfs.clean=/tmp/evil status`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c diff.zip.textconv=/tmp/evil diff`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c alias.st='!sh -c id' st`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c credential.helper=/tmp/evil fetch`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c include.path=/tmp/evil.cfg status`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git --config-env=core.editor=EVIL commit`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git -c uploadpack.packObjectsHook=/tmp/evil log`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git --exec-path=/tmp/evil status`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git -c nosuch.key=1 status`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git -c user.name=x commit -m y`, class: shellclass.MutatingWorkspace},
+	{cmd: `git -c color.ui=false status`, class: shellclass.SafeRead},
+	{cmd: `git -c core.hooksPath=/tmp/h commit -m x`, class: shellclass.Privilege, hardDeny: true},
+	{cmd: `GIT_EXTERNAL_DIFF=/tmp/evil git diff`, class: shellclass.SafeRead, unknown: true},
+	{cmd: `GIT_PAGER=/tmp/evil git log`, class: shellclass.SafeRead, unknown: true},
+	{cmd: `GIT_CONFIG_COUNT=1 git status`, class: shellclass.SafeRead, unknown: true},
+	{cmd: `env GIT_EDITOR=/tmp/evil git commit`, class: shellclass.MutatingWorkspace, unknown: true},
 }
 
 func TestAnalyzeTable(t *testing.T) {

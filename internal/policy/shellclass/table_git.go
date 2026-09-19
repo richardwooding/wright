@@ -72,18 +72,18 @@ func handleGit(a *analyzer, name string, args []word) result {
 func gitGlobalOptions(args []word) (i int, r result, done bool) {
 	for i < len(args) && isFlag(args[i].text) {
 		t := args[i].text
-		switch {
-		case t == "-c" && i+1 < len(args):
-			if isHooksPath(args[i+1].text) {
-				return i, privilegeDeny("git -c core.hooksPath overrides hooks"), true
+		if setting, n, ok := gitConfigArg(args, i); ok {
+			if r, bad := gitConfigOption(setting); bad {
+				return i, r, true
 			}
-			i += 2
-		case strings.HasPrefix(t, "-c") && isHooksPath(t[2:]):
-			return i, privilegeDeny("git -c core.hooksPath overrides hooks"), true
-		case t == "-C" || t == "--git-dir" || t == "--work-tree" || t == "--namespace" || t == "--exec-path":
-			i += 2
-		case strings.HasPrefix(t, "--exec-path="):
+			i += n
+			continue
+		}
+		switch {
+		case t == "--exec-path" || strings.HasPrefix(t, "--exec-path="):
 			return i, opaque("git --exec-path overrides the git binaries"), true
+		case t == "-C" || t == "--git-dir" || t == "--work-tree" || t == "--namespace":
+			i += 2
 		default:
 			i++
 		}
@@ -91,9 +91,128 @@ func gitGlobalOptions(args []word) (i int, r result, done bool) {
 	return i, result{}, false
 }
 
+// gitConfigArg recognises the `-c key=value` forms (separate, glued and
+// --config-env) and returns the setting plus how many argv words it takes. A
+// missing value is reported as dynamic, which makes the command opaque.
+func gitConfigArg(args []word, i int) (word, int, bool) {
+	t := args[i].text
+	switch {
+	case t == "-c" || t == "--config-env":
+		if i+1 < len(args) {
+			return args[i+1], 2, true
+		}
+		return word{dynamic: true}, 1, true
+	case strings.HasPrefix(t, "-c") && len(t) > 2:
+		return word{text: t[2:], dynamic: args[i].dynamic}, 1, true
+	case strings.HasPrefix(t, "--config-env="):
+		return word{text: strings.TrimPrefix(t, "--config-env="), dynamic: args[i].dynamic}, 1, true
+	}
+	return word{}, 0, false
+}
+
+// gitConfigOption judges one `-c key=value` (or `--config-env key=ENV`). bad
+// reports that the setting alone decides the command's class.
+func gitConfigOption(kv word) (result, bool) {
+	key, _, _ := strings.Cut(kv.text, "=")
+	switch {
+	case kv.dynamic:
+		return opaque("git -c with a dynamic setting"), true
+	case isHooksPath(key):
+		return privilegeDeny("git -c core.hooksPath overrides hooks"), true
+	case gitConfigRunsProgram(key):
+		return result{class: Privilege, unknown: true, reason: "git -c " + key + " points git at a program to run"}, true
+	case gitConfigInert(key):
+		return result{}, false
+	}
+	// An unrecognised key may name a program git will run, so the safe
+	// default is opaque rather than "probably harmless".
+	return opaque("git -c " + key + " is not a known inert setting"), true
+}
+
 func isHooksPath(kv string) bool {
 	key, _, _ := strings.Cut(kv, "=")
 	return strings.EqualFold(key, "core.hooksPath")
+}
+
+// gitConfigSections are whole config sections whose keys name commands, hooks
+// or extra config to load.
+var gitConfigSections = []string{
+	"alias", "uploadpack", "receive", "includeif", "pager", "url", "instaweb",
+	"guitool", "difftool", "mergetool", "browser", "man", "web", "svn-remote", "trace2",
+}
+
+// gitConfigLastSegment maps a section to the trailing key names in it that
+// name a program (the middle segment is the driver/filter name).
+var gitConfigLastSegment = map[string][]string{
+	"core":        {"hookspath", "sshcommand", "editor", "pager", "fsmonitor", "askpass", "gitproxy", "alternaterefscommand", "editor"},
+	"diff":        {"external", "textconv", "command"},
+	"merge":       {"driver"},
+	"filter":      {"clean", "smudge", "process"},
+	"protocol":    {"allow"},
+	"gpg":         {"program"},
+	"credential":  {"helper", "username"},
+	"http":        {"proxy", "sslcainfo"},
+	"include":     {"path"},
+	"ssh":         {"variant"},
+	"sequence":    {"editor"},
+	"init":        {"templatedir"},
+	"interactive": {"difffilter"},
+	"blame":       {"markunblamablelines"},
+	"safe":        {"directory"},
+}
+
+// gitConfigRunsProgram reports whether setting key can make git execute a
+// program of the caller's choosing, or read configuration that can.
+func gitConfigRunsProgram(key string) bool {
+	key = strings.ToLower(key)
+	section, rest, ok := strings.Cut(key, ".")
+	if !ok {
+		return false
+	}
+	if slices.Contains(gitConfigSections, section) {
+		return true
+	}
+	last := rest
+	if i := strings.LastIndex(rest, "."); i >= 0 {
+		last = rest[i+1:]
+	}
+	return slices.Contains(gitConfigLastSegment[section], last)
+}
+
+// gitConfigInertPrefixes are sections that only affect presentation.
+var gitConfigInertPrefixes = []string{"color.", "advice.", "status.", "format."}
+
+// gitConfigInertKeys are the settings an agent legitimately passes with -c
+// that cannot change what git executes. Everything outside this list is
+// opaque: an allowlist is the only safe default when an unknown key may name
+// a program.
+var gitConfigInertKeys = map[string]bool{
+	"user.name": true, "user.email": true, "user.useconfigonly": true, "user.signingkey": true,
+	"core.autocrlf": true, "core.ignorecase": true, "core.quotepath": true, "core.filemode": true,
+	"core.abbrev": true, "core.safecrlf": true, "core.symlinks": true, "core.logallrefupdates": true,
+	"core.precomposeunicode": true, "core.longpaths": true, "core.bare": true, "core.commitgraph": true,
+	"core.untrackedcache": true, "core.sparsecheckout": true, "core.whitespace": true, "core.eol": true,
+	"diff.noprefix": true, "diff.algorithm": true, "diff.renames": true, "diff.context": true,
+	"diff.mnemonicprefix": true, "diff.indentheuristic": true, "diff.colormoved": true,
+	"diff.submodule": true, "diff.wordregex": true, "diff.relative": true, "diff.orderfile": true,
+	"log.date": true, "log.decorate": true, "log.follow": true, "log.abbrevcommit": true, "log.mailmap": true,
+	"push.default": true, "push.autosetupremote": true, "pull.rebase": true, "pull.ff": true,
+	"merge.conflictstyle": true, "merge.ff": true, "rebase.autosquash": true, "rebase.autostash": true,
+	"fetch.prune": true, "fetch.parallel": true, "commit.gpgsign": true, "tag.gpgsign": true,
+	"init.defaultbranch": true, "gc.auto": true, "grep.linenumber": true, "grep.patterntype": true,
+	"apply.whitespace": true, "am.threeway": true, "branch.autosetupmerge": true,
+	"submodule.recurse": true, "versionsort.suffix": true,
+}
+
+// gitConfigInert reports whether key is a known presentation-only setting.
+func gitConfigInert(key string) bool {
+	key = strings.ToLower(key)
+	for _, p := range gitConfigInertPrefixes {
+		if strings.HasPrefix(key, p) {
+			return true
+		}
+	}
+	return gitConfigInertKeys[key]
 }
 
 // gitSubcommands need argument inspection.
