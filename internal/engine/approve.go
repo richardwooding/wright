@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/richardwooding/agentkit"
@@ -250,11 +251,18 @@ func headlessReason(c agentkit.Call, v policy.Verdict) string {
 	if len(v.Offers) > 0 {
 		flags := make([]string, 0, len(v.Offers))
 		for _, o := range v.Offers {
-			flags = append(flags, "--allow '"+o.Rule.String()+"'")
+			flag := "--allow '" + o.Rule.String() + "'"
+			if !slices.Contains(flags, flag) {
+				flags = append(flags, flag)
+			}
 		}
 		hint = "re-run with " + strings.Join(flags, " ")
 	}
-	return fmt.Sprintf("%s %s (%s, or use --mode auto-edit for edits)", c.Call.Name, HeadlessDenialMarker, hint)
+	why := ""
+	if v.Reason != "" {
+		why = ": " + v.Reason
+	}
+	return fmt.Sprintf("%s %s%s (%s)", c.Call.Name, HeadlessDenialMarker, why, hint)
 }
 
 func severity(v policy.Verdict, req policy.Request) Severity {

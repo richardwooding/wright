@@ -2,6 +2,8 @@ package policy
 
 import (
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -251,8 +253,26 @@ func (ev *eval) run() {
 	if ev.matchDecision(Deny, false) {
 		return
 	}
+	// The containment checks run before any allow rule. An argv-prefix rule
+	// such as bash(grep *) matches on the command alone, so without this a
+	// broad allow would silently cover /etc/shadow or a recursive read that
+	// pulls a credential file into the transcript. The denial half runs
+	// first; the ask half runs after the explicit ask rules so a rule the
+	// user wrote is the one named in the verdict.
+	deny, ask := ev.containment()
+	if deny != "" {
+		ev.decide(Deny, deny, nil)
+		return
+	}
 	if ev.matchDecision(Ask, false) && ev.mode != ModeBypass {
 		ev.finishAsk()
+		return
+	}
+	if ask != "" && ev.mode != ModeBypass {
+		ev.decide(Ask, ask, nil)
+		// No rule waives a containment ask — the checks above run before the
+		// allow rules on purpose — so offering one would be a lie. The user
+		// narrows the command (or approves this call) instead.
 		return
 	}
 	if ev.allowed() {
@@ -662,7 +682,13 @@ func (ev *eval) outsideShell(sh *shellclass.Analysis) (deny, ask string) {
 		return deny, ""
 	}
 	for _, w := range writes {
-		if !ev.e.ws.Inside(w) {
+		switch {
+		case ev.e.ws.IsProtected(w) || ev.e.ws.IsSecretFile(w):
+			// Also covered by the hard-deny set when the caller declares
+			// Request.Writes; checked here too so a shell-declared write is
+			// caught whoever filled the request in.
+			return "protected path " + ev.e.ws.Rel(w), ""
+		case !ev.e.ws.Inside(w):
 			return "", "writes outside the workspace " + ev.e.ws.Rel(w)
 		}
 	}
@@ -794,4 +820,107 @@ func (e *Engine) suggestPaths(req Request) []Rule {
 		}
 	}
 	return rules
+}
+
+// containment applies the workspace rules ahead of the allow rules and
+// reports what they decided. A deny is final in every mode. The ask is final
+// for bash, whose rules match argv and never examine paths; the path tools
+// keep their own flow, where a rule naming the path may still cover it.
+func (ev *eval) containment() (deny, ask string) {
+	switch ev.kind {
+	case kindBash:
+		if ev.req.Shell == nil {
+			return "", ""
+		}
+		deny, ask = ev.outsideShell(ev.req.Shell)
+	case kindRead, kindWrite:
+		deny, _ = ev.outside(append(slices.Clone(ev.req.Paths), ev.req.Writes...))
+	default:
+		return "", ""
+	}
+	if deny != "" {
+		return deny, ""
+	}
+	if ask == "" && ev.kind == kindBash {
+		ask = ev.exposedSecrets()
+	}
+	if ev.kind != kindBash {
+		ask = ""
+	}
+	return "", ask
+}
+
+// maxSecretScan bounds the directory walk below; a repository larger than
+// this yields no verdict rather than a slow one.
+const maxSecretScan = 20000
+
+// exposedSecrets reports credential files a declared directory read would
+// sweep up. A recursive reader (grep -r, find, tar) declares the directory it
+// was pointed at, not the files it opens, so without this scan `grep -r "" .`
+// puts .env in the transcript while `cat .env` is denied.
+func (ev *eval) exposedSecrets() string {
+	var found []string
+	for _, dir := range ev.declaredDirs() {
+		found = ev.scanForSecrets(dir, found)
+		if len(found) >= maxSecretNames {
+			break
+		}
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	rel := make([]string, 0, len(found))
+	for _, f := range found {
+		rel = append(rel, ev.e.ws.Rel(f))
+	}
+	return "would read credential files under the directory it was given (" + strings.Join(rel, ", ") + ")"
+}
+
+// maxSecretNames bounds how many offending files the reason names.
+const maxSecretNames = 3
+
+// declaredDirs returns the directories the request says it reads, from the
+// request itself and from the shell analysis (the caller need not have copied
+// the declared reads across).
+func (ev *eval) declaredDirs() []string {
+	paths := slices.Clone(ev.req.Paths)
+	if ev.req.Shell != nil {
+		for _, c := range ev.req.Shell.Commands {
+			paths = append(paths, c.Reads...)
+		}
+	}
+	dirs := make([]string, 0, len(paths))
+	for _, p := range paths {
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			dirs = append(dirs, p)
+		}
+	}
+	return dirs
+}
+
+// scanForSecrets walks dir looking for credential files, appending to found.
+func (ev *eval) scanForSecrets(dir string, found []string) []string {
+	n := 0
+	_ = filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return nil //nolint:nilerr // an unreadable entry is not evidence either way
+		}
+		if n++; n > maxSecretScan {
+			return fs.SkipAll
+		}
+		if d.IsDir() {
+			if d.Name() == ".git" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if ev.e.ws.IsSecretFile(path) && !slices.Contains(found, path) {
+			found = append(found, path)
+			if len(found) >= maxSecretNames {
+				return fs.SkipAll
+			}
+		}
+		return nil
+	})
+	return found
 }
