@@ -176,6 +176,32 @@ client to HTTP MCP transports).
   fuzzed. Default patterns must not be able to match inside a marker: token
   character classes exclude `[`, and no vendor prefix appears in a marker
   name. The generic entropy pattern stays opt-in (`WithGeneric`).
+  `Writer` is line-buffered *plus* a bounded private-key lookbehind: a
+  multi-line pattern cannot match a single line, so anything spanning lines
+  needs holding logic there, not just in `Redact`. The streamed output and
+  the whole-buffer output must never disagree about a secret — the user's
+  screen is as much a disclosure as the model's context.
+- **Redact before `Clip`.** `Clip` writes the full text to the spill file and
+  names that path to the model, so any tool that spills must redact first
+  (`bash`, `web_fetch`). Redacting the clipped result only cleans the excerpt
+  and leaves the secret on disk.
+- **A described path must be the path that runs.** `bash` executes with
+  `spec.Dir = Cwd.Get()`, which `cd` moves, so `describeBash` wraps
+  `policy.NewShellWorkspace` in `cwdWorkspace` to resolve relative words
+  against that directory. Anything that classifies a command has to use the
+  same base the command will use, or the verdict and the approval preview
+  describe a different file from the one that is opened.
+- **Sandboxed commands are `bash -c`.** Never `-lc`: a login shell sources
+  `/etc/profile`, `/etc/profile.d/*` and the user's `~/.bash_profile` (real
+  on the `none` backend), which can undo the filtered environment. The
+  environment is explicit and carries `PATH`.
+- **`web_fetch` checks the host itself.** ssrfguard validates every dial, but
+  the tool also refuses loopback, unspecified, link-local, RFC1918, CGNAT and
+  metadata hosts in `parseFetchURL` — including the integer, hex, octal and
+  IPv4-mapped spellings — so a URL that can never work is refused before the
+  request and before the approval prompt shows it. Only `Deps.AllowLocalFetch`
+  (tests serving from 127.0.0.1) lifts it. robots.txt product tokens match
+  exactly, never by prefix.
 - **Audit lines are immutable.** `audit.Log.Write` sets `Seq` and `Prev` (the
   SHA-256 of the previous *line*), redacts `Text`/`Args`, caps `Args` at 4 KiB
   and records `ArgsSHA256` of the full value. Never log environment variables
@@ -233,6 +259,17 @@ client to HTTP MCP transports).
   everything that varies goes in the dynamic environment block.
   `TestSystemStableIsIdenticalAcrossTurns` pins it — put new facts in
   `environment`, not in the constants.
+- **Instruction files are quoted, never ratified.** `prompt.System` renders
+  every `Instruction` inside `<instructions source=… scope=…>` after the
+  framing that says a `scope="project"` file came from the repository and
+  cannot override the operating constraints or the permission policy;
+  `ScopeUser` (the user's `$XDG_CONFIG_HOME/wright/AGENTS.md`) is the only
+  scope that is the user's own, and the zero value frames as project.
+  `LoadInstructions` runs `ScanInjection` over each body and attaches the
+  signals, which become the block's `warning` attribute and an app warning
+  naming the file — never load one silently. Both `</instructions` and
+  `<instructions` are escaped in bodies, so a file can neither close its
+  block nor forge an opening tag with a scope of its choosing.
 - **Session sidecars live in `sessions/meta/`.** `agentkit.FileStore.List`
   reads every `*.json`/`*.jsonl` in its directory as a transcript (and skips
   subdirectories), so `<id>.meta.json` beside the transcript would be parsed

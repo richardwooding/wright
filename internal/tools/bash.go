@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -75,7 +76,7 @@ func (d *Deps) describeBash(args json.RawMessage) (policy.Request, Preview, erro
 	if strings.TrimSpace(a.Command) == "" {
 		return policy.Request{}, Preview{}, errors.New("command is required")
 	}
-	an := shellclass.Analyze(a.Command, policy.NewShellWorkspace(d.WS, nil, nil))
+	an := shellclass.Analyze(a.Command, d.shellWorkspace())
 	req := policy.Request{Tool: NameBash, Args: args, Shell: &an, Network: a.Network}
 	for _, c := range an.Commands {
 		req.Writes = append(req.Writes, c.Writes...)
@@ -89,6 +90,53 @@ func (d *Deps) describeBash(args json.RawMessage) (policy.Request, Preview, erro
 	return req, Preview{Title: title, Body: body}, nil
 }
 
+// shellWorkspace is the analyzer's view of the workspace. policy's adapter
+// resolves a relative word against the workspace *root*, but the command
+// runs with spec.Dir set to the tracked working directory, which `cd` moves;
+// resolving against the root would name a different file in the verdict and
+// in the approval preview than the one the command opens. Wrapping here
+// keeps the fix on the tools side, since NewShellWorkspace has no parameter
+// for a working directory.
+func (d *Deps) shellWorkspace() shellclass.Workspace {
+	ws := policy.NewShellWorkspace(d.WS, nil, nil)
+	if d.Cwd == nil {
+		return ws
+	}
+	return cwdWorkspace{Workspace: ws, cwd: d.Cwd.Get()}
+}
+
+// cwdWorkspace resolves relative paths against cwd instead of the root.
+type cwdWorkspace struct {
+	shellclass.Workspace
+	cwd string
+}
+
+// Resolve rebases a relative word onto the working directory before handing
+// it to the workspace, which still expands, resolves symlinks and decides
+// whether the result is inside.
+func (c cwdWorkspace) Resolve(p string) (string, bool, error) {
+	return c.Workspace.Resolve(c.rebase(p))
+}
+
+// rebase leaves absolute paths and the workspace's own prefixes ("~",
+// "$WORKSPACE") alone; everything else is relative to the working directory.
+func (c cwdWorkspace) rebase(p string) string {
+	if c.cwd == "" || p == "" || filepath.IsAbs(p) ||
+		strings.HasPrefix(p, "~") || strings.HasPrefix(p, "$WORKSPACE") {
+		return p
+	}
+	return filepath.Join(c.cwd, p)
+}
+
+// ProtectedBranches forwards the wrapped workspace's override, which an
+// embedded interface would otherwise hide from shellclass.
+func (c cwdWorkspace) ProtectedBranches() []string {
+	if bp, ok := c.Workspace.(shellclass.BranchProtector); ok {
+		return bp.ProtectedBranches()
+	}
+	return nil
+}
+
 func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error) {
 	if strings.TrimSpace(a.Command) == "" {
 		return agentkit.Output{}, errors.New("command is required")
@@ -100,7 +148,12 @@ func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error)
 	timeout = min(timeout, maxBashTimeout)
 	script, notes := d.prepareScript(a.Command)
 	spec := d.SandboxSpec
-	spec.Argv = []string{"bash", "-lc", script + "\nprintf '\\n" + cwdMarker + "%s\\n' \"$PWD\""}
+	// "-c", not "-lc": a login shell sources /etc/profile, /etc/profile.d/*
+	// and (on the none backend, where $HOME is real) the user's
+	// ~/.bash_profile, any of which can change PATH, define functions or
+	// export variables that the sandbox's filtered environment deliberately
+	// left out. The environment here is explicit and already carries PATH.
+	spec.Argv = []string{"bash", "-c", script + "\nprintf '\\n" + cwdMarker + "%s\\n' \"$PWD\""}
 	spec.Dir = d.Cwd.Get()
 	// a.Network is trustworthy only because the engine rewrites it to the
 	// policy verdict before the call reaches here; spec.Network carries the
@@ -178,8 +231,12 @@ func (d *Deps) updateCwd(newCwd string) []string {
 
 // bashResult assembles the model-facing text: output, notes, status.
 func (d *Deps) bashResult(ctx context.Context, out string, cmd *exec.Cmd, runErr error, dur time.Duration, timedOut bool, timeout time.Duration, notes []string) agentkit.Output {
-	out, _ = Clip(out, maxBashOutput, d.SpillDir, spillID(ctx))
+	// Redact first: Clip writes the full text to the spill file, and an
+	// unredacted secret on disk (and a path to it handed to the model) is
+	// exactly what redaction is for. Clipping after also keeps the byte
+	// count in the truncation note honest about what was saved.
 	out = d.redact(ctx, NameBash, out)
+	out, _ = Clip(out, maxBashOutput, d.SpillDir, spillID(ctx))
 	var b strings.Builder
 	b.WriteString(strings.TrimRight(out, "\n"))
 	for _, n := range notes {

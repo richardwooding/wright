@@ -299,3 +299,142 @@ func FuzzRedact(f *testing.F) {
 		}
 	})
 }
+
+// TestWriterMultiLineKey pins M2: the streaming writer the user's screen is
+// fed from must not leak a key that the whole-buffer path redacts. It is
+// line-buffered, so the multi-line private-key pattern can only be caught by
+// the bounded lookbehind.
+func TestWriterMultiLineKey(t *testing.T) {
+	key := "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\nQyNTUxOQAAACDb\n-----END OPENSSH PRIVATE KEY-----\n"
+	tests := []struct {
+		name     string
+		in       string
+		bytewise bool
+		// whole says the whole-buffer path catches this input too, so the
+		// two must agree; an unterminated or over-long block is exactly the
+		// case where only the writer can do anything.
+		whole  bool
+		want   []string
+		absent []string
+	}{
+		{
+			name:   "whole key in one write",
+			in:     "before\n" + key + "after\n",
+			whole:  true,
+			want:   []string{"before\n", "[redacted: private-key]", "after\n"},
+			absent: []string{"b3BlbnNzaC", "BEGIN OPENSSH"},
+		},
+		{
+			name:     "key split across many tiny writes",
+			in:       "before\n" + key + "after\n",
+			bytewise: true,
+			whole:    true,
+			want:     []string{"before\n", "[redacted: private-key]", "after\n"},
+			absent:   []string{"b3BlbnNzaC", "BEGIN OPENSSH"},
+		},
+		{
+			name:   "unterminated key is redacted at Close",
+			in:     "before\n-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAA\n",
+			want:   []string{"before\n", "[redacted: private-key]"},
+			absent: []string{"b3BlbnNzaC", "BEGIN OPENSSH"},
+		},
+		{
+			name:   "line before the marker still streams",
+			in:     "tail " + ghpToken + "\n" + key,
+			whole:  true,
+			want:   []string{"tail [redacted: github…ghij]\n", "[redacted: private-key]"},
+			absent: []string{ghpToken, "b3BlbnNzaC"},
+		},
+		{
+			name:   "oversized block is cut at the cap and the rest dropped until END",
+			in:     "-----BEGIN RSA PRIVATE KEY-----\n" + strings.Repeat("QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo=\n", 2000) + "-----END RSA PRIVATE KEY-----\nafter\n",
+			want:   []string{"[redacted: private-key]", "after\n"},
+			absent: []string{"QUJDREVGR0hJSktMTU5PUFFSU1RVVldYWVo"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			w := redact.New().Writer(&buf)
+			if tt.bytewise {
+				for i := 0; i < len(tt.in); i++ {
+					if _, err := w.Write([]byte{tt.in[i]}); err != nil {
+						t.Fatal(err)
+					}
+				}
+			} else if _, err := w.Write([]byte(tt.in)); err != nil {
+				t.Fatal(err)
+			}
+			if err := w.Close(); err != nil {
+				t.Fatal(err)
+			}
+			got := buf.String()
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Errorf("missing %q in:\n%q", want, got)
+				}
+			}
+			for _, absent := range tt.absent {
+				if strings.Contains(got, absent) {
+					t.Errorf("leaked %q in:\n%q", absent, got)
+				}
+			}
+			if !tt.whole {
+				return
+			}
+			// The streamed result must agree with the whole-buffer one on
+			// the thing that matters: no key material either way.
+			whole, _ := redact.New().Redact(tt.in)
+			for _, absent := range tt.absent {
+				if strings.Contains(whole, absent) {
+					t.Errorf("whole-buffer redaction leaked %q", absent)
+				}
+			}
+		})
+	}
+}
+
+// TestWriterKeepsStreamingLive pins that the lookbehind only engages on a
+// key: ordinary output is still forwarded line by line, not buffered.
+func TestWriterKeepsStreamingLive(t *testing.T) {
+	var buf bytes.Buffer
+	w := redact.New().Writer(&buf)
+	if _, err := w.Write([]byte("one\ntwo\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "one\ntwo\n" {
+		t.Errorf("lines were held back: %q", got)
+	}
+	if _, err := w.Write([]byte("-----BEGIN EC PRIVATE KEY-----\nsecretmaterial\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "one\ntwo\n" {
+		t.Errorf("key block was forwarded before its end: %q", got)
+	}
+	if _, err := w.Write([]byte("-----END EC PRIVATE KEY-----\nthree\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != "one\ntwo\n[redacted: private-key]\nthree\n" {
+		t.Errorf("unexpected output: %q", got)
+	}
+}
+
+// TestWriterWithoutPrivateKeyPattern pins that disabling the pattern also
+// disables the lookbehind: nothing is held back that will not be redacted.
+func TestWriterWithoutPrivateKeyPattern(t *testing.T) {
+	var buf bytes.Buffer
+	w := redact.New(redact.WithDisabled(redact.NamePrivateKey)).Writer(&buf)
+	in := "-----BEGIN RSA PRIVATE KEY-----\nabc\n"
+	if _, err := w.Write([]byte(in)); err != nil {
+		t.Fatal(err)
+	}
+	if got := buf.String(); got != in {
+		t.Errorf("output held back with the pattern disabled: %q", got)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+}

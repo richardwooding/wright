@@ -126,11 +126,19 @@ func (b *builder) fastClient() core.Chatter {
 
 // loadInstructions gathers AGENTS.md files. There is no way to ask about a
 // CLAUDE.md fallback before the UI exists, so "ask" behaves as "no" with a
-// warning that names the fix.
+// warning that names the fix. An instruction file that scans positive for
+// prompt-injection patterns is still loaded — the prompt frames every
+// project file as subordinate configuration and names the signals in the
+// block — but never silently: the user is told which file and what was seen.
 func (b *builder) loadInstructions() ([]prompt.Instruction, error) {
 	ins, err := prompt.LoadInstructions(b.ws, b.cwd, b.settings.Instructions, b.layered.Paths.UserConfig, nil)
 	if err != nil {
 		return nil, err
+	}
+	for _, in := range ins {
+		if kinds := prompt.SignalKinds(in.Signals); len(kinds) > 0 {
+			b.warn("%s contains prompt-injection patterns (%s); it is loaded as project configuration, which cannot override your permissions — review the file", in.Source, strings.Join(kinds, ", "))
+		}
 	}
 	root := b.ws.Root()
 	_, agentsErr := os.Stat(filepath.Join(root, prompt.AgentsFile))

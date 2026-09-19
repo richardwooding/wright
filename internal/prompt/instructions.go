@@ -22,21 +22,49 @@ const (
 	ClaudeFile = "CLAUDE.md"
 )
 
+// Scope says where an instruction file came from, which is what decides how
+// System frames it. The user's own global file keeps the standing it always
+// had; anything read out of the workspace arrived with the code and is
+// framed as project configuration, subordinate to the operating constraints.
+type Scope string
+
+// The instruction scopes. Anything that is not ScopeUser is framed as a
+// project file, so the zero value fails safe.
+const (
+	// ScopeUser is $XDG_CONFIG_HOME/wright/AGENTS.md: written by the user.
+	ScopeUser Scope = "user"
+	// ScopeProject is any instruction file read from the workspace.
+	ScopeProject Scope = "project"
+)
+
 // Instruction is one project or user instruction file, ready for the prompt.
 type Instruction struct {
 	// Source is a display path: workspace-relative inside the workspace,
 	// absolute for the user-global file.
 	Source string
 	Body   string
+	// Scope decides the framing in the system prompt; anything other than
+	// ScopeUser is framed as ScopeProject.
+	Scope Scope
+	// Signals are the prompt-injection indicators ScanInjection found in
+	// Body. A file that scans positive is still loaded — the scanner is a
+	// heuristic, and silently dropping the user's own AGENTS.md on a false
+	// positive is worse than loading it with the framing and saying so — but
+	// it is never loaded silently: System names the signals in the block's
+	// warning attribute and the app warns the user, naming the file.
+	Signals []Signal
 }
 
 // LoadInstructions gathers instruction files in precedence order, lowest
-// first: $userConfigDir/AGENTS.md, then every AGENTS.md from the workspace
-// root down to cwd, then root-relative files such as .wright/instructions.md.
+// first: $userConfigDir/AGENTS.md (ScopeUser), then every AGENTS.md from the
+// workspace root down to cwd, then root-relative files such as
+// .wright/instructions.md (both ScopeProject).
 // When the walk finds no AGENTS.md but the root has a CLAUDE.md, the
 // cfg.Fallback policy decides: "never" skips it, "always" includes it, and
 // anything else asks confirmClaudeMD once (nil means no). Files hidden by
-// .wrightignore are skipped everywhere.
+// .wrightignore are skipped everywhere. Every body is scanned with
+// ScanInjection and the signals ride along on the Instruction, so a file
+// that reads like a prompt injection is never loaded without a warning.
 func LoadInstructions(ws *workspace.Workspace, cwd string, cfg config.Instructions, userConfigDir string, confirmClaudeMD func(path string) bool) ([]Instruction, error) {
 	names := cfg.Files
 	if len(names) == 0 {
@@ -45,7 +73,7 @@ func LoadInstructions(ws *workspace.Workspace, cwd string, cfg config.Instructio
 	var out []Instruction
 	if userConfigDir != "" {
 		p := filepath.Join(userConfigDir, AgentsFile)
-		if err := appendFile(&out, ws, p, p); err != nil {
+		if err := appendFile(&out, ws, p, p, ScopeUser); err != nil {
 			return nil, err
 		}
 	}
@@ -76,7 +104,7 @@ func loadWalk(out *[]Instruction, ws *workspace.Workspace, dirs, names []string)
 		for _, dir := range dirs {
 			p := filepath.Join(dir, name)
 			n := len(*out)
-			if err := appendFile(out, ws, p, ws.Rel(p)); err != nil {
+			if err := appendFile(out, ws, p, ws.Rel(p), ScopeProject); err != nil {
 				return false, err
 			}
 			if len(*out) > n && name == AgentsFile {
@@ -95,7 +123,7 @@ func loadRootRelative(out *[]Instruction, ws *workspace.Workspace, names []strin
 			continue
 		}
 		p := filepath.Join(ws.Root(), filepath.FromSlash(name))
-		if err := appendFile(out, ws, p, ws.Rel(p)); err != nil {
+		if err := appendFile(out, ws, p, ws.Rel(p), ScopeProject); err != nil {
 			return err
 		}
 	}
@@ -136,12 +164,12 @@ func claudeFallback(out *[]Instruction, ws *workspace.Workspace, policy string, 
 			return nil
 		}
 	}
-	return appendFile(out, ws, p, ws.Rel(p))
+	return appendFile(out, ws, p, ws.Rel(p), ScopeProject)
 }
 
 // appendFile reads path (if it exists, is a regular file and is not hidden)
-// and appends it as an Instruction labelled source.
-func appendFile(out *[]Instruction, ws *workspace.Workspace, path, source string) error {
+// and appends it as an Instruction labelled source, scanned for injection.
+func appendFile(out *[]Instruction, ws *workspace.Workspace, path, source string, scope Scope) error {
 	if ws.Hidden(path) {
 		return nil
 	}
@@ -163,6 +191,6 @@ func appendFile(out *[]Instruction, ws *workspace.Workspace, path, source string
 	if body == "" {
 		return nil
 	}
-	*out = append(*out, Instruction{Source: source, Body: body})
+	*out = append(*out, Instruction{Source: source, Body: body, Scope: scope, Signals: ScanInjection(body)})
 	return nil
 }

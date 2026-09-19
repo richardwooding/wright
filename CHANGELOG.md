@@ -131,3 +131,57 @@ redaction and a tamper-evident audit log between the model and the machine.
   cask), `Containerfile` on wolfi-base plus `Containerfile.local` for podman,
   CI / release / pages / gloam-sync workflows, Dependabot, and the gloam
   documentation site under `docs/`.
+
+### Security
+
+- Project instruction files (`AGENTS.md` from the workspace root down to cwd,
+  `.wright/instructions.md`, a confirmed `CLAUDE.md`) are no longer quoted
+  into the system prompt as if the system had written them. They are now
+  preceded by framing that says what they are, and each block carries both
+  its source and a `scope`: a `scope="project"` file arrived with the
+  repository, is the user's project configuration rather than a system
+  instruction, and can never widen permissions, lift a denial, change what is
+  reported to the user or redirect the task. The user's own global
+  `AGENTS.md` keeps its standing as `scope="user"`. Every body is scanned
+  with `prompt.ScanInjection` when it is loaded: the signals ride along on
+  the `Instruction`, the block carries a `warning` attribute naming them, and
+  the app emits a notice naming the file — an instruction file that scans
+  positive is loaded with the framing and the warning, never silently. A body
+  can neither close its own block (`</instructions`) nor forge an opening tag
+  (`<instructions`); both sequences are escaped.
+- `redact.Writer` — the writer behind `bash`'s live output stream, which is
+  what the user's screen and the transcript show — is line-buffered, so the
+  only multi-line pattern (`private-key`) could never match: the model-facing
+  result was redacted while the user watched the whole key scroll past. The
+  writer now keeps a bounded lookbehind, holding output from a
+  `-----BEGIN … PRIVATE KEY` marker until the matching `-----END`, a 64 KiB
+  cap, or `Close`; an unterminated block is redacted from the marker on, and
+  a block that overruns the cap is marked and its remainder dropped until the
+  END marker. Ordinary output still streams line by line.
+- `bash` and `web_fetch` redact before they clip. `Clip` writes the *full*
+  text to the spill file under `$XDG_CACHE_HOME/wright/spill/<session>/` and
+  hands the model that path, so redacting afterwards left the unredacted
+  secret on disk. Nothing unredacted is written now, and the truncation note
+  counts the bytes that were actually saved.
+- `bash`'s `Describe` resolves relative paths against the working directory
+  the command will run in, not the workspace root. The tool runs with
+  `spec.Dir` set to the tracked cwd, which `cd` moves, so every declared read
+  and write in the policy request — and in the approval preview the user
+  reads — could name a different file from the one the command opens. It
+  failed safe with a single root; a second root at another depth
+  (`--add-dir`) would have made it exploitable.
+- `web_fetch` refuses local, private and metadata hosts itself, before the
+  request and before the approval prompt shows a URL that could never work.
+  The ssrfguard client already blocked these at dial time; the tool-side
+  check now covers the spellings a text glob misses — `::1`,
+  `::ffff:127.0.0.1`, `0.0.0.0`, `[::]`, `2130706433`, `0x7f000001`,
+  `0177.0.0.1`, `*.localhost`, `*.internal`, `metadata.google.internal`,
+  link-local (169.254/16, fe80::/10), RFC1918 and carrier-grade NAT.
+- `web_fetch` matches the robots.txt product token exactly. It used a prefix
+  match, so a site's `User-agent: wrightbot` group captured `wright` and
+  applied another crawler's rules to us.
+- Sandboxed commands run as `bash -c`, not `bash -lc`. A login shell sources
+  `/etc/profile`, `/etc/profile.d/*` and — on the `none` backend, where
+  `$HOME` is the user's own — `~/.bash_profile`, any of which can put back
+  what the sandbox's filtered environment deliberately left out. The
+  environment handed to the command is explicit and already carries `PATH`.

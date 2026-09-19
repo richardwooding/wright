@@ -49,6 +49,9 @@ func newFixture(t testing.TB, mutate func(*tools.Deps)) *fixture {
 		SandboxSpec: sandbox.Spec{ReadWrite: ws.Roots, Env: env},
 		SpillDir:    t.TempDir(),
 		RunID:       func(context.Context) string { return "run-1" },
+		// The test servers live on 127.0.0.1, which web_fetch refuses by
+		// default; TestWebFetchRefusesLocalHosts covers the refusal.
+		AllowLocalFetch: true,
 	}
 	if mutate != nil {
 		mutate(&deps)

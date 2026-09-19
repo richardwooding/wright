@@ -2,6 +2,7 @@ package tools_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"os/exec"
@@ -217,5 +218,133 @@ func TestNetworkContext(t *testing.T) {
 	ctx := tools.WithNetwork(context.Background(), true)
 	if allow, ok := tools.NetworkFrom(ctx); !ok || !allow {
 		t.Error("override lost")
+	}
+}
+
+// TestBashSpillIsRedacted pins M3: the spill file is written by Clip, so
+// redaction has to happen before it, not after. Otherwise the full secret
+// lands in $XDG_CACHE_HOME/wright/spill and the model is handed the path.
+func TestBashSpillIsRedacted(t *testing.T) {
+	f := newFixture(t, func(d *tools.Deps) { d.Redactor = redact.New() })
+	token := "ghp_" + strings.Repeat("D", 36)
+	got, err := f.text(tools.NameBash, `{"command":"echo `+token+`; i=0; while [ $i -lt 4000 ]; do echo line-$i-0123456789; i=$((i+1)); done"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := spillPath(t, got)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), token) {
+		t.Errorf("spill file %s holds the unredacted secret", path)
+	}
+	if !strings.Contains(string(data), "[redacted: github") {
+		t.Errorf("spill file %s has no redaction marker", path)
+	}
+	if strings.Contains(got, token) {
+		t.Errorf("result holds the unredacted secret:\n%.200s", got)
+	}
+}
+
+// spillPath pulls the spill file path out of a truncation note.
+func spillPath(t *testing.T, out string) string {
+	t.Helper()
+	i := strings.Index(out, "[output truncated: ")
+	if i < 0 {
+		t.Fatalf("no truncation note in:\n%.300s", out)
+	}
+	note := out[i : strings.Index(out[i:], "]")+i]
+	const marker = "full output saved to "
+	j := strings.Index(note, marker)
+	if j < 0 {
+		t.Fatalf("note names no spill file: %q", note)
+	}
+	return note[j+len(marker):]
+}
+
+// TestBashDescribeResolvesAgainstCwd pins M6: the analyzer must resolve a
+// relative word against the working directory the command will actually run
+// in (spec.Dir, which `cd` moves), not against the workspace root. Otherwise
+// the verdict and the approval preview name a different file from the one
+// the command opens.
+func TestBashDescribeResolvesAgainstCwd(t *testing.T) {
+	f := newFixture(t, nil)
+	for _, dir := range []string{"sub", "sub/deep"} {
+		if err := os.MkdirAll(filepath.Join(f.root, filepath.FromSlash(dir)), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d, ok := tools.Lookup(f.ts, tools.NameBash)
+	if !ok {
+		t.Fatal("bash has no Describer")
+	}
+	req, _, err := d.Describe(json.RawMessage(`{"command":"cat notes.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.root, "notes.txt"); !contains(req.Paths, want) {
+		t.Errorf("at the root, read paths = %v, want %s", req.Paths, want)
+	}
+	if _, err := f.text(tools.NameBash, `{"command":"cd sub"}`); err != nil {
+		t.Fatal(err)
+	}
+	req, _, err = d.Describe(json.RawMessage(`{"command":"cat notes.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.root, "sub", "notes.txt"); !contains(req.Paths, want) {
+		t.Errorf("after cd sub, read paths = %v, want %s", req.Paths, want)
+	}
+	// Writes follow the same path resolution.
+	req, _, err = d.Describe(json.RawMessage(`{"command":"echo hi > deep/out.txt"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(f.root, "sub", "deep", "out.txt"); !contains(req.Writes, want) {
+		t.Errorf("after cd sub, write paths = %v, want %s", req.Writes, want)
+	}
+	// Absolute paths are untouched by the rebase.
+	abs := filepath.Join(f.root, "top.txt")
+	req, _, err = d.Describe(json.RawMessage(`{"command":"cat ` + filepath.ToSlash(abs) + `"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(req.Paths, abs) {
+		t.Errorf("absolute path rewritten: %v, want %s", req.Paths, abs)
+	}
+}
+
+func contains(paths []string, want string) bool {
+	for _, p := range paths {
+		if p == want {
+			return true
+		}
+	}
+	return false
+}
+
+// TestBashIsNotALoginShell pins that the tool runs `bash -c`, not `bash -lc`:
+// a login shell sources /etc/profile, /etc/profile.d/* and — on the none
+// backend, where $HOME is the user's own — ~/.bash_profile, any of which can
+// put back what the sandbox's filtered environment left out.
+func TestBashIsNotALoginShell(t *testing.T) {
+	home := t.TempDir()
+	profile := "export WRIGHT_LOGIN_SHELL=sourced\n"
+	for _, name := range []string{".bash_profile", ".profile", ".bash_login"} {
+		if err := os.WriteFile(filepath.Join(home, name), []byte(profile), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := newFixture(t, func(d *tools.Deps) {
+		// os/exec keeps the last duplicate, so this replaces the fixture's HOME.
+		d.SandboxSpec.Env = append(d.SandboxSpec.Env, "HOME="+home)
+	})
+	got, err := f.text(tools.NameBash, `{"command":"echo login=[$WRIGHT_LOGIN_SHELL]"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "login=[]") {
+		t.Errorf("the shell sourced a profile:\n%s", got)
 	}
 }

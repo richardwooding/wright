@@ -68,6 +68,12 @@ type Deps struct {
 	// ssrfguard checks every dial, so redirects to internal addresses fail
 	// at connect time; a custom CheckRedirect is the place for domain rules.
 	Fetch *http.Client
+	// AllowLocalFetch lets web_fetch accept loopback, link-local, private
+	// and metadata hosts, which it otherwise refuses before making the
+	// request. wright never sets it — the guarded client refuses those
+	// addresses at dial time anyway — but a test serving from 127.0.0.1
+	// needs it.
+	AllowLocalFetch bool
 	// Search backs web_search. nil leaves web_search unregistered.
 	Search SearchProvider
 	// SpillDir receives full copies of truncated outputs. "" disables spills.

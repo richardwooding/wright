@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -57,8 +59,28 @@ func (d *Deps) webFetch() agentkit.Tool {
 	}
 }
 
-// parseFetchURL accepts absolute http(s) URLs only.
-func parseFetchURL(raw string) (*url.URL, error) {
+// blockedNames are host names that name the machine itself or a cloud
+// instance-metadata service. The list is the literal-name half of the
+// check; anything that only resolves to such an address is caught by the
+// guarded client at dial time.
+var blockedNames = map[string]bool{
+	"localhost":                true,
+	"metadata":                 true,
+	"metadata.google.internal": true,
+	"instance-data":            true,
+}
+
+// cgnat is the carrier-grade NAT range, which net.IP has no predicate for
+// and which reaches plenty of internal infrastructure.
+var cgnat = net.IPNet{IP: net.IPv4(100, 64, 0, 0), Mask: net.CIDRMask(10, 32)}
+
+// parseFetchURL accepts absolute http(s) URLs only, and refuses hosts that
+// name the local machine, a private network or an instance-metadata
+// service. This is defence in depth: the ssrfguard client validates every
+// dial (which also covers DNS names that resolve inward, and rebinding), so
+// this check exists to refuse the obvious cases early, before a request is
+// made and before the approval prompt shows a URL that could never work.
+func (d *Deps) parseFetchURL(raw string) (*url.URL, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, fmt.Errorf("invalid url: %w", err)
@@ -66,7 +88,75 @@ func parseFetchURL(raw string) (*url.URL, error) {
 	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, fmt.Errorf("url must be absolute http or https, got %q", raw)
 	}
+	if d.AllowLocalFetch {
+		return u, nil
+	}
+	if reason := blockedFetchHost(u.Hostname()); reason != "" {
+		return nil, fmt.Errorf("%w: %s is %s; web_fetch is for public URLs", ErrRefused, u.Host, reason)
+	}
 	return u, nil
+}
+
+// blockedFetchHost names why host may not be fetched, or "" when it may.
+func blockedFetchHost(host string) string {
+	h := strings.ToLower(strings.TrimSuffix(host, "."))
+	if blockedNames[h] || strings.HasSuffix(h, ".localhost") || strings.HasSuffix(h, ".internal") {
+		return "a local or metadata host name"
+	}
+	ip := parseHostIP(h)
+	if ip == nil {
+		return ""
+	}
+	switch {
+	case ip.IsLoopback():
+		return "a loopback address"
+	case ip.IsUnspecified():
+		return "the unspecified address"
+	case ip.IsLinkLocalUnicast(), ip.IsLinkLocalMulticast(), ip.IsInterfaceLocalMulticast():
+		return "a link-local address"
+	case ip.IsPrivate(), cgnat.Contains(ip):
+		return "a private address"
+	}
+	return ""
+}
+
+// parseHostIP parses the dotted, IPv6 and integer spellings of an address
+// (127.0.0.1, ::1, ::ffff:127.0.0.1, 2130706433, 0x7f000001, 0177.0.0.1),
+// because a resolver accepts all of them and a glob on the text does not.
+func parseHostIP(host string) net.IP {
+	if ip := net.ParseIP(host); ip != nil {
+		return ip
+	}
+	if n, err := strconv.ParseUint(host, 0, 32); err == nil {
+		return net.IPv4(byte(n>>24), byte(n>>16), byte(n>>8), byte(n))
+	}
+	return octalIPv4(host)
+}
+
+// octalIPv4 parses a dotted quad whose parts carry leading zeros, which
+// inet_aton reads as octal and net.ParseIP rejects outright.
+func octalIPv4(host string) net.IP {
+	parts := strings.Split(host, ".")
+	if len(parts) != 4 {
+		return nil
+	}
+	var quad [4]byte
+	for i, p := range parts {
+		if !strings.HasPrefix(p, "0") || len(p) < 2 {
+			n, err := strconv.ParseUint(p, 10, 8)
+			if err != nil {
+				return nil
+			}
+			quad[i] = byte(n)
+			continue
+		}
+		n, err := strconv.ParseUint(p, 8, 8)
+		if err != nil {
+			return nil
+		}
+		quad[i] = byte(n)
+	}
+	return net.IPv4(quad[0], quad[1], quad[2], quad[3])
 }
 
 func (d *Deps) describeFetch(args json.RawMessage) (policy.Request, Preview, error) {
@@ -74,7 +164,7 @@ func (d *Deps) describeFetch(args json.RawMessage) (policy.Request, Preview, err
 	if err := decode(args, &a); err != nil {
 		return policy.Request{}, Preview{}, err
 	}
-	u, err := parseFetchURL(a.URL)
+	u, err := d.parseFetchURL(a.URL)
 	if err != nil {
 		return policy.Request{}, Preview{}, err
 	}
@@ -83,7 +173,7 @@ func (d *Deps) describeFetch(args json.RawMessage) (policy.Request, Preview, err
 }
 
 func (d *Deps) runFetch(ctx context.Context, f *fetcher, a fetchArgs) (agentkit.Output, error) {
-	u, err := parseFetchURL(a.URL)
+	u, err := d.parseFetchURL(a.URL)
 	if err != nil {
 		return agentkit.Output{}, err
 	}
@@ -111,8 +201,10 @@ func (d *Deps) runFetch(ctx context.Context, f *fetcher, a fetchArgs) (agentkit.
 	}
 	b.WriteString("\n")
 	b.WriteString(text)
-	out, _ := Clip(b.String(), maxFetchText, d.SpillDir, spillID(ctx))
-	return agentkit.Text(d.redact(ctx, NameWebFetch, out)), nil
+	// Redact before Clip: Clip spills the full text to a file, so anything
+	// still secret at that point is written to disk unredacted.
+	out, _ := Clip(d.redact(ctx, NameWebFetch, b.String()), maxFetchText, d.SpillDir, spillID(ctx))
+	return agentkit.Text(out), nil
 }
 
 // userAgent is honest about who is asking.
@@ -306,7 +398,10 @@ func parseRobots(text, product string) *robotsRules {
 			r := &robotsRules{}
 			current = append(current, r)
 			switch {
-			case strings.EqualFold(val, product) || strings.HasPrefix(strings.ToLower(val), strings.ToLower(product)):
+			// The product token must match exactly (case-insensitively): a
+			// prefix match would hand us another crawler's group, so a site
+			// writing rules for "wrightbot" would silently bind "wright".
+			case strings.EqualFold(val, product):
 				ours = r
 			case val == "*":
 				star = r
