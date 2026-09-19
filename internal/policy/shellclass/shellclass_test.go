@@ -484,7 +484,8 @@ func TestInjectingEnvVarsAreOpaque(t *testing.T) {
 	if !slices.IsSorted(names) {
 		t.Errorf("InjectingEnvVars is not sorted: %v", names)
 	}
-	for _, want := range []string{"GOFLAGS", "GOEXPERIMENT", "GOPROXY", "GOPRIVATE", "CC", "CXX",
+	for _, want := range []string{
+		"GOFLAGS", "GOEXPERIMENT", "GOPROXY", "GOPRIVATE", "CC", "CXX",
 		"CGO_CFLAGS", "CGO_LDFLAGS", "RUSTFLAGS", "RUSTC_WRAPPER", "CARGO_BUILD_RUSTFLAGS",
 		"MAKEFLAGS", "PIP_INDEX_URL",
 	} {
@@ -618,6 +619,11 @@ func commandStart(script string, start int) bool {
 		return true
 	}
 	if strings.IndexByte("\n;&|({", script[k-1]) < 0 {
+		return false
+	}
+	// "{" opens a block only when a blank follows it: `{rm` is a single word,
+	// so `az {rm -rf ~` passes "{rm" to az and removes nothing.
+	if script[k-1] == '{' && k == start {
 		return false
 	}
 	redirect := k >= 2 && (script[k-1] == '&' || script[k-1] == '|') && (script[k-2] == '>' || script[k-2] == '<')
