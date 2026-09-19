@@ -137,6 +137,22 @@ func snippet(s string, from, to int) string {
 	return strconv.Quote(s[from:end])
 }
 
+// SignalKinds lists the distinct signal kinds in sig, first occurrence
+// first. It is what the prompt's warning attribute and the app's notice both
+// show: the kinds name what was seen without repeating the content.
+func SignalKinds(sig []Signal) []string {
+	seen := make(map[string]bool, len(sig))
+	out := make([]string, 0, len(sig))
+	for _, s := range sig {
+		if seen[s.Kind] {
+			continue
+		}
+		seen[s.Kind] = true
+		out = append(out, s.Kind)
+	}
+	return out
+}
+
 func sortSignals(sig []Signal) {
 	for i := 1; i < len(sig); i++ {
 		for j := i; j > 0 && sig[j].Offset < sig[j-1].Offset; j-- {

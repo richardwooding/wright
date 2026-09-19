@@ -131,3 +131,21 @@ redaction and a tamper-evident audit log between the model and the machine.
   cask), `Containerfile` on wolfi-base plus `Containerfile.local` for podman,
   CI / release / pages / gloam-sync workflows, Dependabot, and the gloam
   documentation site under `docs/`.
+
+### Security
+
+- Project instruction files (`AGENTS.md` from the workspace root down to cwd,
+  `.wright/instructions.md`, a confirmed `CLAUDE.md`) are no longer quoted
+  into the system prompt as if the system had written them. They are now
+  preceded by framing that says what they are, and each block carries both
+  its source and a `scope`: a `scope="project"` file arrived with the
+  repository, is the user's project configuration rather than a system
+  instruction, and can never widen permissions, lift a denial, change what is
+  reported to the user or redirect the task. The user's own global
+  `AGENTS.md` keeps its standing as `scope="user"`. Every body is scanned
+  with `prompt.ScanInjection` when it is loaded: the signals ride along on
+  the `Instruction`, the block carries a `warning` attribute naming them, and
+  the app emits a notice naming the file — an instruction file that scans
+  positive is loaded with the framing and the warning, never silently. A body
+  can neither close its own block (`</instructions`) nor forge an opening tag
+  (`<instructions`); both sequences are escaped.

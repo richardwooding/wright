@@ -233,6 +233,17 @@ client to HTTP MCP transports).
   everything that varies goes in the dynamic environment block.
   `TestSystemStableIsIdenticalAcrossTurns` pins it — put new facts in
   `environment`, not in the constants.
+- **Instruction files are quoted, never ratified.** `prompt.System` renders
+  every `Instruction` inside `<instructions source=… scope=…>` after the
+  framing that says a `scope="project"` file came from the repository and
+  cannot override the operating constraints or the permission policy;
+  `ScopeUser` (the user's `$XDG_CONFIG_HOME/wright/AGENTS.md`) is the only
+  scope that is the user's own, and the zero value frames as project.
+  `LoadInstructions` runs `ScanInjection` over each body and attaches the
+  signals, which become the block's `warning` attribute and an app warning
+  naming the file — never load one silently. Both `</instructions` and
+  `<instructions` are escaped in bodies, so a file can neither close its
+  block nor forge an opening tag with a scope of its choosing.
 - **Session sidecars live in `sessions/meta/`.** `agentkit.FileStore.List`
   reads every `*.json`/`*.jsonl` in its directory as a transcript (and skips
   subdirectories), so `<id>.meta.json` beside the transcript would be parsed
