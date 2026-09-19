@@ -146,7 +146,9 @@ func (b *Built) redaction(args []string) (string, error) {
 // built before the acceptance, so the effect starts with the next session.
 func (b *Built) trustProject() (string, error) {
 	path := b.Layered.Paths.ProjectSettingsFile()
-	hash, err := trust.HashFile(path)
+	// Both project layers are trusted as a unit, so the hash covers
+	// settings.local.json too.
+	hash, err := ProjectHash(b.Layered.Paths)
 	if err != nil {
 		return "", err
 	}
@@ -154,11 +156,12 @@ func (b *Built) trustProject() (string, error) {
 		return "no project settings file (" + b.WS.Rel(path) + ") to trust", nil
 	}
 	if b.Trusted {
-		return b.WS.Rel(path) + " is already trusted", nil
+		return b.WS.Rel(b.Layered.Paths.ProjectDir) + " is already trusted", nil
 	}
 	store := trust.Open(b.Layered.Paths.TrustFile())
 	if err := store.AcceptProject(b.WS.Root(), hash); err != nil {
 		return "", err
 	}
-	return TrustPrompt(b.WS.Rel(path), b.Layered.Project) + "\naccepted: its allow rules, extra directories, env passthrough and MCP servers apply from the next session", nil
+	return TrustPrompt(b.WS.Rel(b.Layered.Paths.ProjectDir), b.Layered.Project, b.Layered.ProjectLocal) +
+		"\naccepted: its settings apply in full from the next session", nil
 }

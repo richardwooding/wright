@@ -9,6 +9,7 @@ import (
 	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/sandbox"
+	"github.com/richardwooding/wright/internal/trust"
 )
 
 // Bypass refusals. They are errors, not warnings: a bypass that silently
@@ -35,9 +36,28 @@ func (b *builder) permissions() error {
 	b.pol = policy.New(b.ws, mode, layers...)
 	l := b.layered
 	b.pol.SetPersist(func(r policy.Rule) error {
-		return l.SaveProjectLocal(func(s *config.Settings) { appendRule(&s.Permissions, r) })
+		if err := l.SaveProjectLocal(func(s *config.Settings) { appendRule(&s.Permissions, r) }); err != nil {
+			return err
+		}
+		return b.retrustLocal()
 	})
 	return nil
+}
+
+// retrustLocal re-records the project's trust hash after wright itself wrote
+// settings.local.json. The file is part of the hashed unit, so a persisted
+// grant would otherwise make the project untrusted next session — but only a
+// project that was already trusted is re-accepted, so writing the file can
+// never promote an untrusted project.
+func (b *builder) retrustLocal() error {
+	if !b.trusted {
+		return nil
+	}
+	hash, err := ProjectHash(b.layered.Paths)
+	if err != nil || hash == "" {
+		return err
+	}
+	return trust.Open(b.layered.Paths.TrustFile()).AcceptProject(b.ws.Root(), hash)
 }
 
 // resolveMode applies flag > WRIGHT_MODE/settings > default, then the bypass
@@ -74,12 +94,13 @@ func (b *builder) resolveMode() (policy.Mode, error) {
 	return policy.ModeBypass, nil
 }
 
-// ruleLayers parses builtin < user < project < project.local < flags. The
-// project layer contributes allow rules only when trusted.
+// ruleLayers parses builtin < user < project < project.local < flags. Both
+// project layers contribute allow rules only when trusted: settings.local.json
+// is a file in the repository too, so it is gated with the shared one.
 func (b *builder) ruleLayers() ([][]policy.Rule, error) {
-	project := b.layered.Project.Permissions
+	project, local := b.layered.Project.Permissions, b.layered.ProjectLocal.Permissions
 	if !b.trusted {
-		project.Allow = nil
+		project.Allow, local.Allow = nil, nil
 	}
 	steps := []struct {
 		perms config.Permissions
@@ -87,7 +108,7 @@ func (b *builder) ruleLayers() ([][]policy.Rule, error) {
 	}{
 		{b.user.Permissions, policy.SourceUser},
 		{project, policy.SourceProject},
-		{b.layered.ProjectLocal.Permissions, policy.SourceProjectLocal},
+		{local, policy.SourceProjectLocal},
 		{config.Permissions{Allow: b.o.Allow, Deny: b.o.Deny}, policy.SourceFlag},
 	}
 	layers := [][]policy.Rule{policy.Builtin(), subAgentRules(b.agentDefs)}

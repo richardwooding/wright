@@ -91,9 +91,10 @@ func InitProject(dir string) ([]string, error) {
 	return written, nil
 }
 
-// trustFile accepts the project settings file as it stands on disk.
+// trustFile accepts the project settings as they stand on disk — both
+// layers, since they are hashed and trusted as a unit.
 func trustFile(paths config.Paths, root string) error {
-	hash, err := trust.HashFile(paths.ProjectSettingsFile())
+	hash, err := ProjectHash(paths)
 	if err != nil {
 		return err
 	}

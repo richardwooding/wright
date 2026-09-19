@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	akskills "github.com/richardwooding/agentkit/skills"
 
@@ -73,9 +74,9 @@ func (b *builder) env(key string) string {
 func (b *builder) headless() bool { return b.o.Print || !b.o.IsTerminal }
 
 // workspaceAndConfig opens the workspace, loads the settings layers and
-// applies the trust rule: a project's allow rules, extra directories, env
-// passthrough and MCP servers are inert until the user has accepted that
-// exact settings file.
+// applies the trust rule: everything in a project's settings that could
+// *widen* what the agent may do is inert until the user has accepted those
+// exact files — both .wright/settings.json and .wright/settings.local.json.
 func (b *builder) workspaceAndConfig() error {
 	cwd, err := resolveCwd(b.o.Cwd)
 	if err != nil {
@@ -123,13 +124,52 @@ func (b *builder) loadAgents() {
 	b.agentDefs = defs
 }
 
-// checkTrust decides whether the project layer applies. Without a settings
-// file there is nothing to trust. Otherwise the stored hash must match; an
-// interactive terminal may accept it now through Confirm, everything else
-// runs with the project layer inert and says so.
+// ProjectHash identifies a project's settings *as a unit*: the shared
+// .wright/settings.json and the per-developer .wright/settings.local.json
+// together. Hashing them separately let a repository ship only the local
+// file and be trusted by default, because "no settings.json" used to mean
+// "nothing to trust". Empty means the project has no settings file at all.
+func ProjectHash(paths config.Paths) (string, error) {
+	shared, err := trust.HashFile(paths.ProjectSettingsFile())
+	if err != nil {
+		return "", err
+	}
+	local, err := trust.HashFile(paths.ProjectLocalFile())
+	if err != nil {
+		return "", err
+	}
+	if shared == "" && local == "" {
+		return "", nil
+	}
+	return trust.HashStrings(shared, local), nil
+}
+
+// projectFiles names the project settings files that exist, for messages.
+func (b *builder) projectFiles() string {
+	var names []string
+	for _, p := range []string{b.layered.Paths.ProjectSettingsFile(), b.layered.Paths.ProjectLocalFile()} {
+		if _, err := os.Stat(p); err == nil {
+			names = append(names, b.ws.Rel(p))
+		}
+	}
+	return strings.Join(names, " and ")
+}
+
+// untrustedNote lists everything an untrusted project layer loses, so the
+// note on stderr is the truth: naming less than is dropped is worse than
+// saying nothing, because the user reads it as an assurance.
+const untrustedNote = "its allow rules, permission mode, additional directories, env passthrough, " +
+	"MCP servers, sandbox settings (network, extra read-write and read-only mounts), " +
+	"model, skills directories, git trailer, instruction files and any \"redaction\": false are ignored; " +
+	"its ask and deny rules and \"redaction\": true still apply"
+
+// checkTrust decides whether the project layers apply. With no project
+// settings file at all there is nothing to trust; as soon as one exists —
+// shared or local — the stored hash must match. An interactive terminal may
+// accept it now through Confirm, everything else runs with the project
+// layers inert and says so.
 func (b *builder) checkTrust() bool {
-	path := b.layered.Paths.ProjectSettingsFile()
-	hash, err := trust.HashFile(path)
+	hash, err := ProjectHash(b.layered.Paths)
 	if err != nil {
 		b.warn("project settings unreadable (%v); treating as untrusted", err)
 		return false
@@ -143,29 +183,32 @@ func (b *builder) checkTrust() bool {
 		return true
 	}
 	if b.o.Confirm != nil && !b.headless() {
-		if b.o.Confirm(TrustPrompt(path, b.layered.Project)) {
+		if b.o.Confirm(TrustPrompt(b.projectFiles(), b.layered.Project, b.layered.ProjectLocal)) {
 			if err := store.AcceptProject(root, hash); err != nil {
 				b.warn("could not record project trust: %v", err)
 			}
 			return true
 		}
 	}
-	b.warn("%s is not trusted yet: its allow rules, extra directories, env passthrough and MCP servers are ignored (run /trust to review and accept it)", b.ws.Rel(path))
+	b.warn("%s is not trusted yet: %s (run /trust to review and accept it)", b.projectFiles(), untrustedNote)
 	return false
 }
 
-// effectiveSettings rebuilds the merged settings with the project layer
-// gated by trust. An untrusted project still contributes ask and deny rules:
-// tightening is always free.
+// effectiveSettings rebuilds the merged settings with *both* project layers
+// gated by trust — settings.local.json is a file in the repository like any
+// other, so it cannot be the one layer that applies unread. An untrusted
+// project still contributes ask and deny rules and redaction: tightening is
+// always free.
 func effectiveSettings(l *config.Layered, user config.Settings, trusted bool, env func(string) string) config.Settings {
 	s := config.Defaults()
 	config.Merge(&s, user)
 	if trusted {
 		config.Merge(&s, l.Project)
+		config.Merge(&s, l.ProjectLocal)
 	} else {
 		config.Merge(&s, tighteningOnly(l.Project))
+		config.Merge(&s, tighteningOnly(l.ProjectLocal))
 	}
-	config.Merge(&s, l.ProjectLocal)
 	if v := env("WRIGHT_MODEL"); v != "" {
 		s.Model.Default = v
 	}
@@ -178,23 +221,53 @@ func effectiveSettings(l *config.Layered, user config.Settings, trusted bool, en
 	return s
 }
 
-// tighteningOnly keeps the parts of a project layer that can only restrict.
+// tighteningOnly keeps the parts of a project layer that can only restrict:
+// ask and deny rules, and redaction when it is turned *on*. Everything else
+// — the mode, the sandbox mounts, the network switch, redaction: false —
+// can only widen what the agent may do, so it waits for trust.
 func tighteningOnly(p config.Settings) config.Settings {
-	return config.Settings{Permissions: config.Permissions{Ask: p.Permissions.Ask, Deny: p.Permissions.Deny}}
+	out := config.Settings{Permissions: config.Permissions{Ask: p.Permissions.Ask, Deny: p.Permissions.Deny}}
+	if p.Redaction != nil && *p.Redaction {
+		out.Redaction = p.Redaction
+	}
+	return out
 }
 
 // TrustPrompt renders what accepting a project's settings would enable, for
-// the trust question (interactive Confirm now, the TUI's /trust later).
-func TrustPrompt(path string, p config.Settings) string {
+// the trust question (interactive Confirm now, the TUI's /trust later). Both
+// project layers are shown: they are trusted, and dropped, together.
+func TrustPrompt(path string, layers ...config.Settings) string {
+	var p config.Settings
+	for _, l := range layers {
+		config.Merge(&p, l)
+	}
 	s := fmt.Sprintf("%s wants to:\n", path)
 	if n := len(p.Permissions.Allow); n > 0 {
 		s += fmt.Sprintf("  allow %d rule(s): %v\n", n, p.Permissions.Allow)
+	}
+	if p.Permissions.Mode != "" {
+		s += fmt.Sprintf("  start in permission mode %q\n", p.Permissions.Mode)
 	}
 	if n := len(p.Permissions.AdditionalDirs); n > 0 {
 		s += fmt.Sprintf("  add %d directory(ies): %v\n", n, p.Permissions.AdditionalDirs)
 	}
 	if n := len(p.Sandbox.PassEnv); n > 0 {
 		s += fmt.Sprintf("  pass %d env var(s) into the sandbox: %v\n", n, p.Sandbox.PassEnv)
+	}
+	if p.Sandbox.AllowNetwork {
+		s += "  give sandboxed commands the network\n"
+	}
+	if p.Sandbox.Backend != "" {
+		s += fmt.Sprintf("  use sandbox backend %q\n", p.Sandbox.Backend)
+	}
+	if n := len(p.Sandbox.ExtraRW); n > 0 {
+		s += fmt.Sprintf("  mount %d directory(ies) read-write in the sandbox: %v\n", n, p.Sandbox.ExtraRW)
+	}
+	if n := len(p.Sandbox.ExtraRO); n > 0 {
+		s += fmt.Sprintf("  mount %d directory(ies) read-only in the sandbox: %v\n", n, p.Sandbox.ExtraRO)
+	}
+	if p.Redaction != nil && !*p.Redaction {
+		s += "  turn secret redaction off\n"
 	}
 	if n := len(p.MCPServers); n > 0 {
 		s += fmt.Sprintf("  configure %d MCP server(s)\n", n)

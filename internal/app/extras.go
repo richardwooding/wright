@@ -156,7 +156,7 @@ func retrust(eff Effective) error {
 	if !eff.Trusted {
 		return nil
 	}
-	hash, err := trust.HashFile(eff.Layered.Paths.ProjectSettingsFile())
+	hash, err := ProjectHash(eff.Layered.Paths)
 	if err != nil || hash == "" {
 		return err
 	}
