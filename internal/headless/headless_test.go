@@ -162,7 +162,7 @@ func TestExitCodes(t *testing.T) {
 				t.Fatalf("json format must print exactly one result line, got %+v", lines)
 			}
 			res := lines[0]
-			if res.ExitCode != tt.wantCode || res.StopReason != tt.wantStop {
+			if res.ExitCode == nil || *res.ExitCode != tt.wantCode || res.StopReason != tt.wantStop {
 				t.Fatalf("result = %+v", res)
 			}
 			if tt.wantCode == headless.ExitApprovalRequired && !strings.Contains(res.Error, engine.HeadlessDenialMarker) {

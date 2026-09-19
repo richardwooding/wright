@@ -80,7 +80,7 @@ type Line struct {
 	ToolCalls  int    `json:"tool_calls,omitempty"`
 	DurationMS int64  `json:"duration_ms,omitempty"`
 	SessionID  string `json:"session_id,omitempty"`
-	ExitCode   int    `json:"exit_code"`
+	ExitCode   *int   `json:"exit_code,omitempty"` // pointer so 0 still appears on the result line
 }
 
 // ToolLine identifies a tool call.
@@ -244,7 +244,7 @@ func (r *runner) exitCode() int {
 }
 
 func (r *runner) resultLine(code int) Line {
-	l := Line{Type: "result", SessionID: r.e.SessionID(), ExitCode: code, Error: r.errText}
+	l := Line{Type: "result", SessionID: r.e.SessionID(), ExitCode: &code, Error: r.errText}
 	if fin := r.fin; fin != nil {
 		l.Output, l.StopReason, l.Steps, l.ToolCalls = fin.Output, fin.StopReason, fin.Steps, fin.ToolCalls
 		l.Usage, l.CostUSD, l.DurationMS = usageLine(fin.Usage), fin.Cost, fin.Duration.Milliseconds()
