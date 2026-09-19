@@ -9,8 +9,8 @@ Go 1.27, pure Go, no cgo): a Bubble Tea v2 TUI and a headless mode around an
 `agentkit` agent, with a permission engine, an OS sandbox, secret redaction and a
 tamper-evident audit log between the model and the machine. Generic agent/LLM
 plumbing belongs in `agentkit`/`llmkit`; everything coding-specific lives here.
-It works end to end today — `wright`, `wright -p`, sessions, audit — and is
-pre-1.0 and untagged; MCP and skills are still stubs. User-facing documentation
+It works end to end today — `wright`, `wright -p`, sessions, audit, MCP,
+skills, sub-agents — and is pre-1.0, first tagged as v0.1.0. User-facing documentation
 lives in `README.md` and `docs/index.html`; keep both honest about what exists,
 because "no invented capabilities" is part of the product.
 

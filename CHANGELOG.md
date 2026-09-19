@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-09-20
+
 First working version of wright: an interactive TUI and a headless runner
 around an `agentkit` agent, with a permission engine, an OS sandbox, secret
 redaction and a tamper-evident audit log between the model and the machine.
