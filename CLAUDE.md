@@ -144,6 +144,30 @@ client to HTTP MCP transports).
   analyser cannot see through sets `Unknown`, and `policy` refuses to match
   allow rules against Unknown scripts — that is the property that makes allow
   rules safe to write.
+- **An option or an assignment can be a command.** Every name in a table's
+  safe-read set (`gitSafeRead`, the readers) is auto-allowed with *no*
+  prompt, so any option of it that names a program to run (`git bisect run`,
+  `git grep --open-files-in-pager`/`-O`, `difftool --extcmd`, `sort
+  --compress-program`), a file to read (`git blame --contents`) or a file to
+  write (`git show|log|diff --output`, `git config --file`, `git archive -o`)
+  is arbitrary execution or disclosure behind a name that reads as harmless.
+  Before adding a command there, read its options for `--*-pager`,
+  `--*-command`, `--*-tool`, `--*-filter`, `--output`, `--contents`, `--file`
+  and `--no-index`; an option that runs a program is `Privilege` *and*
+  opaque, and one that names a path is a declared read or write so the
+  secret/protected floors and the containment checks see it. The same holds
+  for an environment prefix: an assignment lands in `Command.Env`, never in
+  the argv an allow rule matches, so `GOFLAGS=-toolexec=./x go build ./...`
+  rode the builtin `bash(go build *)` rule until `dangerousVar` learned the
+  build variables. They are exported as `shellclass.InjectingEnvVars` —
+  `sandbox.envStrip` covers the same ground and should read that list rather
+  than keep a second copy.
+- **A git command can be pointed at another repository.** `-C`,
+  `--git-dir` and `--work-tree` bring a foreign config (aliases, hooks path,
+  filters) and change what every relative path in the command means, so a
+  value outside the workspace is opaque. The global options taint the
+  subcommand's result instead of replacing it — returning early there would
+  drop the hard deny `git push --force origin main` raises.
 - **The hard-deny set is a floor, not a rule.** It is checked before rules and
   before the mode table, including in bypass mode, and it counts
   (`Engine.HardDenials`; the run is cancelled after three). Add new entries in

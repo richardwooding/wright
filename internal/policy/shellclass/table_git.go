@@ -12,19 +12,19 @@ var defaultProtectedBranches = []string{"main", "master", "release/*"}
 
 var (
 	gitSafeRead = map[string]bool{
-		"status": true, "diff": true, "log": true, "show": true, "blame": true, "rev-parse": true, "describe": true,
+		"status": true, "rev-parse": true, "describe": true,
 		"shortlog": true, "ls-files": true, "ls-tree": true, "cat-file": true, "rev-list": true, "name-rev": true,
-		"grep": true, "help": true, "version": true, "--version": true, "check-ignore": true, "check-attr": true,
-		"merge-base": true, "diff-tree": true, "diff-index": true, "diff-files": true, "for-each-ref": true, "var": true,
-		"count-objects": true, "fsck": true, "whatchanged": true, "range-diff": true, "show-ref": true, "verify-commit": true,
-		"verify-tag": true, "cherry": true, "bisect": true, "annotate": true, "show-branch": true, "status-porcelain": true,
+		"help": true, "version": true, "--version": true, "check-ignore": true, "check-attr": true,
+		"merge-base": true, "for-each-ref": true, "var": true,
+		"count-objects": true, "fsck": true, "show-ref": true, "verify-commit": true,
+		"verify-tag": true, "cherry": true, "show-branch": true, "status-porcelain": true,
 	}
 	gitMutating = map[string]bool{
 		"add": true, "commit": true, "switch": true, "merge": true, "rebase": true, "cherry-pick": true, "revert": true,
 		"mv": true, "rm": true, "apply": true, "am": true, "init": true, "notes": true, "update-index": true,
 		"replace": true, "commit-tree": true, "write-tree": true, "read-tree": true, "mktree": true, "hash-object": true,
-		"fast-import": true, "fast-export": true, "format-patch": true, "archive": true, "bundle": true, "mailinfo": true,
-		"mergetool": true, "difftool": true, "rerere": true, "sparse-checkout": true, "maintenance": true, "symbolic-ref": true,
+		"fast-import": true, "fast-export": true, "mailinfo": true,
+		"rerere": true, "sparse-checkout": true, "maintenance": true, "symbolic-ref": true,
 		"pack-refs": true, "repack": true, "lfs": true,
 	}
 	gitNetwork = map[string]bool{
@@ -40,12 +40,26 @@ func registerGit() { register(handleGit, "git") }
 // handleGit peels global options (-C dir, -c key=value, --git-dir) and
 // dispatches on the subcommand. `-c core.hooksPath=…` is hard-denied because
 // a hook path pointed at the workspace turns the next `git commit` into
-// arbitrary code execution.
+// arbitrary code execution. A global option that only taints the command —
+// a repository outside the workspace — is merged into the subcommand's
+// result rather than replacing it, so a hard deny the subcommand would have
+// raised is not lost on the way.
 func handleGit(a *analyzer, name string, args []word) result {
-	i, r, done := gitGlobalOptions(args)
+	i, taint, done := a.gitGlobalOptions(args)
 	if done {
-		return r
+		return taint
 	}
+	r := a.gitSubcommand(args, i)
+	if taint.unknown {
+		r.unknown = true
+		r.raise(taint.class)
+		r.reason = joinReason(r.reason, taint.reason)
+	}
+	return r
+}
+
+// gitSubcommand classifies the subcommand at args[i] and its arguments.
+func (a *analyzer) gitSubcommand(args []word, i int) result {
 	if i >= len(args) {
 		return safe("git")
 	}
@@ -68,8 +82,10 @@ func handleGit(a *analyzer, name string, args []word) result {
 }
 
 // gitGlobalOptions skips git's global options and returns the index of the
-// subcommand. done is true when an option itself decided the outcome.
-func gitGlobalOptions(args []word) (i int, r result, done bool) {
+// subcommand. done is true when an option itself decided the outcome; when
+// it is false, a taint with unknown set still applies to whatever the
+// subcommand turns out to be.
+func (a *analyzer) gitGlobalOptions(args []word) (i int, taint result, done bool) {
 	for i < len(args) && isFlag(args[i].text) {
 		t := args[i].text
 		if setting, n, ok := gitConfigArg(args, i); ok {
@@ -79,16 +95,61 @@ func gitGlobalOptions(args []word) (i int, r result, done bool) {
 			i += n
 			continue
 		}
+		if opt, val, n, ok := gitLocationArg(args, i); ok {
+			if r, bad := a.gitLocation(opt, val); bad {
+				taint = r
+			}
+			i += n
+			continue
+		}
 		switch {
 		case t == "--exec-path" || strings.HasPrefix(t, "--exec-path="):
 			return i, opaque("git --exec-path overrides the git binaries"), true
-		case t == "-C" || t == "--git-dir" || t == "--work-tree" || t == "--namespace":
+		case t == "--namespace":
 			i += 2
 		default:
 			i++
 		}
 	}
-	return i, result{}, false
+	return i, taint, false
+}
+
+// gitLocationOptions point git at another repository or working tree.
+var gitLocationOptions = []string{"-C", "--git-dir", "--work-tree"}
+
+// gitLocationArg recognises the separate and glued spellings of those
+// options and returns how many argv words the option takes. A missing value
+// is reported as dynamic, which makes the command opaque.
+func gitLocationArg(args []word, i int) (opt string, val word, n int, ok bool) {
+	t := args[i].text
+	for _, o := range gitLocationOptions {
+		switch {
+		case t == o:
+			if i+1 < len(args) {
+				return o, args[i+1], 2, true
+			}
+			return o, word{dynamic: true}, 1, true
+		case strings.HasPrefix(t, o+"="):
+			return o, word{text: strings.TrimPrefix(t, o+"="), dynamic: args[i].dynamic}, 1, true
+		}
+	}
+	return "", word{}, 0, false
+}
+
+// gitLocation judges the value of -C/--git-dir/--work-tree. A repository or
+// working tree outside the workspace brings its own configuration with it —
+// aliases, a hooks path, filter drivers — and every path the rest of the
+// command names is resolved against it, so the analysis describes a
+// different tree from the one that runs. Such a command is not denied, but
+// it is opaque: it may never ride an allow rule.
+func (a *analyzer) gitLocation(opt string, v word) (result, bool) {
+	if v.dynamic {
+		return opaque("git " + opt + " with a dynamic path"), true
+	}
+	if _, inside, err := a.ws.Resolve(v.text); err != nil || !inside {
+		return opaque("git " + opt + " points outside the workspace"), true
+	}
+	return result{}, false
 }
 
 // gitConfigArg recognises the `-c key=value` forms (separate, glued and
@@ -217,20 +278,37 @@ func gitConfigInert(key string) bool {
 
 // gitSubcommands need argument inspection.
 var gitSubcommands = map[string]func(a *analyzer, rest []word) result{
-	"push":       gitPush,
-	"config":     gitConfig,
-	"branch":     gitBranch,
-	"checkout":   gitCheckout,
-	"reset":      gitReset,
-	"clean":      gitClean,
-	"stash":      gitStash,
-	"reflog":     gitReflog,
-	"gc":         gitGC,
-	"remote":     gitRemote,
-	"submodule":  gitSubmodule,
-	"worktree":   gitWorktree,
-	"tag":        gitTag,
-	"update-ref": gitUpdateRef,
+	"push":         gitPush,
+	"config":       gitConfig,
+	"branch":       gitBranch,
+	"checkout":     gitCheckout,
+	"reset":        gitReset,
+	"clean":        gitClean,
+	"stash":        gitStash,
+	"reflog":       gitReflog,
+	"gc":           gitGC,
+	"remote":       gitRemote,
+	"submodule":    gitSubmodule,
+	"worktree":     gitWorktree,
+	"tag":          gitTag,
+	"update-ref":   gitUpdateRef,
+	"bisect":       gitBisect,
+	"grep":         gitGrep,
+	"blame":        gitBlame,
+	"annotate":     gitBlame,
+	"diff":         gitDiffFamily("diff"),
+	"show":         gitDiffFamily("show"),
+	"log":          gitDiffFamily("log"),
+	"whatchanged":  gitDiffFamily("whatchanged"),
+	"range-diff":   gitDiffFamily("range-diff"),
+	"diff-tree":    gitDiffFamily("diff-tree"),
+	"diff-index":   gitDiffFamily("diff-index"),
+	"diff-files":   gitDiffFamily("diff-files"),
+	"difftool":     gitToolCommand("difftool"),
+	"mergetool":    gitToolCommand("mergetool"),
+	"archive":      gitArchive,
+	"format-patch": gitFormatPatch,
+	"bundle":       gitBundle,
 }
 
 // gitPush: a plain push is Network(+mutating remote). Forced or deleting
@@ -304,9 +382,16 @@ func (a *analyzer) protectedBranch(ref string) bool {
 }
 
 // gitConfig: reads are safe; writes are mutating; global/system writes and
-// anything touching core.hooksPath are hard-denied.
+// anything touching core.hooksPath are hard-denied. `--file <path>` makes
+// the command an ordinary file reader or writer — `git config --file
+// ~/.bashrc alias.x y` wrote a startup file, and `--file <secret> --list`
+// opened one — so the path is declared and the usual checks apply.
 func gitConfig(a *analyzer, rest []word) result {
+	file, hasFile := flagValue(rest, "--file", "-f")
 	nf := texts(nonFlags(rest))
+	if hasFile && len(nf) > 0 && nf[0] == file.text {
+		nf = nf[1:] // the option's value, not a config key
+	}
 	if slices.ContainsFunc(nf, isHooksPath) {
 		return privilegeDeny("git config core.hooksPath overrides hooks")
 	}
@@ -314,12 +399,20 @@ func gitConfig(a *analyzer, rest []word) result {
 	writeFlag := hasFlag(rest, "--unset", "--unset-all", "--replace-all", "--add", "--remove-section", "--rename-section", "--edit", "-e", "set", "unset")
 	isWrite := writeFlag || (!readFlag && len(nf) >= 2) || (len(nf) >= 1 && (nf[0] == "set" || nf[0] == "unset"))
 	if !isWrite {
-		return safe("git config read")
+		r := safe("git config read")
+		if hasFile {
+			a.readFiles(&r, []word{file})
+		}
+		return r
 	}
 	if hasFlag(rest, "--global", "--system", "--worktree") {
 		return privilegeDeny("git config writes outside the repository")
 	}
-	return mutating("git config write")
+	r := mutating("git config write")
+	if hasFile {
+		a.writeFiles(&r, []word{file}, false)
+	}
+	return r
 }
 
 func gitBranch(a *analyzer, rest []word) result {
@@ -436,6 +529,216 @@ func gitTag(a *analyzer, rest []word) result {
 		return safe("git tag list")
 	}
 	return mutating("git tag create")
+}
+
+// gitDiffFamily builds the handler for a read-only command that takes git's
+// diff options. `--output=<file>` is one of them: `git show --output=/etc/x
+// HEAD` and `git diff --output=/tmp/z` both classified safe-read while
+// writing a file the policy never saw — outside the sandbox that lands
+// anywhere, and in plan mode it let a "read-only" command write at all. The
+// value is now a declared write, the way the reader specs treat `sort -o`.
+func gitDiffFamily(sub string) func(a *analyzer, rest []word) result {
+	label := "git " + sub
+	return func(a *analyzer, rest []word) result {
+		r := safe(label)
+		if v, ok := flagValue(rest, "--output"); ok {
+			r.reason = joinReason(r.reason, label+" writes its output file")
+			a.writeFiles(&r, []word{v}, true)
+		}
+		return r
+	}
+}
+
+// gitToolCommand builds the handler for difftool/mergetool: `--extcmd=<cmd>`
+// (`-x`) runs that command for every changed or conflicted file, and
+// `--tool=<name>` selects a tool whose command line comes from
+// configuration. Neither may ride an allow rule written for the command
+// name alone.
+func gitToolCommand(sub string) func(a *analyzer, rest []word) result {
+	label := "git " + sub
+	return func(a *analyzer, rest []word) result {
+		switch {
+		case hasFlag(rest, "--extcmd", "-x"):
+			return result{class: Privilege, unknown: true, reason: label + " --extcmd runs a program of the caller's choosing"}
+		case hasFlag(rest, "--tool", "-t"):
+			return opaque(label + " --tool runs a configured program")
+		}
+		return mutating(label)
+	}
+}
+
+// gitArchive writes the file named by -o/--output, anywhere on the disk, and
+// reaches the network with --remote; both were invisible in a bare
+// "git archive" classification.
+func gitArchive(a *analyzer, rest []word) result {
+	r := mutating("git archive")
+	if hasFlag(rest, "--remote") {
+		r = network("git archive --remote")
+	}
+	if v, ok := flagValue(rest, "-o", "--output"); ok {
+		a.writeFiles(&r, gitFileOperand(v), true)
+	}
+	return r
+}
+
+// gitFormatPatch writes one file per commit into the directory named by
+// -o/--output-directory (the working directory by default).
+func gitFormatPatch(a *analyzer, rest []word) result {
+	r := mutating("git format-patch")
+	if v, ok := flagValue(rest, "-o", "--output-directory"); ok {
+		a.writeFiles(&r, gitFileOperand(v), false)
+	}
+	return r
+}
+
+// gitBundle: `create` writes the bundle file it is given — any file, including
+// one outside the repository — and the others read one.
+func gitBundle(a *analyzer, rest []word) result {
+	sub := first(rest)
+	label := strings.TrimRight("git bundle "+sub, " ")
+	nf := nonFlags(rest)
+	var operand []word
+	if len(nf) > 1 {
+		operand = gitFileOperand(nf[1])
+	}
+	switch sub {
+	case "create":
+		r := mutating(label)
+		a.writeFiles(&r, operand, true)
+		return r
+	case "verify", "list-heads":
+		r := safe(label)
+		a.readFiles(&r, operand)
+		return r
+	case "unbundle":
+		r := mutating(label)
+		a.readFiles(&r, operand)
+		return r
+	}
+	return mutating(label)
+}
+
+// gitFileOperand drops the "-" that means stdin or stdout, which is not a
+// file the workspace rules apply to.
+func gitFileOperand(v word) []word {
+	if v.text == "-" {
+		return nil
+	}
+	return []word{v}
+}
+
+// gitBlameFiles are the blame options whose value is a file blame opens:
+// --contents supplies the text to annotate and -S a file of revisions.
+var gitBlameFiles = []string{"--contents", "-S"}
+
+// gitBlame: `git blame --contents <path> HEAD -- <tracked>` prints every line
+// of <path> with the annotation, whatever and wherever <path> is — a private
+// key, an .env file, anything outside the workspace. The handler never parsed
+// the option, so the path was not a declared read and neither the
+// secret-file hard deny nor the containment check ever saw it. Declaring it
+// puts both back in the way. `annotate` is the same command under its older
+// name.
+func gitBlame(a *analyzer, rest []word) result {
+	r := safe("git blame")
+	for _, opt := range gitBlameFiles {
+		if v, ok := flagValue(rest, opt); ok {
+			a.readFiles(&r, []word{v})
+		}
+	}
+	return r
+}
+
+// gitGrepSpec reads git grep's options with the reader machinery so that an
+// option value is never mistaken for a pathspec, and names the option that
+// runs a program.
+var gitGrepSpec = readerSpec{
+	skip:    1,
+	pattern: []string{"-e", "-f", "--regexp", "--file"},
+	value: vals("-e", "-f", "--regexp", "--file", "-m", "--max-count", "-A", "-B", "-C",
+		"--after-context", "--before-context", "--context", "--threads", "--max-depth"),
+	exec: []string{"--open-files-in-pager"},
+}
+
+// gitGrep: `--open-files-in-pager=<cmd>` (and its glued `-O<cmd>` spelling)
+// runs that program on every matching file, so a search classified safe-read
+// was arbitrary code execution. The operands are pathspecs of tracked
+// content, except after a `--` separator or with `--no-index`, which searches
+// the working tree instead of the index and so will happily print a file the
+// repository never tracked: `git grep --no-index -e . -- .env` read a secret
+// the declared-read checks never saw.
+func gitGrep(a *analyzer, rest []word) result {
+	files, _, exec := gitGrepSpec.split(rest)
+	if exec == "" && gitGrepPagerShort(rest) {
+		exec = "-O"
+	}
+	if exec != "" {
+		return result{class: Privilege, unknown: true, reason: "git grep " + exec + " runs a program of the caller's choosing"}
+	}
+	r := safe("git grep")
+	a.readFiles(&r, gitGrepPaths(rest, files))
+	return r
+}
+
+// gitGrepPagerShort reports the `-O[<pager>]` form. Its argument is optional,
+// so git only accepts it glued to the option, where it never looks like a
+// known option name.
+func gitGrepPagerShort(args []word) bool {
+	for _, w := range args {
+		t := w.text
+		if strings.HasPrefix(t, "-") && !strings.HasPrefix(t, "--") && strings.ContainsRune(t[1:], 'O') {
+			return true
+		}
+	}
+	return false
+}
+
+// gitGrepPaths are the operands that name files on disk: everything after a
+// `--` separator, and, under --no-index, the positional operands left after
+// the pattern. Without either, the operands are revisions and pathspecs
+// resolved against the object database, not paths to open.
+func gitGrepPaths(args, positional []word) []word {
+	for i, w := range args {
+		if w.text == "--" {
+			return args[i+1:]
+		}
+	}
+	if hasFlag(args, "--no-index") {
+		return positional
+	}
+	return nil
+}
+
+// gitBisectSafe are the bisect subcommands that only report the search's
+// state, and gitBisectMoves those that move HEAD to another commit.
+var (
+	gitBisectSafe  = []string{"", "log", "view", "visualize", "terms", "help"}
+	gitBisectMoves = []string{"start", "good", "bad", "new", "old", "skip", "reset"}
+)
+
+// gitBisect: `git bisect run <cmd>` runs a program of the caller's choosing
+// at every step of the search, so it is arbitrary code execution wearing the
+// name of a history command — it was auto-allowed as a safe read. It is
+// opaque as well as Privilege: an argv-prefix allow rule must never cover a
+// command that names its own executor. The rest of bisect checks commits out,
+// which is a working-tree change.
+func gitBisect(a *analyzer, rest []word) result {
+	sub := first(rest)
+	label := strings.TrimRight("git bisect "+sub, " ")
+	switch {
+	case sub == "run":
+		return result{class: Privilege, unknown: true, reason: label + " executes a program at every step"}
+	case slices.Contains(gitBisectSafe, sub):
+		return safe(label)
+	case sub == "replay":
+		r := mutating(label)
+		if nf := nonFlags(rest); len(nf) > 1 {
+			a.readFiles(&r, nf[1:2])
+		}
+		return r
+	case slices.Contains(gitBisectMoves, sub):
+		return mutating(label)
+	}
+	return opaque("unknown git bisect subcommand " + sub)
 }
 
 func gitUpdateRef(a *analyzer, rest []word) result {

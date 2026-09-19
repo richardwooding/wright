@@ -2,6 +2,7 @@ package shellclass
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"mvdan.cc/sh/v3/syntax"
@@ -245,18 +246,73 @@ func (a *analyzer) assigns(as []*syntax.Assign) (env []string, danger string) {
 	return env, danger
 }
 
-// dangerousVar names variables whose assignment changes command resolution
-// or loads code into every later process. The GIT_* entries are the
-// environment spelling of the config keys that point git at a program
-// (GIT_EXTERNAL_DIFF=… git diff runs that program on every file).
+// loaderVars change command resolution or load code into every later
+// process, whatever that process turns out to be.
+var loaderVars = []string{
+	"PATH", "IFS", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "BASH_ENV", "ENV", "PROMPT_COMMAND",
+	"PYTHONSTARTUP", "NODE_OPTIONS", "SHELLOPTS", "BASHOPTS",
+}
+
+// gitProgramVars are the environment spelling of the git config keys that
+// point git at a program (GIT_EXTERNAL_DIFF=… git diff runs that program on
+// every file).
+var gitProgramVars = []string{
+	"GIT_SSH", "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS", "GIT_EDITOR",
+	"GIT_SEQUENCE_EDITOR", "GIT_PAGER", "GIT_ASKPASS", "GIT_PROXY_COMMAND", "GIT_TEMPLATE_DIR",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_ATTR_NOSYSTEM",
+}
+
+// injectingEnvVars are the build and toolchain variables whose *value* is
+// code, or names the program that compiles, links, wraps or fetches. They
+// belong here rather than in the command table because an environment prefix
+// never appears in the argv an allow rule matches: with
+// `GOFLAGS=-toolexec=./pwn.sh go build ./...` the builtin `bash(go build *)`
+// rule sees only `go build ./...`, so without this list the script ran with
+// no prompt at all.
+var injectingEnvVars = []string{
+	// Go: -toolexec/-ldflags smuggled through GOFLAGS, a replacement
+	// toolchain root, the module fetch path and the checksum switches.
+	"GOFLAGS", "GOEXPERIMENT", "GOPROXY", "GOPRIVATE", "GOSUMDB", "GONOSUMDB", "GONOSUMCHECK",
+	"GOROOT", "GCCGO", "GOGCCFLAGS",
+	// The C/C++ toolchain, reached by cgo, make and every autotools build.
+	"CC", "CXX", "CPP", "LD", "CFLAGS", "CXXFLAGS", "CPPFLAGS", "LDFLAGS",
+	"CGO_CFLAGS", "CGO_CXXFLAGS", "CGO_CPPFLAGS", "CGO_LDFLAGS", "CGO_FFLAGS",
+	// Rust and cargo (CARGO_TARGET_<triple>_RUNNER and _LINKER are matched by
+	// prefix below).
+	"RUSTFLAGS", "RUSTDOCFLAGS", "RUSTC", "RUSTC_WRAPPER", "RUSTC_WORKSPACE_WRAPPER",
+	"CARGO_BUILD_RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS",
+	// make reads MAKEFLAGS as command line and MAKEFILES as extra rules.
+	"MAKEFLAGS", "MAKEFILES",
+	// Package managers: a registry of the caller's choosing supplies the code
+	// the install step then executes.
+	"PIP_INDEX_URL", "PIP_EXTRA_INDEX_URL", "PIP_FIND_LINKS", "NPM_CONFIG_REGISTRY", "YARN_REGISTRY",
+	// JVM: -javaagent in any of these starts a program inside the build.
+	"JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "JAVA_OPTS", "MAVEN_OPTS", "GRADLE_OPTS", "SBT_OPTS",
+	// Interpreter option variables that run code before the script does.
+	"PERL5OPT", "PERL5LIB", "RUBYOPT",
+}
+
+// InjectingEnvVars returns the environment variables whose assignment turns
+// an otherwise ordinary build command into arbitrary code execution, sorted,
+// as a copy the caller may modify. A variable that injects code into an
+// allowed command is as good as an allowed command, so the sandbox strips the
+// same names from a sandboxed command's environment; reading this list there
+// too keeps the two from drifting apart.
+func InjectingEnvVars() []string {
+	out := slices.Clone(injectingEnvVars)
+	slices.Sort(out)
+	return out
+}
+
+// dangerousVar names variables whose assignment changes command resolution,
+// loads code into every later process, points git at a program to run, or
+// injects code into a build.
 func dangerousVar(name string) bool {
-	switch name {
-	case "PATH", "IFS", "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "BASH_ENV", "ENV", "PROMPT_COMMAND", "PYTHONSTARTUP", "NODE_OPTIONS", "SHELLOPTS", "BASHOPTS",
-		"GIT_SSH", "GIT_SSH_COMMAND", "GIT_EXEC_PATH", "GIT_EXTERNAL_DIFF", "GIT_DIFF_OPTS", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR",
-		"GIT_PAGER", "GIT_ASKPASS", "GIT_PROXY_COMMAND", "GIT_TEMPLATE_DIR", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_ATTR_NOSYSTEM":
+	if slices.Contains(loaderVars, name) || slices.Contains(gitProgramVars, name) || slices.Contains(injectingEnvVars, name) {
 		return true
 	}
-	return strings.HasPrefix(name, "DYLD_") || strings.HasPrefix(name, "GIT_CONFIG")
+	return strings.HasPrefix(name, "DYLD_") || strings.HasPrefix(name, "GIT_CONFIG") ||
+		strings.HasPrefix(name, "CARGO_TARGET_")
 }
 
 func (a *analyzer) expandAll(ws []*syntax.Word) []word {

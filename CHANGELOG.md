@@ -156,6 +156,65 @@ redaction and a tamper-evident audit log between the model and the machine.
   the same way, `find -exec` hid its payload's paths from the deny rules, and
   `sort -o` truncated a file while classifying as a read. All of these now
   classify as opaque, privileged or writing, so none can be auto-allowed.
+- An environment-prefix assignment is invisible to an argv-prefix allow rule,
+  so `GOFLAGS=-toolexec=./pwn.sh go build ./...` matched the builtin
+  `bash(go build *)` rule and ran `pwn.sh` with no approval and no audit of
+  the variable. The classifier now treats the build and toolchain variables
+  whose value is code as opaque — `GOFLAGS`, `GOEXPERIMENT`, `GOPROXY`,
+  `GOPRIVATE`, `CC`/`CXX`/`CGO_*`, `RUSTFLAGS`, `RUSTC_WRAPPER`,
+  `CARGO_BUILD_RUSTFLAGS` and `CARGO_TARGET_*`, `MAKEFLAGS`, `PIP_INDEX_URL`,
+  the JVM `*_OPTS` agents and the Perl/Ruby option variables — whether they
+  are written as a prefix, through `env`, or exported. They are exported as
+  `shellclass.InjectingEnvVars` so the sandbox's environment strip and the
+  classifier cannot drift apart.
+- `git bisect run <cmd>` runs a program of the caller's choosing at every
+  step of the search and was classified safe-read, so it ran with no approval
+  at all. `bisect` now has a handler: `run` is opaque and privileged,
+  `replay` declares the log file it reads, the subcommands that move HEAD are
+  mutating, and only `log`/`view`/`terms` stay read-only.
+- `git grep --open-files-in-pager=<cmd>` (and the glued `-O<cmd>` spelling)
+  runs that program on every matching file, which made a search that
+  classified safe-read arbitrary code execution. `grep` now has a handler:
+  the pager options are opaque and privileged, option values are no longer
+  mistaken for pathspecs, and the operands that really are files — everything
+  after a `--` separator, and with `--no-index` the operands after the
+  pattern — are declared reads, so `git grep --no-index -e . -- .env` meets
+  the secret-file deny instead of printing the file.
+- `git blame --contents <path> HEAD -- <tracked>` prints every line of
+  `<path>`, wherever it is: `git blame --contents ~/.ssh/id_rsa …` was
+  allowed and returned the key. `blame` and its older name `annotate` now
+  declare the value of `--contents` and `-S` as reads, so the secret-file
+  hard deny and the outside-the-workspace checks see the path the command
+  actually opens.
+- The commands that take git's diff options write the file named by
+  `--output=<file>`: `git show --output=/etc/x HEAD` and `git diff
+  --output=/tmp/z` both classified `allow (safe-read)` while writing a file
+  the policy never saw — anywhere at all without a sandbox, and in plan mode
+  a "read-only" command that writes. `diff`, `show`, `log`, `whatchanged`,
+  `range-diff` and the `diff-tree`/`diff-index`/`diff-files` plumbing now
+  declare that value as a write, the way the reader specs already treat
+  `sort -o`.
+- `git -C <dir>`, `--git-dir=<dir>` and `--work-tree=<dir>` were skipped
+  without looking at the value. A repository outside the workspace brings its
+  own configuration with it — aliases, a hooks path, filter drivers — and
+  every path the rest of the command names is resolved against it, so the
+  analysis described a different tree from the one that ran. Such a command
+  is now opaque and can never ride an allow rule, and because the option
+  taints the subcommand instead of replacing it, a hard deny the subcommand
+  raises (`git -C … push --force origin main`) still stands.
+- `git config --file <path>` is an ordinary file reader and writer: it wrote
+  `~/.bashrc` as "git config write" and read a credential file as "git config
+  read", with the path invisible to both. The value of `--file`/`-f` is now
+  declared, and it is no longer counted as a config key when deciding whether
+  the command reads or writes.
+- The same audit covered the rest of the git table: `difftool`/`mergetool`
+  `--extcmd`/`-x` run a command of the caller's choosing for every changed
+  file (now opaque and privileged) and `--tool` runs a configured one (now
+  opaque); `git archive -o`, `git format-patch -o` and `git bundle create`
+  declare the file or directory they write, and `git archive --remote`
+  reports that it needs the network. `git for-each-ref --format` was checked
+  and does not execute anything: its `--shell`/`--python`/`--perl` switches
+  only quote the output.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a
