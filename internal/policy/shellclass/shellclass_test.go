@@ -237,6 +237,19 @@ var table = []row{
 	{cmd: `awk -F: '{print $2, $1}' main.go go.mod`, class: shellclass.SafeRead},
 	{cmd: `awk -v n=2 'NR==1{print $n}' main.go`, class: shellclass.SafeRead},
 	{cmd: `awk '{print}' .env`, class: shellclass.Destructive, hardDeny: true},
+	// --- sed scripts can execute the pattern space (adversarial review C1)
+	{cmd: `sed 's/.*/&/e' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed -e '1e touch /tmp/pwned' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed -n '/x/{s/.*/id/ep}' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed -i 's/a/b/e' main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed -f script.sed main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed --file=script.sed main.go`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `sed 's/a/b/' main.go`, class: shellclass.SafeRead},
+	{cmd: `sed -n '1,5p' main.go`, class: shellclass.SafeRead},
+	{cmd: `sed -E 's/(a|b)/x/g' main.go go.mod`, class: shellclass.SafeRead},
+	{cmd: `sed 's/a/b/w out.txt' main.go`, class: shellclass.MutatingWorkspace},
+	{cmd: `sed -n 'w main.go' go.mod`, class: shellclass.Destructive},
+	{cmd: `sed 's/a/b/' .env`, class: shellclass.Destructive, hardDeny: true},
 }
 
 func TestAnalyzeTable(t *testing.T) {

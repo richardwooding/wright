@@ -225,24 +225,6 @@ func handleUnset(a *analyzer, name string, args []word) result {
 	return safe("")
 }
 
-// handleSed: -i edits files in place (mutating, protected targets denied);
-// otherwise sed only reads.
-func handleSed(a *analyzer, name string, args []word) result {
-	inPlace := hasShort(args, 'i') || hasFlag(args, "--in-place")
-	files := nonFlags(args)
-	if !hasFlag(args, "-e", "-f", "--expression", "--file") && len(files) > 0 {
-		files = files[1:] // the script
-	}
-	if !inPlace {
-		r := safe("")
-		a.readFiles(&r, files)
-		return r
-	}
-	r := mutating("edits files in place")
-	a.writeFiles(&r, files, false)
-	return r
-}
-
 // handleTee writes (truncating unless -a) every positional argument.
 func handleTee(a *analyzer, name string, args []word) result {
 	r := mutating("")
