@@ -178,8 +178,12 @@ func (d *Deps) updateCwd(newCwd string) []string {
 
 // bashResult assembles the model-facing text: output, notes, status.
 func (d *Deps) bashResult(ctx context.Context, out string, cmd *exec.Cmd, runErr error, dur time.Duration, timedOut bool, timeout time.Duration, notes []string) agentkit.Output {
-	out, _ = Clip(out, maxBashOutput, d.SpillDir, spillID(ctx))
+	// Redact first: Clip writes the full text to the spill file, and an
+	// unredacted secret on disk (and a path to it handed to the model) is
+	// exactly what redaction is for. Clipping after also keeps the byte
+	// count in the truncation note honest about what was saved.
 	out = d.redact(ctx, NameBash, out)
+	out, _ = Clip(out, maxBashOutput, d.SpillDir, spillID(ctx))
 	var b strings.Builder
 	b.WriteString(strings.TrimRight(out, "\n"))
 	for _, n := range notes {

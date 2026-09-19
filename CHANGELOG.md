@@ -158,3 +158,8 @@ redaction and a tamper-evident audit log between the model and the machine.
   cap, or `Close`; an unterminated block is redacted from the marker on, and
   a block that overruns the cap is marked and its remainder dropped until the
   END marker. Ordinary output still streams line by line.
+- `bash` and `web_fetch` redact before they clip. `Clip` writes the *full*
+  text to the spill file under `$XDG_CACHE_HOME/wright/spill/<session>/` and
+  hands the model that path, so redacting afterwards left the unredacted
+  secret on disk. Nothing unredacted is written now, and the truncation note
+  counts the bytes that were actually saved.

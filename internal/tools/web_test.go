@@ -6,9 +6,11 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
+	"github.com/richardwooding/wright/internal/redact"
 	"github.com/richardwooding/wright/internal/tools"
 )
 
@@ -36,6 +38,10 @@ func fakeSite(t *testing.T) *httptest.Server {
 	mux.HandleFunc("/big", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		_, _ = w.Write([]byte(strings.Repeat("a", 2<<20)))
+	})
+	mux.HandleFunc("/secret", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/plain")
+		_, _ = w.Write([]byte("ghp_" + strings.Repeat("E", 36) + "\n" + strings.Repeat("padding line\n", 20000)))
 	})
 	mux.HandleFunc("/bin", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/octet-stream")
@@ -170,5 +176,34 @@ func TestOptionalToolsUnregistered(t *testing.T) {
 	f = newFixture(t, func(d *tools.Deps) { d.Sandbox = nil })
 	if _, ok := f.ts.Lookup(tools.NameBash); ok {
 		t.Error("bash registered without a sandbox backend")
+	}
+}
+
+// TestWebFetchSpillIsRedacted pins M3 for web_fetch: the spill file Clip
+// writes must hold the redacted text, not the page as it arrived.
+func TestWebFetchSpillIsRedacted(t *testing.T) {
+	srv := fakeSite(t)
+	f := newFixture(t, func(d *tools.Deps) {
+		d.Fetch = srv.Client()
+		d.Redactor = redact.New()
+	})
+	got, err := f.text(tools.NameWebFetch, jsonArgs(map[string]any{"url": srv.URL + "/secret"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	token := "ghp_" + strings.Repeat("E", 36)
+	if strings.Contains(got, token) {
+		t.Errorf("result holds the unredacted secret:\n%.200s", got)
+	}
+	path := spillPath(t, got)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), token) {
+		t.Errorf("spill file %s holds the unredacted secret", path)
+	}
+	if !strings.Contains(string(data), "[redacted: github") {
+		t.Errorf("spill file %s has no redaction marker", path)
 	}
 }

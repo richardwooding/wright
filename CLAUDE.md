@@ -181,6 +181,10 @@ client to HTTP MCP transports).
   needs holding logic there, not just in `Redact`. The streamed output and
   the whole-buffer output must never disagree about a secret — the user's
   screen is as much a disclosure as the model's context.
+- **Redact before `Clip`.** `Clip` writes the full text to the spill file and
+  names that path to the model, so any tool that spills must redact first
+  (`bash`, `web_fetch`). Redacting the clipped result only cleans the excerpt
+  and leaves the secret on disk.
 - **Audit lines are immutable.** `audit.Log.Write` sets `Seq` and `Prev` (the
   SHA-256 of the previous *line*), redacts `Text`/`Args`, caps `Args` at 4 KiB
   and records `ArgsSHA256` of the full value. Never log environment variables

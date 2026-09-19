@@ -111,8 +111,10 @@ func (d *Deps) runFetch(ctx context.Context, f *fetcher, a fetchArgs) (agentkit.
 	}
 	b.WriteString("\n")
 	b.WriteString(text)
-	out, _ := Clip(b.String(), maxFetchText, d.SpillDir, spillID(ctx))
-	return agentkit.Text(d.redact(ctx, NameWebFetch, out)), nil
+	// Redact before Clip: Clip spills the full text to a file, so anything
+	// still secret at that point is written to disk unredacted.
+	out, _ := Clip(d.redact(ctx, NameWebFetch, b.String()), maxFetchText, d.SpillDir, spillID(ctx))
+	return agentkit.Text(out), nil
 }
 
 // userAgent is honest about who is asking.

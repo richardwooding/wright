@@ -219,3 +219,45 @@ func TestNetworkContext(t *testing.T) {
 		t.Error("override lost")
 	}
 }
+
+// TestBashSpillIsRedacted pins M3: the spill file is written by Clip, so
+// redaction has to happen before it, not after. Otherwise the full secret
+// lands in $XDG_CACHE_HOME/wright/spill and the model is handed the path.
+func TestBashSpillIsRedacted(t *testing.T) {
+	f := newFixture(t, func(d *tools.Deps) { d.Redactor = redact.New() })
+	token := "ghp_" + strings.Repeat("D", 36)
+	got, err := f.text(tools.NameBash, `{"command":"echo `+token+`; i=0; while [ $i -lt 4000 ]; do echo line-$i-0123456789; i=$((i+1)); done"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := spillPath(t, got)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(data), token) {
+		t.Errorf("spill file %s holds the unredacted secret", path)
+	}
+	if !strings.Contains(string(data), "[redacted: github") {
+		t.Errorf("spill file %s has no redaction marker", path)
+	}
+	if strings.Contains(got, token) {
+		t.Errorf("result holds the unredacted secret:\n%.200s", got)
+	}
+}
+
+// spillPath pulls the spill file path out of a truncation note.
+func spillPath(t *testing.T, out string) string {
+	t.Helper()
+	i := strings.Index(out, "[output truncated: ")
+	if i < 0 {
+		t.Fatalf("no truncation note in:\n%.300s", out)
+	}
+	note := out[i : strings.Index(out[i:], "]")+i]
+	const marker = "full output saved to "
+	j := strings.Index(note, marker)
+	if j < 0 {
+		t.Fatalf("note names no spill file: %q", note)
+	}
+	return note[j+len(marker):]
+}
