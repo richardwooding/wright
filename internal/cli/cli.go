@@ -9,25 +9,49 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/alecthomas/kong"
+	"github.com/charmbracelet/x/term"
+
+	"github.com/richardwooding/wright/internal/app"
+	"github.com/richardwooding/wright/internal/headless"
 )
 
 // Exit codes shared by the interactive and headless paths. They are part of
 // the headless contract (scripts branch on them), so they never change meaning.
 const (
-	ExitOK          = 0
-	ExitError       = 1 // provider or tool error
-	ExitUsage       = 2
-	ExitApproval    = 3 // headless run needed an approval that was not granted
-	ExitBudget      = 4
-	ExitInterrupted = 130
+	ExitOK          = headless.ExitOK
+	ExitFailure     = headless.ExitError // provider or tool error
+	ExitUsage       = headless.ExitUsage
+	ExitApproval    = headless.ExitApprovalRequired // headless run needed an approval that was not granted
+	ExitBudget      = headless.ExitBudget
+	ExitInterrupted = headless.ExitInterrupted
 )
 
 // errNotImplemented marks commands that exist in the CLI surface but are
 // delivered in a later phase. Declaring the full tree now keeps help output,
 // docs and scripts stable while the implementation lands.
-var errNotImplemented = errors.New("not implemented yet")
+var errNotImplemented = errors.New("not implemented yet (Phase 3)")
+
+// ExitError carries a specific process exit code out of a command. Err is
+// optional: a headless run that ends with exit 3 has already reported itself
+// and needs no extra message from main.
+type ExitError struct {
+	Code int
+	Err  error
+}
+
+// Error implements error.
+func (e *ExitError) Error() string {
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return fmt.Sprintf("exit status %d", e.Code)
+}
+
+// Unwrap exposes the wrapped error to errors.Is/As.
+func (e *ExitError) Unwrap() error { return e.Err }
 
 // BuildInfo carries the ldflags-injected version metadata from package main.
 type BuildInfo struct {
@@ -39,9 +63,15 @@ func (b BuildInfo) String() string {
 	return fmt.Sprintf("wright %s (%s, %s)", b.Version, b.Commit, b.Date)
 }
 
+// IO bundles the process streams so tests can substitute them.
+type IO struct {
+	Stdin  io.Reader
+	Stdout io.Writer
+	Stderr io.Writer
+}
+
 // CLI is the single kong root struct. Flags here are global; each subcommand
-// carries its own arguments. Only --version, doctor, config paths and the
-// hidden __sandbox helper are functional in this phase.
+// carries its own arguments.
 type CLI struct {
 	Print                  bool             `short:"p" name:"print" help:"Headless mode: run the prompt, print the result and exit."`
 	Output                 string           `enum:"text,json,stream-json" default:"text" help:"Headless output format (${enum})."`
@@ -77,13 +107,16 @@ type CLI struct {
 }
 
 // Globals is bound into every Run method: the parsed root, build info, the
-// cancellable context from main and the output streams (swappable in tests).
+// cancellable context from main, the streams (swappable in tests) and the
+// interactive UI hook (nil when no UI is linked in).
 type Globals struct {
-	CLI    *CLI
-	Build  BuildInfo
-	Ctx    context.Context
-	Stdout io.Writer
-	Stderr io.Writer
+	CLI         *CLI
+	Build       BuildInfo
+	Ctx         context.Context
+	Stdin       io.Reader
+	Stdout      io.Writer
+	Stderr      io.Writer
+	Interactive app.Interactive
 }
 
 // exitPanic is the sentinel kong.Exit raises so --version and --help unwind
@@ -92,12 +125,13 @@ type exitPanic struct{ code int }
 
 // Main parses args, runs the selected command and maps the result to an exit
 // code. It is the whole of package main's logic so tests can drive it.
-func Main(ctx context.Context, args []string, build BuildInfo) (code int, err error) {
-	return Run(ctx, args, build, os.Stdout, os.Stderr)
+// interactive is the TUI entry point; nil means only headless runs work.
+func Main(ctx context.Context, args []string, build BuildInfo, interactive app.Interactive) (code int, err error) {
+	return Run(ctx, args, build, IO{Stdin: os.Stdin, Stdout: os.Stdout, Stderr: os.Stderr}, interactive)
 }
 
-// Run is Main with explicit output streams, for tests.
-func Run(ctx context.Context, args []string, build BuildInfo, stdout, stderr io.Writer) (code int, err error) {
+// Run is Main with explicit streams, for tests.
+func Run(ctx context.Context, args []string, build BuildInfo, streams IO, interactive app.Interactive) (code int, err error) {
 	cli := &CLI{}
 	parser, err := kong.New(cli,
 		kong.Name("wright"),
@@ -105,11 +139,11 @@ func Run(ctx context.Context, args []string, build BuildInfo, stdout, stderr io.
 		kong.UsageOnError(),
 		kong.ConfigureHelp(kong.HelpOptions{Compact: true}),
 		kong.Vars{"version": build.String()},
-		kong.Writers(stdout, stderr),
+		kong.Writers(streams.Stdout, streams.Stderr),
 		kong.Exit(func(c int) { panic(exitPanic{code: c}) }),
 	)
 	if err != nil {
-		return ExitError, err
+		return ExitFailure, err
 	}
 	defer func() {
 		if r := recover(); r != nil {
@@ -124,26 +158,37 @@ func Run(ctx context.Context, args []string, build BuildInfo, stdout, stderr io.
 	kctx, err := parser.Parse(args)
 	if err != nil {
 		parser.Errorf("%v", err)
-		fmt.Fprintln(stderr, "Run 'wright --help' for usage.")
+		fmt.Fprintln(streams.Stderr, "Run 'wright --help' for usage.")
 		return ExitUsage, nil
 	}
-	g := &Globals{CLI: cli, Build: build, Ctx: ctx, Stdout: stdout, Stderr: stderr}
+	g := &Globals{CLI: cli, Build: build, Ctx: ctx, Stdin: streams.Stdin, Stdout: streams.Stdout, Stderr: streams.Stderr, Interactive: interactive}
 	if err := kctx.Run(g); err != nil {
-		return exitCodeFor(err), err
+		return exitCodeFor(err), reportable(err)
 	}
 	return ExitOK, nil
 }
 
 // exitCodeFor maps command errors onto the documented exit codes.
 func exitCodeFor(err error) int {
+	var ee *ExitError
 	switch {
+	case errors.As(err, &ee):
+		return ee.Code
 	case errors.Is(err, context.Canceled):
 		return ExitInterrupted
-	case errors.Is(err, errNotImplemented):
-		return ExitError
 	default:
-		return ExitError
+		return ExitFailure
 	}
+}
+
+// reportable strips an ExitError that carries no message, so main prints
+// nothing for a run that already reported itself.
+func reportable(err error) error {
+	var ee *ExitError
+	if errors.As(err, &ee) && ee.Err == nil {
+		return nil
+	}
+	return err
 }
 
 // RunCmd is the default command: an interactive (or, with -p, headless) session.
@@ -151,84 +196,77 @@ type RunCmd struct {
 	Prompt []string `arg:"" optional:"" help:"Initial prompt. With -p it is the whole request."`
 }
 
-// Run starts a session. Interactive and headless modes land in Phase 1/2.
-func (c *RunCmd) Run(_ *Globals) error {
-	return fmt.Errorf("interactive session: %w", errNotImplemented)
+// Run starts a session through the composition root.
+func (c *RunCmd) Run(g *Globals) error {
+	f := g.CLI
+	stdoutTTY := isTerminal(g.Stdout)
+	o := app.RunOptions{
+		Prompt:                 strings.Join(c.Prompt, " "),
+		Print:                  f.Print,
+		Output:                 f.Output,
+		Model:                  f.Model,
+		Mode:                   f.Mode,
+		Bypass:                 f.BypassPermissions,
+		AllowUnsandboxedBypass: f.AllowUnsandboxedBypass,
+		Resume:                 f.Resume,
+		Continue:               f.Continue,
+		Cwd:                    f.Cwd,
+		AddDirs:                f.AddDir,
+		Allow:                  f.Allow,
+		Deny:                   f.Deny,
+		Sandbox:                f.Sandbox,
+		AllowNetwork:           f.AllowNetwork,
+		MaxSteps:               f.MaxSteps,
+		Reasoning:              f.Reasoning,
+		Plain:                  f.Plain || os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" || !stdoutTTY,
+		Verbose:                f.Verbose,
+		StrictInjection:        f.StrictInjection,
+		Version:                g.Build.Version,
+		Stdin:                  g.Stdin,
+		Stdout:                 g.Stdout,
+		Stderr:                 g.Stderr,
+		Env:                    os.Getenv,
+		IsTerminal:             stdoutTTY && isTerminal(g.Stdin),
+		Confirm:                confirm(g),
+	}
+	code, err := app.Run(g.Ctx, o, g.Interactive)
+	if code != ExitOK || err != nil {
+		return &ExitError{Code: code, Err: err}
+	}
+	return nil
 }
 
-// SessionsCmd groups the session management subcommands.
-type SessionsCmd struct {
-	List   SessionsListCmd   `cmd:"" default:"1" help:"List sessions for this workspace."`
-	Show   SessionsShowCmd   `cmd:"" help:"Print a session transcript."`
-	Export SessionsExportCmd `cmd:"" help:"Export a session as Markdown."`
-	Delete SessionsDeleteCmd `cmd:"" help:"Delete a session, its snapshots and audit log."`
-	Purge  SessionsPurgeCmd  `cmd:"" help:"Delete all sessions for this workspace."`
+// confirm asks a yes/no question on the terminal before the UI starts; it
+// is only offered when both streams are a terminal.
+func confirm(g *Globals) func(string) bool {
+	if !isTerminal(g.Stdin) || !isTerminal(g.Stdout) {
+		return nil
+	}
+	return func(question string) bool {
+		fmt.Fprintf(g.Stdout, "%s [y/N] ", question)
+		var answer string
+		if _, err := fmt.Fscanln(g.Stdin, &answer); err != nil {
+			return false
+		}
+		answer = strings.ToLower(strings.TrimSpace(answer))
+		return answer == "y" || answer == "yes"
+	}
 }
 
-// SessionsListCmd lists sessions.
-type SessionsListCmd struct{}
-
-// Run lists sessions (Phase 2).
-func (c *SessionsListCmd) Run(_ *Globals) error {
-	return fmt.Errorf("sessions list: %w", errNotImplemented)
-}
-
-// SessionsShowCmd prints one session.
-type SessionsShowCmd struct {
-	ID string `arg:"" help:"Session ID."`
-}
-
-// Run prints a session (Phase 2).
-func (c *SessionsShowCmd) Run(_ *Globals) error {
-	return fmt.Errorf("sessions show: %w", errNotImplemented)
-}
-
-// SessionsExportCmd exports a session as Markdown.
-type SessionsExportCmd struct {
-	ID string `arg:"" help:"Session ID."`
-}
-
-// Run exports a session (Phase 2).
-func (c *SessionsExportCmd) Run(_ *Globals) error {
-	return fmt.Errorf("sessions export: %w", errNotImplemented)
-}
-
-// SessionsDeleteCmd deletes one session.
-type SessionsDeleteCmd struct {
-	ID string `arg:"" help:"Session ID."`
-}
-
-// Run deletes a session (Phase 2).
-func (c *SessionsDeleteCmd) Run(_ *Globals) error {
-	return fmt.Errorf("sessions delete: %w", errNotImplemented)
-}
-
-// SessionsPurgeCmd deletes every session for the workspace.
-type SessionsPurgeCmd struct{}
-
-// Run purges sessions (Phase 2).
-func (c *SessionsPurgeCmd) Run(_ *Globals) error {
-	return fmt.Errorf("sessions purge: %w", errNotImplemented)
+// isTerminal reports whether a stream is a terminal; anything that is not an
+// *os.File (a test buffer, a pipe wrapper) is not.
+func isTerminal(v any) bool {
+	f, ok := v.(*os.File)
+	return ok && term.IsTerminal(f.Fd())
 }
 
 // ModelsCmd lists usable models.
 type ModelsCmd struct{}
 
-// Run lists models (Phase 1).
-func (c *ModelsCmd) Run(_ *Globals) error { return fmt.Errorf("models: %w", errNotImplemented) }
-
 // ConfigCmd groups the settings subcommands.
 type ConfigCmd struct {
 	Show  ConfigShowCmd  `cmd:"" default:"1" help:"Print the effective merged settings as JSON."`
 	Paths ConfigPathsCmd `cmd:"" help:"Print where settings, data and cache live."`
-}
-
-// ConfigShowCmd prints merged settings.
-type ConfigShowCmd struct{}
-
-// Run prints merged settings (Phase 2, needs trust gating for project layers).
-func (c *ConfigShowCmd) Run(_ *Globals) error {
-	return fmt.Errorf("config show: %w", errNotImplemented)
 }
 
 // MCPCmd groups MCP server management.
@@ -267,19 +305,25 @@ type SkillsCmd struct{}
 // Run lists skills (Phase 3).
 func (c *SkillsCmd) Run(_ *Globals) error { return fmt.Errorf("skills: %w", errNotImplemented) }
 
-// AuditCmd inspects or verifies audit logs.
-type AuditCmd struct {
-	ID     string `arg:"" optional:"" help:"Session ID (default: latest)."`
-	Kind   string `help:"Only events of this kind."`
-	JSON   bool   `help:"Print raw JSONL events."`
-	Verify bool   `help:"Verify the hash chain instead of printing events."`
-}
-
-// Run prints or verifies an audit log (Phase 2).
-func (c *AuditCmd) Run(_ *Globals) error { return fmt.Errorf("audit: %w", errNotImplemented) }
-
 // InitCmd scaffolds AGENTS.md and project settings.
 type InitCmd struct{}
 
-// Run creates project files (Phase 2).
-func (c *InitCmd) Run(_ *Globals) error { return fmt.Errorf("init: %w", errNotImplemented) }
+// Run creates the project files that are missing and reports what it wrote.
+func (c *InitCmd) Run(g *Globals) error {
+	cwd, err := workingDir(g.CLI.Cwd)
+	if err != nil {
+		return err
+	}
+	written, err := app.InitProject(cwd)
+	if err != nil {
+		return err
+	}
+	if len(written) == 0 {
+		fmt.Fprintln(g.Stdout, "nothing to do: AGENTS.md and .wright/settings.json already exist")
+		return nil
+	}
+	for _, w := range written {
+		fmt.Fprintln(g.Stdout, "created "+w)
+	}
+	return nil
+}
