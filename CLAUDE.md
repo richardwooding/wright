@@ -187,6 +187,17 @@ client to HTTP MCP transports).
 - **Symlink-safe paths.** `workspace.Resolve` evaluates symlinks on the deepest
   existing ancestor and appends the rest, so `ws/link/x` where `link → ~/.ssh`
   resolves outside. Every path in a `policy.Request` must have gone through it.
+  **Anything that matches a path against a fixed set must therefore know the
+  *resolved* spelling.** `workspace.Open` resolves the protected locations
+  once and `IsProtected` checks the literal and the resolved form: on macOS
+  `/etc`, `/var` and `/tmp` are symlinks into `/private`, so a literal-only
+  `/etc/**` matched nothing a request could ever carry — `/etc/passwd`
+  arrived as `/private/etc/passwd`, read as merely "outside the workspace",
+  and bypass mode allowed it. `$HOME` can sit under a link and `~/.ssh` or
+  `~/.gitconfig` can *be* one (dotfiles repositories), so the home entries
+  get the same treatment. Tests must compute the expectation with
+  `filepath.EvalSymlinks` at run time; a hardcoded `/private/...` asserts
+  nothing on Linux.
 - **The sandbox hides `$HOME`.** bwrap mounts a tmpfs over the home directory
   *before* re-binding workspace roots and caches (order matters). The landlock
   helper lists system directories explicitly (`systemRO`) — never

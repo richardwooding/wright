@@ -34,6 +34,12 @@ type Workspace struct {
 	// ConfigDir is wright's own config directory (protected from writes).
 	ConfigDir string
 
+	// resolvedDirs and resolvedFiles are the protected locations in their
+	// symlink-resolved spelling, recorded once at Open because that is the
+	// spelling Resolve hands to IsProtected.
+	resolvedDirs  []string
+	resolvedFiles []string
+
 	ignores *ignoreCache
 }
 
@@ -60,12 +66,17 @@ func Open(start string, extra []string) (*Workspace, error) {
 	if h, err := filepath.EvalSymlinks(home); err == nil {
 		home = h
 	}
-	return &Workspace{
+	w := &Workspace{
 		Roots:     roots,
 		Home:      home,
 		ConfigDir: configDir(home),
 		ignores:   newIgnoreCache(),
-	}, nil
+	}
+	// The protected set is resolved here, once, rather than on every check:
+	// it names system and home locations that do not move during a run.
+	dirs, files := protectedPaths(w.Home, w.ConfigDir)
+	w.resolvedDirs, w.resolvedFiles = resolvedSpellings(dirs), resolvedSpellings(files)
+	return w, nil
 }
 
 // configDir mirrors config.DefaultPaths without importing it (workspace is a

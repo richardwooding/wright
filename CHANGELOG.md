@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Security
+
+- Protected paths were not protected on macOS. `/etc`, `/var` and `/tmp` are
+  symlinks into `/private` there, and every path in a permission request is
+  symlink-resolved, so `/etc/passwd` reached `workspace.IsProtected` as
+  `/private/etc/passwd` and the literal protected set did not match it:
+  reading it was merely "outside the workspace" (an ask), and in
+  `--bypass-permissions` it was allowed outright — a hole in the hard-deny
+  floor that no mode is supposed to have. `workspace.Open` now records the
+  symlink-resolved spelling of every protected location as well as the
+  literal one, so the floor holds for the system directories, wright's own
+  config directory, and credential directories and rc files under `$HOME`
+  that a dotfiles repository (or a home directory under a link) reaches
+  through a symlink. Linux is unaffected, where the two spellings are the
+  same.
+
 ### Fixed
 
 - `grep` with a limit could drop its truncation note. Ignored and hidden

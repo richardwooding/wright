@@ -287,6 +287,76 @@ func TestIsProtected(t *testing.T) {
 	}
 }
 
+// TestIsProtectedMatchesResolvedSpellings pins the hard floor against the
+// spelling Resolve actually produces. Every path in a policy.Request is
+// symlink-resolved, so a protected set that knows only the literal path stops
+// protecting anything reached through a link: /etc on macOS (a symlink to
+// /private/etc), a $HOME under a link, or a ~/.ssh and ~/.gitconfig managed
+// by a dotfiles repository. The expectations are computed here at run time —
+// a hardcoded /private/... string would assert nothing on Linux.
+func TestIsProtectedMatchesResolvedSpellings(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
+	}
+	base, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := filepath.Join(base, "home")
+	store := filepath.Join(base, "elsewhere")
+	root := filepath.Join(base, "ws")
+	cfgReal := filepath.Join(base, "cfg-real")
+	for _, d := range []string{home, filepath.Join(store, "ssh"), filepath.Join(store, "dotfiles"), root, cfgReal} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(store, "dotfiles", "gitconfig"), []byte("[user]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfgLink := filepath.Join(base, "cfg-link")
+	links := map[string]string{
+		filepath.Join(home, ".ssh"):       filepath.Join(store, "ssh"),
+		filepath.Join(home, ".gitconfig"): filepath.Join(store, "dotfiles", "gitconfig"),
+		cfgLink:                           cfgReal,
+	}
+	for link, target := range links {
+		if err := os.Symlink(target, link); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", "")
+	t.Setenv("WRIGHT_CONFIG_DIR", cfgLink)
+	ws, err := workspace.Open(root, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name string
+		path string
+		want bool
+	}{
+		{"system dir as resolved", resolved(t, "/etc/passwd"), true},
+		{"system dir as written", "/etc/passwd", true},
+		{"home credential dir through the link", filepath.Join(home, ".ssh", "id_rsa"), true},
+		{"home credential dir as resolved", filepath.Join(store, "ssh", "id_rsa"), true},
+		{"home rc file through the link", filepath.Join(home, ".gitconfig"), true},
+		{"home rc file as resolved", filepath.Join(store, "dotfiles", "gitconfig"), true},
+		{"config dir through the link", filepath.Join(cfgLink, "trust.json"), true},
+		{"config dir as resolved", filepath.Join(cfgReal, "trust.json"), true},
+		{"a neighbour of a resolved target", filepath.Join(store, "dotfiles", "vimrc"), false},
+		{"an ordinary workspace file", filepath.Join(root, "main.go"), false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ws.IsProtected(tt.path); got != tt.want {
+				t.Errorf("IsProtected(%s) = %v, want %v", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestProtectedHonoursConfigDir(t *testing.T) {
 	fx := newFixture(t)
 	custom := filepath.Join(fx.outside, "wcfg")

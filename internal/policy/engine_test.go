@@ -106,8 +106,27 @@ func rules(t *testing.T, d policy.Decision, src policy.Source, texts ...string) 
 	return rs
 }
 
+// resolvedPath is the spelling Resolve hands the policy engine for path.
+// Every path in a Request is symlink-resolved, and on macOS /etc, /var and
+// /tmp are symlinks into /private, so an expectation written literally
+// asserts nothing there. It is computed at run time — never hardcoded to a
+// /private/... string, which would assert nothing on Linux instead.
+func resolvedPath(t *testing.T, path string) string {
+	t.Helper()
+	dir, base := filepath.Split(path)
+	real, err := filepath.EvalSymlinks(filepath.Clean(dir))
+	if err != nil {
+		return path
+	}
+	return filepath.Join(real, base)
+}
+
 func TestEvaluateTable(t *testing.T) {
 	f := newFixture(t)
+	// The same protected file as the cases above spell it, in the form the
+	// engine really sees. The two spellings are identical on Linux and
+	// differ on macOS; the hard floor has to hold for both.
+	etcPasswd := resolvedPath(t, "/etc/passwd")
 	type tc struct {
 		name     string
 		mode     policy.Mode
@@ -194,6 +213,7 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "bash unknown bypass allows", mode: policy.ModeBypass, req: f.bash("frobnicate --all"), want: policy.Allow},
 		{name: "bash read outside asks", mode: policy.ModeDefault, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
 		{name: "bash read protected denies", mode: policy.ModeDefault, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
+		{name: "bash read protected denies in its resolved spelling", mode: policy.ModeDefault, req: f.bash("cat " + etcPasswd), want: policy.Deny, reason: "protected"},
 		// A builtin allow rule matches argv alone, so the containment checks
 		// have to run first or `bash(cat *)` covers the whole filesystem.
 		{name: "allow rule cannot cover a protected read", mode: policy.ModeDefault, req: f.bash("head -c 200 /etc/passwd"), want: policy.Deny, reason: "protected"},
@@ -226,6 +246,7 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "bash plan read protected denies", mode: policy.ModePlan, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
 		{name: "bash plan read outside asks", mode: policy.ModePlan, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
 		{name: "bash bypass read protected denies", mode: policy.ModeBypass, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
+		{name: "bash bypass read protected denies in its resolved spelling", mode: policy.ModeBypass, req: f.bash("cat " + etcPasswd), want: policy.Deny, reason: "protected"},
 		{name: "bash plan network denied", mode: policy.ModePlan, req: f.bash("go get x"), want: policy.Deny},
 		{name: "bash without analysis denied", mode: policy.ModeBypass, req: policy.Request{Tool: "bash"}, want: policy.Deny},
 		// --- web / mcp / other
