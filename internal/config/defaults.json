@@ -1,0 +1,89 @@
+{
+  "permissions": {
+    "mode": "default",
+    "allow": [
+      "read_file($WORKSPACE/**)",
+      "glob($WORKSPACE/**)",
+      "grep($WORKSPACE/**)",
+      "list_dir($WORKSPACE/**)",
+      "bash(git status *)",
+      "bash(git diff *)",
+      "bash(git log *)",
+      "bash(git show *)",
+      "bash(git blame *)",
+      "bash(git branch --list *)",
+      "bash(git remote -v)",
+      "bash(git rev-parse *)",
+      "bash(git stash list *)",
+      "bash(git worktree list *)",
+      "bash(go build *)",
+      "bash(go test *)",
+      "bash(go vet *)",
+      "bash(go fmt *)",
+      "bash(rg *)",
+      "bash(grep *)",
+      "bash(find *)",
+      "bash(ls *)",
+      "bash(cat *)",
+      "bash(head *)",
+      "bash(tail *)",
+      "bash(wc *)"
+    ],
+    "ask": [
+      "write_file($WORKSPACE/**)",
+      "edit_file($WORKSPACE/**)",
+      "bash(git push *)",
+      "web_fetch",
+      "mcp:*"
+    ],
+    "deny": [
+      "*(**/.env)",
+      "*(**/*.pem)",
+      "*(**/*.key)",
+      "*(**/*.p12)",
+      "*(**/*.pfx)",
+      "*(**/*.jks)",
+      "*(**/*.kdbx)",
+      "*(**/credentials*)",
+      "*(**/service-account*.json)",
+      "*(~/.ssh/**)",
+      "*(~/.aws/**)",
+      "*(~/.gnupg/**)",
+      "*(~/.kube/**)",
+      "*(~/.config/gh/**)",
+      "*(~/.config/wright/**)",
+      "*(~/.docker/config.json)",
+      "*(~/.netrc)",
+      "*(~/.npmrc)",
+      "*(~/.pypirc)",
+      "*($WORKSPACE/.wright/**)",
+      "*($WORKSPACE/.git/**)",
+      "bash(sudo *)",
+      "bash(su *)",
+      "bash(doas *)",
+      "bash(pkexec *)",
+      "bash(crontab *)",
+      "bash(systemctl *)",
+      "bash(launchctl *)",
+      "web_fetch(domain:169.254.169.254)",
+      "web_fetch(domain:localhost)",
+      "web_fetch(domain:127.*)"
+    ]
+  },
+  "sandbox": {
+    "backend": "auto"
+  },
+  "git": {
+    "attribution": true,
+    "trailer": "Co-Authored-By: wright <wright@richardwooding.github.io>",
+    "protectedBranches": ["main", "master", "release/*"]
+  },
+  "redaction": true,
+  "instructions": {
+    "files": ["AGENTS.md", ".wright/instructions.md"],
+    "fallback": "ask"
+  },
+  "updates": {
+    "check": false
+  }
+}
