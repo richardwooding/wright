@@ -213,7 +213,7 @@ func (r *plainRunner) askApproval(ev engine.Event) {
 	}
 	r.approval = a
 	r.line(fmt.Sprintf("? approval (%s) %s: %s", a.Severity, a.Tool, a.Preview.Title))
-	for _, l := range strings.Split(strings.TrimRight(previewText(a), "\n"), "\n") {
+	for l := range strings.SplitSeq(strings.TrimRight(previewText(a), "\n"), "\n") {
 		if l != "" {
 			r.line("    " + l)
 		}
@@ -338,8 +338,8 @@ func previewText(a *engine.Approval) string {
 }
 
 func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		return s[:i] + " …"
+	if before, _, ok := strings.Cut(s, "\n"); ok {
+		return before + " …"
 	}
 	return s
 }

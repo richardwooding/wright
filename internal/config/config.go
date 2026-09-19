@@ -247,12 +247,10 @@ func describeDecodeError(data []byte, err error) error {
 	if errors.Is(err, io.EOF) && len(bytes.TrimSpace(data)) == 0 {
 		return errors.New("the file is empty (an empty settings file is not valid JSON; use {} for no settings)")
 	}
-	var syn *json.SyntaxError
-	if errors.As(err, &syn) {
+	if syn, ok := errors.AsType[*json.SyntaxError](err); ok {
 		return fmt.Errorf("invalid JSON at line %d: %w", lineAt(data, syn.Offset), err)
 	}
-	var typ *json.UnmarshalTypeError
-	if errors.As(err, &typ) {
+	if typ, ok := errors.AsType[*json.UnmarshalTypeError](err); ok {
 		return fmt.Errorf("line %d: %q is %s, want %s", lineAt(data, typ.Offset), typ.Field, typ.Value, typ.Type)
 	}
 	if errors.Is(err, io.ErrUnexpectedEOF) {

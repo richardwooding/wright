@@ -20,7 +20,7 @@ func TestRenderKeepsContentWithinWidth(t *testing.T) {
 			if !strings.Contains(out, "Title") || !strings.Contains(out, "bold") {
 				t.Fatalf("width %d dark %v: content missing from %q", width, dark, out)
 			}
-			for _, line := range strings.Split(out, "\n") {
+			for line := range strings.SplitSeq(out, "\n") {
 				if w := lipgloss.Width(line); w > width {
 					t.Errorf("width %d dark %v: line %q is %d wide", width, dark, line, w)
 				}
@@ -38,7 +38,7 @@ func TestRenderFallsBackWhenBackendFails(t *testing.T) {
 	if !strings.Contains(out, "word") {
 		t.Fatalf("fallback dropped the text: %q", out)
 	}
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if w := lipgloss.Width(line); w > 40 {
 			t.Errorf("fallback line %q is %d wide", line, w)
 		}
@@ -67,7 +67,7 @@ func TestBackendReceivesWidthAndTheme(t *testing.T) {
 
 func TestPlainWraps(t *testing.T) {
 	out := markdown.Plain(strings.Repeat("abcdefghij ", 10), 20)
-	for _, line := range strings.Split(out, "\n") {
+	for line := range strings.SplitSeq(out, "\n") {
 		if len(line) > 20 {
 			t.Errorf("line %q longer than 20", line)
 		}

@@ -17,7 +17,7 @@ because "no invented capabilities" is part of the product.
 ## Commands
 
 ```sh
-go build ./... && go vet ./... && go fix -diff ./...
+go build ./... && go vet ./... && go fix -diff ./...     # CI fails on any go fix diff; run it before pushing
 go test -race ./...                                   # offline; sandbox tests skip when bwrap/landlock are unavailable
 go test -race -run TestEvaluateTable ./internal/policy   # one table
 go test -fuzz=FuzzAnalyze -fuzztime=30s ./internal/policy/shellclass

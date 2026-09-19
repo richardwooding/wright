@@ -53,10 +53,7 @@ func (d *Deps) runListDir(ctx context.Context, a listArgs) (agentkit.Output, err
 	if err != nil {
 		return agentkit.Output{}, err
 	}
-	depth := a.Depth
-	if depth < 1 {
-		depth = 1
-	}
+	depth := max(a.Depth, 1)
 	depth = min(depth, maxListDepth)
 	t := &treeWriter{d: d, limit: maxListEntries}
 	t.b.WriteString(d.rel(base) + "/\n")

@@ -222,8 +222,8 @@ func (l *lateEngine) middleware() agentkit.Middleware {
 			}
 			tool := next
 			chain := e.Middleware()
-			for i := len(chain) - 1; i >= 0; i-- {
-				tool = chain[i](tool)
+			for _, c := range slices.Backward(chain) {
+				tool = c(tool)
 			}
 			return tool.Call(ctx, args)
 		})

@@ -262,7 +262,7 @@ func TestApprovalViewFitsWidth(t *testing.T) {
 					o, _ = press(o, page)
 				}
 				view := o.View(w, h)
-				for _, line := range strings.Split(view, "\n") {
+				for line := range strings.SplitSeq(view, "\n") {
 					if got := lipgloss.Width(line); got > w {
 						t.Errorf("w=%d h=%d page %q: line %d wide: %q", w, h, page, got, plain(line))
 					}
@@ -393,7 +393,7 @@ func TestSmallOverlaysFitWidth(t *testing.T) {
 	}
 	for i, o := range overlays {
 		for _, w := range []int{40, 200} {
-			for _, line := range strings.Split(o.View(w, 20), "\n") {
+			for line := range strings.SplitSeq(o.View(w, 20), "\n") {
 				if got := lipgloss.Width(line); got > w {
 					t.Errorf("overlay %d w=%d: line %d wide: %q", i, w, got, plain(line))
 				}

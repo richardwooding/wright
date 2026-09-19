@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -256,11 +257,11 @@ func spillPath(t *testing.T, out string) string {
 	}
 	note := out[i : strings.Index(out[i:], "]")+i]
 	const marker = "full output saved to "
-	j := strings.Index(note, marker)
-	if j < 0 {
+	_, after, ok := strings.Cut(note, marker)
+	if !ok {
 		t.Fatalf("note names no spill file: %q", note)
 	}
-	return note[j+len(marker):]
+	return after
 }
 
 // TestBashDescribeResolvesAgainstCwd pins M6: the analyzer must resolve a
@@ -316,12 +317,7 @@ func TestBashDescribeResolvesAgainstCwd(t *testing.T) {
 }
 
 func contains(paths []string, want string) bool {
-	for _, p := range paths {
-		if p == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(paths, want)
 }
 
 // TestBashIsNotALoginShell pins that the tool runs `bash -c`, not `bash -lc`:

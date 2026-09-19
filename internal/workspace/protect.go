@@ -81,7 +81,7 @@ func (w *Workspace) IsProtected(abs string) bool {
 	// Any .git or .wright directory is protected, not just the roots': a
 	// monorepo's submodule or a vendored checkout carries hooks that run
 	// outside the sandbox just as the top-level one does.
-	for _, seg := range strings.Split(filepath.ToSlash(abs), "/") {
+	for seg := range strings.SplitSeq(filepath.ToSlash(abs), "/") {
 		if seg == ".git" || seg == ".wright" {
 			return true
 		}

@@ -536,7 +536,7 @@ func TestNoLineWiderThanTerminal(t *testing.T) {
 		m = typeText(m, strings.Repeat("long input ", 12))
 		check := func(stage string) {
 			t.Helper()
-			for _, line := range strings.Split(m.View().Content, "\n") {
+			for line := range strings.SplitSeq(m.View().Content, "\n") {
 				if w := lipgloss.Width(line); w > width {
 					t.Errorf("width %d %s: %d-wide line %q", width, stage, w, ansi.Strip(line))
 				}
@@ -562,7 +562,7 @@ func TestResizeRerendersAtNewWidth(t *testing.T) {
 	if strings.Count(v, "wide") != words {
 		t.Fatalf("text lost on resize:\n%s", v)
 	}
-	for _, line := range strings.Split(m.View().Content, "\n") {
+	for line := range strings.SplitSeq(m.View().Content, "\n") {
 		if w := lipgloss.Width(line); w > 40 {
 			t.Fatalf("cached wide line survived the resize: %q", ansi.Strip(line))
 		}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 
 	"charm.land/bubbles/v2/textarea"
@@ -379,13 +380,7 @@ func prettyJSON(raw json.RawMessage) string {
 func exclude(paths, writes []string) []string {
 	var out []string
 	for _, p := range paths {
-		found := false
-		for _, w := range writes {
-			if p == w {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(writes, p)
 		if !found {
 			out = append(out, p)
 		}

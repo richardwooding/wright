@@ -197,8 +197,8 @@ func (l *lateChain) middleware() agentkit.Middleware {
 		return agentkit.Raw(def.Name, def.Description, def.Parameters, func(ctx context.Context, args json.RawMessage) (agentkit.Output, error) {
 			tool := next
 			chain := l.eng.Middleware()
-			for i := len(chain) - 1; i >= 0; i-- {
-				tool = chain[i](tool)
+			for _, c := range slices.Backward(chain) {
+				tool = c(tool)
 			}
 			return tool.Call(ctx, args)
 		})
