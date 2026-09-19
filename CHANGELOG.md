@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-09-20
+
+Four defects found by CI's macOS job and by following its lead on Linux.
+Three are security-relevant and all four share one cause: a fixed list of
+paths compared against values that have already been symlink-resolved.
+
 ### Security
 
 - A recursive `chmod`/`chown` on a system root escaped the hard-deny set when
