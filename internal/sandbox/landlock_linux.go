@@ -112,6 +112,18 @@ func (landlockBackend) Warnings() []Warning {
 	}
 }
 
+// LandlockNamespaces reports why this machine cannot create the user,
+// network and mount namespaces the landlock backend's confinement rests on,
+// or nil when it can. It is the measured probe nsAvailable performs, not a
+// guess from the environment: where unprivileged user namespaces are
+// forbidden (a hardened kernel, a CI container without the capability) the
+// backend still applies Landlock's path rules but loses the network
+// namespace — "no network" then covers TCP only — and the mount namespace
+// that carries the read-only binds over .git/hooks, .git/config and
+// .wright. Warnings() says this in prose for the user; this is the same
+// answer for a caller that has to branch on it.
+func LandlockNamespaces() error { return nsAvailable() }
+
 // WarningsFor adds what can only be known once the workspace is known: a
 // volume a container runtime bind-mounted in is locked by the user namespace
 // that owns it, so a nested one cannot remount any part of it read-only,

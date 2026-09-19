@@ -133,7 +133,15 @@ func TestBwrapExtraReadWriteCannotUnprotect(t *testing.T) {
 }
 
 // landlockOrSkip returns the landlock backend re-executing the test binary,
-// or skips when this kernel has no Landlock.
+// or skips when this machine cannot give it what its confinement rests on:
+// a kernel with Landlock, and the user, network and mount namespaces the
+// backend creates around the helper. Where the namespaces are refused —
+// unprivileged user namespaces disabled, a seccomp filter, a container
+// without the capability, all of which describe some CI runners — the
+// backend degrades to the documented fallback and the assertions below would
+// be measuring nothing. The skip is decided by the backend's own capability
+// probe, never by a CI environment variable, so a machine that *can* enforce
+// and does not still fails.
 func landlockOrSkip(t *testing.T) sandbox.Backend {
 	t.Helper()
 	if runtime.GOOS != "linux" {
@@ -143,11 +151,29 @@ func landlockOrSkip(t *testing.T) sandbox.Backend {
 	if err != nil || abi < 1 {
 		t.Skipf("landlock unavailable: abi=%d err=%v", abi, err)
 	}
+	if err := sandbox.LandlockNamespaces(); err != nil {
+		t.Skipf("landlock cannot confine here: no namespaces for the helper (%v)", err)
+	}
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	return sandbox.LandlockWithExecutable(exe)
+}
+
+// enforcesOrSkip skips when the backend cannot enforce this spec's
+// protection on this machine. The namespaces can exist and the read-only
+// bind mounts still be refused — a volume a container runtime mounted in is
+// locked by the user namespace that owns it — and the backend then says so
+// through SpecWarnings and runs the payload anyway. That is the documented
+// fallback, not a regression, so the test skips with the backend's own
+// reason instead of failing. Backends that report nothing (bwrap) pass
+// straight through.
+func enforcesOrSkip(t *testing.T, b sandbox.Backend, spec sandbox.Spec) {
+	t.Helper()
+	if w := sandbox.SpecWarnings(b, spec); len(w) > 0 {
+		t.Skipf("%s cannot enforce this workspace's protection: %v", b.Name(), w)
+	}
 }
 
 // workspaceOutsideTmp makes a scratch workspace that is not under /tmp, which
@@ -187,12 +213,14 @@ func TestLandlockProtectsWithoutBreakingTheWorkspace(t *testing.T) {
 	})
 	script += "(mkdir -p '" + filepath.Join(ws, "newdir") + "' 2>/dev/null && echo SUBDIR=WROTE || echo SUBDIR=BLOCKED)\n"
 	script += "(cat '" + filepath.Join(ws, gitName, "hooks", "keep") + "' >/dev/null 2>&1 && echo HOOKREAD=OK || echo HOOKREAD=DENIED)\n"
-	out, err := runSpec(t, b, sandbox.Spec{
+	spec := sandbox.Spec{
 		Argv:      []string{"bash", "-c", script},
 		Dir:       ws,
 		Env:       sandbox.Env(nil, nil),
 		ReadWrite: []string{ws},
-	})
+	}
+	enforcesOrSkip(t, b, spec)
+	out, err := runSpec(t, b, spec)
 	if err != nil {
 		t.Fatalf("landlock run: %v\n%s", err, out)
 	}
@@ -252,7 +280,7 @@ func TestProtectedPathsThatDoNotExistYet(t *testing.T) {
 			if err := os.MkdirAll(filepath.Join(ws, gitName), 0o755); err != nil {
 				t.Fatal(err)
 			}
-			out, err := runSpec(t, b, sandbox.Spec{
+			spec := sandbox.Spec{
 				Argv: []string{"bash", "-c", "" +
 					"(mkdir -p '" + filepath.Join(ws, ".wright") + "' 2>/dev/null && echo MKDIR=OK || echo MKDIR=BLOCKED)\n" +
 					probeScript(map[string]string{
@@ -264,7 +292,9 @@ func TestProtectedPathsThatDoNotExistYet(t *testing.T) {
 				Env:       sandbox.Env(nil, nil),
 				ReadWrite: []string{ws},
 				Roots:     []string{ws},
-			})
+			}
+			enforcesOrSkip(t, b, spec)
+			out, err := runSpec(t, b, spec)
 			if err != nil {
 				t.Fatalf("%s run: %v\n%s", name, err, out)
 			}

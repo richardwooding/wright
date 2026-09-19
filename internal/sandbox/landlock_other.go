@@ -24,6 +24,10 @@ func LandlockWithExecutable(string) Backend { return landlockBackend{} }
 // LandlockABI reports 0 and ErrUnsupported off Linux.
 func LandlockABI() (int, error) { return 0, ErrUnsupported }
 
+// LandlockNamespaces reports that there are no namespaces to create off
+// Linux, where the backend does not exist.
+func LandlockNamespaces() error { return ErrUnsupported }
+
 // LandlockNetwork reports that the backend does not exist off Linux.
 func LandlockNetwork() string { return "not supported on this platform" }
 

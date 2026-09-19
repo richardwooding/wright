@@ -241,7 +241,12 @@ client to HTTP MCP transports).
   by another user namespace — a container runtime's volume — so the probe
   (`__sandbox --probe --probe-dir <root>`) measures the *workspace*, and
   `WarningsFor` says plainly that those paths rest on the permission layer
-  alone. Name resolution through a local resolver's unix socket survives
+  alone. A test that asserts what the namespaces carry has to gate on those
+  same probes — `LandlockNamespaces` for the namespaces, `SpecWarnings` for
+  the read-only binds — and skip with the backend's own reason where it
+  cannot enforce, exactly as the bwrap tests skip without bwrap. Never gate
+  on a CI environment variable: that also silences a machine that *can*
+  enforce and does not. Name resolution through a local resolver's unix socket survives
   under both backends; that is a property of the host, not of the sandbox.
 - **`sandbox.Env` is an allowlist with a hard strip.** Passthrough from trusted
   settings can add names, but nothing matching the strip regexes
