@@ -176,6 +176,11 @@ client to HTTP MCP transports).
   fuzzed. Default patterns must not be able to match inside a marker: token
   character classes exclude `[`, and no vendor prefix appears in a marker
   name. The generic entropy pattern stays opt-in (`WithGeneric`).
+  `Writer` is line-buffered *plus* a bounded private-key lookbehind: a
+  multi-line pattern cannot match a single line, so anything spanning lines
+  needs holding logic there, not just in `Redact`. The streamed output and
+  the whole-buffer output must never disagree about a secret — the user's
+  screen is as much a disclosure as the model's context.
 - **Audit lines are immutable.** `audit.Log.Write` sets `Seq` and `Prev` (the
   SHA-256 of the previous *line*), redacts `Text`/`Args`, caps `Args` at 4 KiB
   and records `ArgsSHA256` of the full value. Never log environment variables

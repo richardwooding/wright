@@ -16,6 +16,7 @@ import (
 	"math"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -142,17 +143,44 @@ func Marker(name, secret string, keep int) string {
 	return "[redacted: " + name + "…" + secret[len(secret)-keep:] + "]"
 }
 
+// maxHeldBytes bounds the private-key lookbehind: past this, the block is
+// flushed redacted rather than buffered forever on a missing END marker.
+const maxHeldBytes = 64 * 1024
+
+// keyBegin and keyEnd are the markers of the one default pattern that spans
+// lines. The writer watches for them so a streamed key is held back instead
+// of being forwarded a line at a time, which no line-wise pattern can catch.
+var (
+	keyBegin = regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`)
+	keyEnd   = regexp.MustCompile(`-----END [A-Z ]*PRIVATE KEY-----`)
+)
+
 // Writer returns a line-buffered writer that redacts each line before
 // forwarding it to w. Partial lines are held until a newline or Close.
+//
+// Line buffering alone cannot see a multi-line secret, so the writer keeps a
+// bounded lookbehind: once a "-----BEGIN … PRIVATE KEY" marker appears,
+// output is held back until the matching END arrives (then the whole block
+// is redacted), until maxHeldBytes accumulate, or until Close — an
+// unterminated block is redacted from the marker on, because a stream that
+// starts a key and stops is a key. A block that overruns the cap is redacted
+// at the cap and the rest is dropped until its END marker, since those lines
+// are key material no line-wise pattern would catch. Everything else still
+// streams live.
 func (r *Redactor) Writer(w io.Writer) io.WriteCloser {
-	return &writer{r: r, w: w}
+	return &writer{r: r, w: w, guard: r.has(NamePrivateKey)}
 }
 
 type writer struct {
-	mu  sync.Mutex
-	r   *Redactor
-	w   io.Writer
-	buf bytes.Buffer
+	mu   sync.Mutex
+	r    *Redactor
+	w    io.Writer
+	buf  bytes.Buffer // incomplete trailing line
+	held bytes.Buffer // a private-key block being accumulated
+	// holding accumulates a key block; suppressing drops the remainder of
+	// one that overran the cap and has already been marked.
+	holding, suppressing bool
+	guard                bool // the private-key pattern is active
 }
 
 func (lw *writer) Write(p []byte) (int, error) {
@@ -167,25 +195,101 @@ func (lw *writer) Write(p []byte) (int, error) {
 			lw.buf.WriteString(line)
 			break
 		}
-		red, _ := lw.r.Redact(line)
-		if _, err := io.WriteString(lw.w, red); err != nil {
+		if err := lw.line(line); err != nil {
 			return 0, err
 		}
 	}
 	return len(p), nil
 }
 
-// Close flushes a trailing partial line.
+// line forwards one complete line, or feeds the held key block.
+func (lw *writer) line(s string) error {
+	if lw.suppressing {
+		lw.suppressing = !keyEnd.MatchString(s)
+		return nil
+	}
+	if lw.holding {
+		lw.held.WriteString(s)
+		switch {
+		case keyEnd.MatchString(s):
+			return lw.flushHeld(true)
+		case lw.held.Len() >= maxHeldBytes:
+			err := lw.flushHeld(false)
+			lw.suppressing = true
+			return err
+		}
+		return nil
+	}
+	if lw.guard && keyBegin.MatchString(s) {
+		lw.holding = true
+		lw.held.WriteString(s)
+		if keyEnd.MatchString(s) {
+			return lw.flushHeld(true)
+		}
+		return nil
+	}
+	red, _ := lw.r.Redact(s)
+	_, err := io.WriteString(lw.w, red)
+	return err
+}
+
+// flushHeld writes the held block. A terminated block is redacted by the
+// ordinary patterns; anything still showing a BEGIN marker afterwards (an
+// unterminated block, or one the pattern could not match) is cut at the
+// marker, because the rest of it is key material.
+func (lw *writer) flushHeld(terminated bool) error {
+	s := lw.held.String()
+	lw.held.Reset()
+	lw.holding = false
+	out, _ := lw.r.Redact(s)
+	if !terminated || keyBegin.MatchString(out) {
+		out = cutAtKey(lw.r, s)
+	}
+	_, err := io.WriteString(lw.w, out)
+	return err
+}
+
+// cutAtKey replaces everything from the BEGIN marker on with the marker,
+// keeping (and redacting) whatever preceded it on that line.
+func cutAtKey(r *Redactor, s string) string {
+	loc := keyBegin.FindStringIndex(s)
+	if loc == nil {
+		out, _ := r.Redact(s)
+		return out
+	}
+	head, _ := r.Redact(s[:loc[0]])
+	tail := ""
+	if strings.HasSuffix(s, "\n") {
+		tail = "\n"
+	}
+	return head + Marker(NamePrivateKey, "", 0) + tail
+}
+
+// Close flushes a trailing partial line and any held key block.
 func (lw *writer) Close() error {
 	lw.mu.Lock()
 	defer lw.mu.Unlock()
-	if lw.buf.Len() == 0 {
-		return nil
+	if lw.buf.Len() > 0 {
+		line := lw.buf.String()
+		lw.buf.Reset()
+		if err := lw.line(line); err != nil {
+			return err
+		}
 	}
-	red, _ := lw.r.Redact(lw.buf.String())
-	lw.buf.Reset()
-	_, err := io.WriteString(lw.w, red)
-	return err
+	if lw.holding {
+		return lw.flushHeld(false)
+	}
+	return nil
+}
+
+// has reports whether the named pattern is active.
+func (r *Redactor) has(name string) bool {
+	for _, p := range r.patterns {
+		if p.Name == name {
+			return true
+		}
+	}
+	return false
 }
 
 // Scan is a convenience for callers that already have a bufio.Scanner: it

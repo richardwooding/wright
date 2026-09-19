@@ -149,3 +149,12 @@ redaction and a tamper-evident audit log between the model and the machine.
   positive is loaded with the framing and the warning, never silently. A body
   can neither close its own block (`</instructions`) nor forge an opening tag
   (`<instructions`); both sequences are escaped.
+- `redact.Writer` — the writer behind `bash`'s live output stream, which is
+  what the user's screen and the transcript show — is line-buffered, so the
+  only multi-line pattern (`private-key`) could never match: the model-facing
+  result was redacted while the user watched the whole key scroll past. The
+  writer now keeps a bounded lookbehind, holding output from a
+  `-----BEGIN … PRIVATE KEY` marker until the matching `-----END`, a 64 KiB
+  cap, or `Close`; an unterminated block is redacted from the marker on, and
+  a block that overruns the cap is marked and its remainder dropped until the
+  END marker. Ordinary output still streams line by line.
