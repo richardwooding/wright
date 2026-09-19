@@ -82,6 +82,7 @@ func TestImportDAG(t *testing.T) {
 func TestNoUnexpectedNetwork(t *testing.T) {
 	allow := []string{
 		pkg("model"), // Ollama loopback probe (/api/tags) — added in Phase 1
+		pkg("tools"), // web_fetch takes the ssrfguard *http.Client and builds its requests
 	}
 	graph := importGraph(t)
 	for p, imports := range graph {

@@ -7,3 +7,4 @@ dist/
 
 # Test artefacts
 coverage.out
+.claude/worktrees/
