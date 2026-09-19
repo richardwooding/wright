@@ -7,6 +7,8 @@ import (
 	"slices"
 	"sort"
 	"strings"
+
+	"github.com/richardwooding/wright/internal/policy/shellclass"
 )
 
 // envAllow is the allowlist of variable names (glob syntax, matched with
@@ -88,8 +90,25 @@ func stripped(name string) bool {
 			return true
 		}
 	}
-	return false
+	// The classifier refuses to auto-allow a command carrying one of these,
+	// because the assignment is the payload. Reading its list here keeps the
+	// two from drifting: a name it considers code must not reach a sandboxed
+	// command through the allowlist either. GOROOT and GOTOOLCHAIN are the
+	// deliberate exceptions — the machine's own values are forwarded by the
+	// allowlist above, while a script that *assigns* them is still opaque.
+	if slices.Contains(forwardableToolchain, name) {
+		return false
+	}
+	return slices.Contains(injectingVars, name)
 }
+
+// forwardableToolchain are names the classifier treats as code when a script
+// assigns them, but which wright forwards from its own environment because
+// they only say where the toolchain is.
+var forwardableToolchain = []string{"GOROOT", "GOTOOLCHAIN"}
+
+// injectingVars is shellclass's list, resolved once.
+var injectingVars = shellclass.InjectingEnvVars()
 
 // matchesAny matches name against glob patterns ("LC_*", exact names).
 func matchesAny(globs []string, name string) bool {

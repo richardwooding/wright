@@ -165,23 +165,46 @@ func WhoAmI(ctx context.Context, dir string) Identity {
 	return id
 }
 
-// Env returns the environment entries that carry id into a sandboxed git,
-// along with the settings that stop git reading a config it cannot see.
-// It is empty when the user has no configured identity, so git keeps its own
-// behaviour rather than committing under a name wright made up.
+// neutralised are configuration keys that name a program for git to run. A
+// repository carries its own .git/config, so cloning a hostile one and
+// running an ordinary `git diff` or `git status` is enough to execute it —
+// and those commands are allowed by default because they are how an agent
+// reads a repository. Nothing static can see this: the command line is
+// innocent. Overriding the keys in the environment is what closes it.
+var neutralised = []string{
+	"diff.external",   // runs per changed file on git diff
+	"core.fsmonitor",  // runs on git status
+	"core.sshCommand", // runs on any remote operation
+	"credential.helper",
+	"sequence.editor",
+	"core.editor",
+}
+
+// Env returns the environment entries wright adds to a sandboxed git: the
+// commit identity resolved on the host, empty stand-ins for the config files
+// the sandbox hides, and overrides that disarm the configuration keys a
+// repository could use to name a program. Entries injected this way take
+// precedence over every config file, including the repository's own.
 func (id Identity) Env() map[string]string {
-	if id.Name == "" || id.Email == "" {
-		return nil
-	}
-	return map[string]string{
-		"GIT_AUTHOR_NAME":     id.Name,
-		"GIT_AUTHOR_EMAIL":    id.Email,
-		"GIT_COMMITTER_NAME":  id.Name,
-		"GIT_COMMITTER_EMAIL": id.Email,
+	env := map[string]string{
 		// The global and system files are unreadable inside the sandbox;
 		// pointing git at an empty one turns a warning (or a fatal error
 		// under landlock) into ordinary "no global config".
 		"GIT_CONFIG_GLOBAL": os.DevNull,
 		"GIT_CONFIG_SYSTEM": os.DevNull,
+		"GIT_CONFIG_COUNT":  strconv.Itoa(len(neutralised)),
 	}
+	for i, key := range neutralised {
+		env["GIT_CONFIG_KEY_"+strconv.Itoa(i)] = key
+		env["GIT_CONFIG_VALUE_"+strconv.Itoa(i)] = ""
+	}
+	// With no identity configured wright carries none: git keeps its own
+	// behaviour rather than committing under a name wright invented.
+	if id.Name != "" && id.Email != "" {
+		env["GIT_AUTHOR_NAME"] = id.Name
+		env["GIT_AUTHOR_EMAIL"] = id.Email
+		env["GIT_COMMITTER_NAME"] = id.Name
+		env["GIT_COMMITTER_EMAIL"] = id.Email
+	}
+	return env
 }

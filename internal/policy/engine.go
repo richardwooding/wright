@@ -275,7 +275,12 @@ func (ev *eval) run() {
 		// narrows the command (or approves this call) instead.
 		return
 	}
-	if ev.allowed() {
+	// Plan mode never consults allow rules. They match on tool and argv, so
+	// a rule written for ordinary work — the builtin bash(git show *), or a
+	// user's bash(go build *) — would otherwise authorise a write in the one
+	// mode that promises not to make any. The mode table below still allows
+	// reads, which is all plan mode is for.
+	if ev.mode != ModePlan && ev.allowed() {
 		return
 	}
 	if ev.matchDecision(Ask, true) && ev.mode != ModeBypass {

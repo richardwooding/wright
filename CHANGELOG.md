@@ -134,6 +134,23 @@ redaction and a tamper-evident audit log between the model and the machine.
 
 ### Security
 
+- A repository carries its own `.git/config`, so cloning a hostile one and
+  running an ordinary `git diff` or `git status` executed whatever
+  `diff.external` or `core.fsmonitor` named — with no prompt, because those
+  commands are allowed by default and the command line is innocent. wright
+  now overrides the configuration keys that name a program
+  (`diff.external`, `core.fsmonitor`, `core.sshCommand`, `credential.helper`,
+  `core.editor`, `sequence.editor`) in the environment it gives git, which
+  takes precedence over every config file including the repository's.
+- Plan mode no longer consults allow rules. They match on tool and argv,
+  never on effect, so the builtin `bash(git show *)` authorised
+  `--output=<path>` and a user's `bash(go build *)` authorised a build in the
+  one mode that promises not to change anything. The mode table still allows
+  reads, which is all plan mode is for.
+- The sandbox's environment strip list and the classifier's list of
+  code-injecting build variables are one list. They had drifted, and a
+  variable the classifier treats as a payload could still be forwarded into a
+  sandboxed command.
 - A recursive reader given no path operand reads the working directory while
   naming nothing, so the credential scan had nothing to look at: `grep -r ""
   .` asked, but `grep -rI SECRET` returned `.env` to the model with no

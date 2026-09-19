@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -173,8 +174,30 @@ func TestWhoAmIAndEnv(t *testing.T) {
 	if env["GIT_CONFIG_GLOBAL"] != os.DevNull {
 		t.Errorf("GIT_CONFIG_GLOBAL = %q, want %q", env["GIT_CONFIG_GLOBAL"], os.DevNull)
 	}
-	// With no identity configured wright must not invent one.
-	if got := (git.Identity{Name: "Ada"}).Env(); got != nil {
-		t.Errorf("a half-configured identity produced %v, want nil", got)
+	// With no identity configured wright must not invent one, but the
+	// hardening entries are still there.
+	partial := (git.Identity{Name: "Ada"}).Env()
+	if _, ok := partial["GIT_AUTHOR_EMAIL"]; ok {
+		t.Errorf("a half-configured identity produced an author: %v", partial)
+	}
+	if partial["GIT_CONFIG_GLOBAL"] != os.DevNull {
+		t.Errorf("hardening missing from a partial identity: %v", partial)
+	}
+	// A repository's own config must not be able to name a program to run.
+	n, err := strconv.Atoi(env["GIT_CONFIG_COUNT"])
+	if err != nil || n == 0 {
+		t.Fatalf("GIT_CONFIG_COUNT = %q", env["GIT_CONFIG_COUNT"])
+	}
+	keys := map[string]bool{}
+	for i := range n {
+		keys[env["GIT_CONFIG_KEY_"+strconv.Itoa(i)]] = true
+		if v := env["GIT_CONFIG_VALUE_"+strconv.Itoa(i)]; v != "" {
+			t.Errorf("key %d is neutralised to %q, want empty", i, v)
+		}
+	}
+	for _, want := range []string{"diff.external", "core.fsmonitor", "core.sshCommand"} {
+		if !keys[want] {
+			t.Errorf("%s is not neutralised; a hostile repository could name a program", want)
+		}
 	}
 }
