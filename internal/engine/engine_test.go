@@ -6,7 +6,6 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -14,53 +13,12 @@ import (
 	"github.com/richardwooding/llmkit/core"
 
 	"github.com/richardwooding/wright/internal/engine"
+	"github.com/richardwooding/wright/internal/enginetest"
 	"github.com/richardwooding/wright/internal/model"
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/session"
 	"github.com/richardwooding/wright/internal/workspace"
 )
-
-// scripted returns canned responses in order and records every request.
-type scripted struct {
-	mu        sync.Mutex
-	responses []*core.Response
-	seen      []*core.Request
-	block     chan struct{} // when set, the first call blocks until closed
-}
-
-func (s *scripted) Chat(ctx context.Context, req *core.Request) (*core.Response, error) {
-	s.mu.Lock()
-	cp := *req
-	s.seen = append(s.seen, &cp)
-	n := len(s.seen)
-	block := s.block
-	s.mu.Unlock()
-	if block != nil && n == 1 {
-		select {
-		case <-block:
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
-	}
-	if n > len(s.responses) {
-		return textResp("done"), nil
-	}
-	return s.responses[n-1], nil
-}
-
-func (s *scripted) requests() []*core.Request {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return append([]*core.Request(nil), s.seen...)
-}
-
-func textResp(t string) *core.Response {
-	return &core.Response{Message: core.Assistant(core.Text(t)), FinishReason: core.FinishStop, Usage: core.Usage{InputTokens: 100, OutputTokens: 10, TotalTokens: 110}}
-}
-
-func callResp(id, name, args string) *core.Response {
-	return &core.Response{Message: core.Assistant(core.ToolCall{ID: id, Name: name, Arguments: json.RawMessage(args)}), FinishReason: core.FinishToolCalls, Usage: core.Usage{InputTokens: 120, OutputTokens: 5, TotalTokens: 125}}
-}
 
 type echoArgs struct {
 	Path string `json:"path"`
@@ -93,11 +51,11 @@ func describer(ws *workspace.Workspace) engine.DescribeFunc {
 
 type fixture struct {
 	eng    *engine.Engine
-	client *scripted
+	client *enginetest.Scripted
 	events <-chan engine.Event
 }
 
-func newFixture(t *testing.T, client *scripted, mutate func(*engine.Options)) fixture {
+func newFixture(t *testing.T, client *enginetest.Scripted, mutate func(*engine.Options)) fixture {
 	t.Helper()
 	root := t.TempDir()
 	ws, err := workspace.Open(root, nil)
@@ -173,7 +131,7 @@ func hasKind(evs []engine.Event, k engine.Kind) bool {
 }
 
 func TestPlainTextRun(t *testing.T) {
-	f := newFixture(t, &scripted{responses: []*core.Response{textResp("hello there")}}, nil)
+	f := newFixture(t, &enginetest.Scripted{Responses: []*core.Response{enginetest.TextResp("hello there")}}, nil)
 	if err := f.eng.Submit("hi"); err != nil {
 		t.Fatal(err)
 	}
@@ -191,7 +149,7 @@ func TestPlainTextRun(t *testing.T) {
 	if st.Running || st.Usage.InputTokens != 100 || st.ContextUsed != 100 || st.ContextWindow != 1000 {
 		t.Fatalf("status = %+v", st)
 	}
-	reqs := f.client.requests()
+	reqs := f.client.Requests()
 	if len(reqs) != 1 || reqs[0].Cache == nil || !reqs[0].Cache.System {
 		t.Fatalf("expected one cached request, got %+v", reqs)
 	}
@@ -202,7 +160,7 @@ func TestPlainTextRun(t *testing.T) {
 }
 
 func TestReadIsAllowedSilently(t *testing.T) {
-	f := newFixture(t, &scripted{responses: []*core.Response{callResp("c1", "read_file", `{"path":"a.go"}`), textResp("ok")}}, nil)
+	f := newFixture(t, &enginetest.Scripted{Responses: []*core.Response{enginetest.CallResp("c1", "read_file", `{"path":"a.go"}`), enginetest.TextResp("ok")}}, nil)
 	_ = f.eng.Submit("read a.go")
 	evs := f.collect(t, nil)
 	if hasKind(evs, engine.KindApprovalRequest) {
@@ -223,7 +181,7 @@ func TestReadIsAllowedSilently(t *testing.T) {
 }
 
 func TestEditAsksAndUserAllows(t *testing.T) {
-	f := newFixture(t, &scripted{responses: []*core.Response{callResp("c1", "edit_file", `{"path":"a.go"}`), textResp("edited")}}, nil)
+	f := newFixture(t, &enginetest.Scripted{Responses: []*core.Response{enginetest.CallResp("c1", "edit_file", `{"path":"a.go"}`), enginetest.TextResp("edited")}}, nil)
 	_ = f.eng.Submit("edit a.go")
 	var approvalID string
 	evs := f.collect(t, func(ev engine.Event) {
@@ -238,7 +196,7 @@ func TestEditAsksAndUserAllows(t *testing.T) {
 	if !hasKind(evs, engine.KindApprovalDecided) {
 		t.Fatalf("no decision event: %s", kinds(evs))
 	}
-	reqs := f.client.requests()
+	reqs := f.client.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("want 2 model calls, got %d", len(reqs))
 	}
@@ -248,14 +206,14 @@ func TestEditAsksAndUserAllows(t *testing.T) {
 }
 
 func TestEditDeniedFeedsModel(t *testing.T) {
-	f := newFixture(t, &scripted{responses: []*core.Response{callResp("c1", "edit_file", `{"path":"a.go"}`), textResp("understood")}}, nil)
+	f := newFixture(t, &enginetest.Scripted{Responses: []*core.Response{enginetest.CallResp("c1", "edit_file", `{"path":"a.go"}`), enginetest.TextResp("understood")}}, nil)
 	_ = f.eng.Submit("edit a.go")
 	f.collect(t, func(ev engine.Event) {
 		if ev.Kind == engine.KindApprovalRequest {
 			f.eng.Reply(ev.Approval.ID, engine.Decision{Allow: false, Reason: "not today"})
 		}
 	})
-	reqs := f.client.requests()
+	reqs := f.client.Requests()
 	res := reqs[1].Messages[len(reqs[1].Messages)-1].ToolResults()
 	if len(res) != 1 || !res[0].IsError || !strings.Contains(res[0].Text(), "not today") {
 		t.Fatalf("denial did not reach the model: %+v", res)
@@ -263,36 +221,36 @@ func TestEditDeniedFeedsModel(t *testing.T) {
 }
 
 func TestHeadlessDeniesWithHint(t *testing.T) {
-	f := newFixture(t, &scripted{responses: []*core.Response{callResp("c1", "edit_file", `{"path":"a.go"}`), textResp("ok")}}, func(o *engine.Options) { o.Headless = true })
+	f := newFixture(t, &enginetest.Scripted{Responses: []*core.Response{enginetest.CallResp("c1", "edit_file", `{"path":"a.go"}`), enginetest.TextResp("ok")}}, func(o *engine.Options) { o.Headless = true })
 	_ = f.eng.Submit("edit a.go")
 	evs := f.collect(t, nil)
 	if hasKind(evs, engine.KindApprovalRequest) {
 		t.Fatal("headless must not prompt")
 	}
-	res := f.client.requests()[1].Messages[len(f.client.requests()[1].Messages)-1].ToolResults()
+	res := f.client.Requests()[1].Messages[len(f.client.Requests()[1].Messages)-1].ToolResults()
 	if len(res) != 1 || !res[0].IsError || !strings.Contains(res[0].Text(), "--allow") {
 		t.Fatalf("headless denial lacks the --allow hint: %+v", res)
 	}
 }
 
 func TestPlanModeHidesWriteTools(t *testing.T) {
-	f := newFixture(t, &scripted{responses: []*core.Response{textResp("planned")}}, func(o *engine.Options) { o.Mode = policy.ModePlan })
+	f := newFixture(t, &enginetest.Scripted{Responses: []*core.Response{enginetest.TextResp("planned")}}, func(o *engine.Options) { o.Mode = policy.ModePlan })
 	_ = f.eng.Submit("plan")
 	f.collect(t, nil)
-	tools := f.client.requests()[0].Tools
+	tools := f.client.Requests()[0].Tools
 	if len(tools) != 1 || tools[0].Name != "read_file" {
 		t.Fatalf("plan mode tools = %+v", tools)
 	}
 }
 
 func TestSecretFileIsHardDenied(t *testing.T) {
-	f := newFixture(t, &scripted{responses: []*core.Response{callResp("c1", "read_file", `{"path":".env"}`), textResp("ok")}}, nil)
+	f := newFixture(t, &enginetest.Scripted{Responses: []*core.Response{enginetest.CallResp("c1", "read_file", `{"path":".env"}`), enginetest.TextResp("ok")}}, nil)
 	_ = f.eng.Submit("read .env")
 	evs := f.collect(t, nil)
 	if hasKind(evs, engine.KindApprovalRequest) {
 		t.Fatal("secret files must be denied, not asked")
 	}
-	res := f.client.requests()[1].Messages[len(f.client.requests()[1].Messages)-1].ToolResults()
+	res := f.client.Requests()[1].Messages[len(f.client.Requests()[1].Messages)-1].ToolResults()
 	if len(res) != 1 || !res[0].IsError || !strings.Contains(res[0].Text(), "denied by policy") {
 		t.Fatalf("denial = %+v", res)
 	}
@@ -300,10 +258,10 @@ func TestSecretFileIsHardDenied(t *testing.T) {
 
 func TestSteeringQueuesWhileRunning(t *testing.T) {
 	block := make(chan struct{})
-	client := &scripted{responses: []*core.Response{textResp("first"), textResp("second")}, block: block}
+	client := &enginetest.Scripted{Responses: []*core.Response{enginetest.TextResp("first"), enginetest.TextResp("second")}, Block: block}
 	f := newFixture(t, client, nil)
 	_ = f.eng.Submit("one")
-	for len(client.requests()) == 0 { // wait until the first model call is in flight
+	for len(client.Requests()) == 0 { // wait until the first model call is in flight
 		time.Sleep(5 * time.Millisecond)
 	}
 	if err := f.eng.Submit("two"); err != nil {
@@ -314,7 +272,7 @@ func TestSteeringQueuesWhileRunning(t *testing.T) {
 	if !hasKind(evs, engine.KindQueued) {
 		t.Fatalf("no queued event: %s", kinds(evs))
 	}
-	reqs := client.requests()
+	reqs := client.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("want the queued message to trigger a second model call, got %d", len(reqs))
 	}
@@ -325,7 +283,7 @@ func TestSteeringQueuesWhileRunning(t *testing.T) {
 
 func TestCancelStopsRun(t *testing.T) {
 	block := make(chan struct{})
-	f := newFixture(t, &scripted{block: block}, nil)
+	f := newFixture(t, &enginetest.Scripted{Block: block}, nil)
 	_ = f.eng.Submit("slow")
 	time.Sleep(50 * time.Millisecond)
 	f.eng.Cancel()
@@ -338,7 +296,7 @@ func TestCancelStopsRun(t *testing.T) {
 }
 
 func TestSetModeRejectsBypass(t *testing.T) {
-	f := newFixture(t, &scripted{}, nil)
+	f := newFixture(t, &enginetest.Scripted{}, nil)
 	if err := f.eng.SetMode(policy.ModeBypass); err == nil {
 		t.Fatal("bypass must not be reachable through SetMode")
 	}

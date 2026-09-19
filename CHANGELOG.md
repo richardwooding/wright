@@ -8,6 +8,22 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `internal/headless`: `wright -p` runner with `text`, `json` and
+  `stream-json` output, the documented exit codes (0/1/2/3/4/130) and
+  interrupt handling through the engine.
+- `internal/app`: composition root — trust-gated settings, sandbox spec,
+  policy layers with `.wright/settings.local.json` persistence, model and
+  session selection, audit/snapshot/redaction wiring, the toolset with its
+  engine adapters (ask_user, redaction notices, todo push, ssrfguard
+  `web_fetch` client with redirect re-validation), `Run` with an
+  `Interactive` hook, slash-command hook (`/diff /audit /init /trust
+  /redaction`), `InitProject`; offline smoke tests against a fake
+  OpenAI-compatible provider.
+- `internal/cli`: `sessions list|show|export|delete|purge`, `models`,
+  `config show`, `audit [id] [--kind] [--json]`, `audit verify`, `init`;
+  `ExitError{Code}` maps headless exit codes to the process.
+- `internal/enginetest`: shared scripted model client for tests.
+
 - Scaffold: kong CLI (`--version`, `doctor`, `config paths`, hidden
   `__sandbox`), `internal/app` import-DAG and no-unexpected-network tests.
 - `internal/theme`: lipgloss v2 palette from the gloam tokens as light/dark pairs.

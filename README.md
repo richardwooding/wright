@@ -62,13 +62,31 @@ single static binary — no cgo, no runtime dependencies. `git`, `rg` and
 ```sh
 wright                          # interactive session in the current repo
 wright "add tests for the parser"
-wright -p "explain the build" --output json     # headless, exit 3 if an approval was needed
 wright --mode plan              # read-only: edits and mutating commands are denied
 wright --allow 'bash(npm test *)' --add-dir ../shared
-wright doctor                   # sandbox backends, landlock ABI, git, rg, which provider keys are set
-wright config paths             # where settings, data and cache live
+
+# headless (-p): one prompt, one answer, no approvals — anything that would
+# have asked is denied with the --allow rule that would permit it
+wright -p "explain the build"                                   # final text on stdout
+wright -p "which tests cover the parser?" --output json         # one result object
+git diff | wright -p "review this change" --output stream-json  # stdin is fenced as <stdin>; one JSON line per event
+wright -p "rename Foo to Bar in internal/x" --allow 'edit_file(**)'   # without the rule: exit 3, nothing edited
+wright -p "run the tests and fix what fails" --allow 'bash(go test *)' --mode auto-edit -v   # tool one-liners on stderr
+wright -p "..." --max-steps 20  # exit 4 when the budget runs out
+
+wright sessions                 # list · show ID · export ID -o out.md · delete ID · purge --older-than 720h
+wright models                   # catalog models whose provider has credentials; * marks the default
+wright config show              # effective settings (untrusted project layer excluded) · config paths
+wright audit                    # events of the latest session · audit ID --kind decision · audit --json
 wright audit verify             # check the session log's hash chain
+wright init                     # AGENTS.md + .wright/settings.json skeletons (trusted, since you wrote them)
+wright doctor                   # sandbox backends, landlock ABI, git, rg, which provider keys are set
 ```
+
+`stream-json` lines are `{"type": <event kind>, ...}` with `run_id`, `text`,
+`tool {name,id,args}`, `result {text,is_error}`, `usage`, `cost_usd`,
+`context_pct` as they apply; the last line is
+`{"type":"result","output","stop_reason","steps","tool_calls","usage","cost_usd","duration_ms","session_id","exit_code","error"}`.
 
 | flag | meaning |
 | --- | --- |
@@ -82,8 +100,17 @@ wright audit verify             # check the session log's hash chain
 | `-r, --resume` / `-c, --continue` | resume a session by ID, or the latest |
 | `--plain` | no alternate screen (implied by `NO_COLOR`, `TERM=dumb`, non-TTY) |
 
-Exit codes: `0` ok · `1` provider/tool error · `2` usage · `3` approval
-required · `4` budget exhausted · `130` interrupted.
+Exit codes: `0` ok · `1` provider/tool error · `2` usage (no prompt, bad
+format) · `3` approval required (a call was denied because nobody could
+answer; the message names the `--allow` rule or mode that would permit it) ·
+`4` budget exhausted (`--max-steps`, tokens, deadline) · `130` interrupted
+(SIGINT/SIGTERM cancel the run; the audit `run_end` is still written).
+
+Project settings (`.wright/settings.json`) are inert until you trust them:
+their `allow` rules, extra directories, env passthrough and MCP servers do
+not apply, and a warning says so, until `/trust` (or the file having been
+written by `wright init`) records the file's hash. `ask` and `deny` rules
+from a project always apply.
 
 ## Permission rules
 

@@ -25,7 +25,9 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	code, err := cli.Main(ctx, os.Args[1:], cli.BuildInfo{Version: version, Commit: commit, Date: date})
+	// The interactive UI is wired here once the TUI package lands; until
+	// then only headless (-p) runs work and the CLI says so.
+	code, err := cli.Main(ctx, os.Args[1:], cli.BuildInfo{Version: version, Commit: commit, Date: date}, nil)
 	if err != nil && !errors.Is(err, context.Canceled) {
 		fmt.Fprintf(os.Stderr, "wright: %v\n", err)
 	}

@@ -228,12 +228,17 @@ func denialText(v policy.Verdict) string {
 	return s + ". Do not retry the same action another way; tell the user what you needed and why."
 }
 
+// HeadlessDenialMarker is the phrase every headless denial carries. The
+// headless runner scans tool results for it to report "approval required"
+// (exit 3) rather than a plain tool failure.
+const HeadlessDenialMarker = "requires interactive approval in headless mode"
+
 func headlessReason(c agentkit.Call, v policy.Verdict) string {
 	hint := "re-run interactively"
 	if len(v.Offers) > 0 {
 		hint = "re-run with --allow '" + v.Offers[len(v.Offers)-1].Rule.String() + "'"
 	}
-	return fmt.Sprintf("%s requires interactive approval in headless mode (%s, or use --mode auto-edit for edits)", c.Call.Name, hint)
+	return fmt.Sprintf("%s %s (%s, or use --mode auto-edit for edits)", c.Call.Name, HeadlessDenialMarker, hint)
 }
 
 func severity(v policy.Verdict, req policy.Request) Severity {

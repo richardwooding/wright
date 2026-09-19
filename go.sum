@@ -82,6 +82,8 @@ github.com/richardwooding/agentkit v0.3.0 h1:JU4hia23XH4rPWO0iiC4DvlsQ+90WJ+OJJH
 github.com/richardwooding/agentkit v0.3.0/go.mod h1:miEcal/Pvh+zYGG/ZZD6vYTBWVQb5JOm69qjJTLoZxk=
 github.com/richardwooding/llmkit v0.3.0 h1:1gpxFqNhXGcjxVUvxn/tnVkQKA7LK3q6eDb9PuQFIwo=
 github.com/richardwooding/llmkit v0.3.0/go.mod h1:HkivIVVayrt98U1sbwytl3YMenoZya8K7P4gYZEgLv8=
+github.com/richardwooding/ssrfguard v0.2.2 h1:/EtPjdiMUkA1EKTgbaCrumgiDkul5bEi77A57KxJJz8=
+github.com/richardwooding/ssrfguard v0.2.2/go.mod h1:l26en+xGOtuFaRcpYqXkaCC2QdWggOyCw+DM5RzQpJQ=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=
 github.com/rivo/uniseg v0.4.7/go.mod h1:FN3SvrM+Zdj16jyLfmOkMNblXMcoc8DfTHruCPUcx88=
 github.com/rogpeppe/go-internal v1.15.0 h1:D0RCU5rMAp+SpgkiNdrjfJ+LX4J1M32V2NeCY7EJ6hc=
