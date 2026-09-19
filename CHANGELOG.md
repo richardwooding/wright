@@ -134,6 +134,34 @@ redaction and a tamper-evident audit log between the model and the machine.
 
 ### Security
 
+- The shell classifier called several commands that execute arbitrary code
+  "safe-read", and a safe-read command is auto-allowed with no prompt:
+  `awk 'BEGIN{system("…")}'` (the program text was never inspected),
+  GNU `sed`'s `e` command and `s///e` flag, and `git -c` keys such as
+  `diff.external`, `core.pager` and `core.sshCommand` (the key was skipped
+  after checking only `core.hooksPath`). `go test -exec`, `go build
+  -toolexec` and `go vet -vettool` rode the builtin `bash(go test *)` rule
+  the same way, `find -exec` hid its payload's paths from the deny rules, and
+  `sort -o` truncated a file while classifying as a read. All of these now
+  classify as opaque, privileged or writing, so none can be auto-allowed.
+- The workspace containment checks now run *before* the allow rules. An
+  argv-prefix rule such as the builtin `bash(grep *)` matches on the command
+  alone, so it covered paths the command was never checked against: a
+  protected path is now denied whatever rule matched, in every mode, and for
+  bash an outside-the-workspace ask cannot be waived by a rule that never
+  examined the path.
+- A recursive reader declares the directory it was pointed at, not the files
+  it opens, so `grep -r "" .` put `.env` in the model's context while
+  `cat .env` was denied. A bounded scan of declared directory reads now
+  forces an approval naming the credential files at stake; no rule waives
+  it, and the denial says so rather than suggesting an `--allow` that would
+  not work.
+- Plan mode — the most restrictive mode — was the most permissive one for
+  shell reads: it decided before the containment checks ran, so a read-only
+  command could reach `/etc/passwd` there while default mode denied it.
+- Nested `.git` and `.wright` directories are protected like the workspace
+  root's. A submodule's or vendored checkout's hooks run outside the sandbox
+  just the same, and were one approval away.
 - Project instruction files (`AGENTS.md` from the workspace root down to cwd,
   `.wright/instructions.md`, a confirmed `CLAUDE.md`) are no longer quoted
   into the system prompt as if the system had written them. They are now
