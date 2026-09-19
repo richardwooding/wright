@@ -123,13 +123,19 @@ func writeClose(f *os.File, data []byte) error {
 	return f.Close()
 }
 
-// Project returns the accepted record for root, if any.
+// Project returns the accepted record for root, if any. The key is the
+// normalised path, so the spelling the caller happens to hold does not
+// decide whether a project is recognised; a record written under another
+// spelling (by an older version, or through a link) is still found.
 func (s *Store) Project(root string) (Record, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, err := s.load()
 	if err != nil {
 		return Record{}, false
+	}
+	if r, ok := f.Projects[normalizeRoot(root)]; ok {
+		return r, true
 	}
 	r, ok := f.Projects[root]
 	return r, ok
@@ -141,7 +147,8 @@ func (s *Store) ProjectTrusted(root, settingsHash string) bool {
 	return ok && r.SettingsHash == settingsHash
 }
 
-// AcceptProject records root's settings hash as accepted.
+// AcceptProject records root's settings hash as accepted, under the
+// normalised path so the next lookup agrees however it spells the project.
 func (s *Store) AcceptProject(root, settingsHash string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -149,11 +156,13 @@ func (s *Store) AcceptProject(root, settingsHash string) error {
 	if err != nil {
 		return err
 	}
+	root = normalizeRoot(root)
 	f.Projects[root] = Record{Root: root, SettingsHash: settingsHash, Accepted: time.Now().UTC()}
 	return s.save(f)
 }
 
-// ForgetProject removes root's record.
+// ForgetProject removes root's record, in either spelling: forgetting a
+// project must not depend on how the caller wrote its path.
 func (s *Store) ForgetProject(root string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -161,6 +170,7 @@ func (s *Store) ForgetProject(root string) error {
 	if err != nil {
 		return err
 	}
+	delete(f.Projects, normalizeRoot(root))
 	delete(f.Projects, root)
 	return s.save(f)
 }
@@ -219,6 +229,25 @@ func (s *Store) Servers() []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// normalizeRoot is the key a project is remembered under: absolute and
+// symlink-resolved. Trust is a property of the directory, not of the
+// spelling that reached it — on macOS a project under /var/folders is
+// accepted as /var/... and looked up as /private/var/..., which left an
+// accepted project untrusted for ever. A path that cannot be resolved (it no
+// longer exists) is kept as it was, cleaned, so a stale record can still be
+// found and forgotten.
+func normalizeRoot(root string) string {
+	abs, err := filepath.Abs(root)
+	if err != nil {
+		return filepath.Clean(root)
+	}
+	real, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return abs
+	}
+	return real
 }
 
 // HashFile returns the hex SHA-256 of a file's content. A missing file

@@ -24,6 +24,15 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Project trust was keyed by the spelling of the project's path, so a
+  project accepted once could stay untrusted for ever. Acceptance recorded
+  one spelling and the check looked up another (resolved versus not), which
+  on macOS — where a project under `/var/folders` resolves to
+  `/private/var/folders` — broke project trust outright: `.wright/settings.json`
+  never applied, however often it was accepted. `trust.Store` now records and
+  looks up projects under the absolute, symlink-resolved path, and finds a
+  record written under either spelling.
+
 - `grep` with a limit could drop its truncation note. Ignored and hidden
   files were filtered out *after* the limit was applied, so a match ripgrep
   happened to emit first from an ignored directory consumed the limit and

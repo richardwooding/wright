@@ -3,6 +3,7 @@ package trust_test
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -54,6 +55,63 @@ func TestProjects(t *testing.T) {
 		if strings.HasPrefix(e.Name(), ".trust-") {
 			t.Errorf("temp file left behind: %s", e.Name())
 		}
+	}
+}
+
+// TestProjectSpellingDoesNotDecideTrust pins that a project accepted through
+// one spelling of its path is recognised through the other. On macOS a
+// project under /var/folders is accepted as /var/... and looked up as
+// /private/var/... — which left every accepted project untrusted, so its
+// settings never applied. The two spellings are built here with a symlinked
+// directory, so the test means the same thing on Linux.
+func TestProjectSpellingDoesNotDecideTrust(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
+	}
+	base := t.TempDir()
+	linked := filepath.Join(base, "link")
+	real := filepath.Join(base, "real")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, linked); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(linked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved == linked {
+		t.Fatalf("the two spellings must differ, got %s for both", linked)
+	}
+	tests := []struct {
+		name         string
+		accept, look string
+	}{
+		{name: "accepted through the link, looked up resolved", accept: linked, look: resolved},
+		{name: "accepted resolved, looked up through the link", accept: resolved, look: linked},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newStore(t)
+			if err := s.AcceptProject(tt.accept, "h"); err != nil {
+				t.Fatal(err)
+			}
+			if !s.ProjectTrusted(tt.look, "h") {
+				t.Errorf("AcceptProject(%s) then ProjectTrusted(%s) = false", tt.accept, tt.look)
+			}
+			if s.ProjectTrusted(tt.look, "other") {
+				t.Error("a different settings hash must not be trusted")
+			}
+			// Forgetting through either spelling must remove it too, or a
+			// project could be untrusted and still recognised.
+			if err := s.ForgetProject(tt.look); err != nil {
+				t.Fatal(err)
+			}
+			if _, ok := s.Project(tt.accept); ok {
+				t.Errorf("ForgetProject(%s) left the record for %s", tt.look, tt.accept)
+			}
+		})
 	}
 }
 

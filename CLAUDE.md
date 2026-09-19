@@ -320,7 +320,11 @@ client to HTTP MCP transports).
   `wright init` trusts the files it writes; a persisted grant
   rewrites `settings.local.json` and re-records the hash, but only for an
   already-trusted project. `/trust` accepts an existing pair, effective from
-  the next session. `config show` prints the gated view.
+  the next session. `config show` prints the gated view. A project is keyed
+  in `trust.json` by its absolute, symlink-resolved root
+  (`trust.normalizeRoot`), never by the spelling a caller happens to hold:
+  accepting under one spelling and checking under another is how project
+  trust silently stopped working on macOS.
 - **Headless exit 3 comes from the tool result.** With `Options.Headless`
   the engine answers every Ask verdict with a denial containing
   `engine.HeadlessDenialMarker`; `headless.Run` scans `KindToolResult` text
