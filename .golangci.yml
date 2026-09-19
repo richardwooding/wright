@@ -48,6 +48,8 @@ linters:
       - path: _test\.go
         linters:
           - goconst
+          - gocyclo
+          - gocognit
       - path: internal/policy/shellclass/
         linters:
           - goconst
