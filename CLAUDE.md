@@ -29,9 +29,10 @@ goreleaser release --snapshot --clean --skip=publish,docker   # local release dr
 CGO_ENABLED=0 GOOS=linux go build -trimpath -o dist/wright-local ./cmd/wright && podman build -f Containerfile.local -t wright:dev .
 ```
 
-`~/Projects/Personal/go.work` lists the sibling libraries but not this repo, so
-run Go commands here with `GOWORK=off` (or add `./wright` to the workspace).
-Never add `replace` directives.
+This module depends on the *tagged* `agentkit` and `llmkit` releases. To develop against an
+unreleased sibling checkout, create a temporary `go.work` in `~/Projects/Personal` (not a git
+repo) listing `./wright`, `./agentkit`, `./agentkit/mcp`, `./llmkit`; delete it once the tags
+exist. Never add `replace` directives.
 
 ## Architecture
 
@@ -159,8 +160,7 @@ suppress). Conventional commits; every commit ends with
 2. Libraries first, in this order, each tagged by the user: `llmkit` `v0.x.0`,
    then `llmkit/vertexgrpc`, then `agentkit` `v0.x.0` (bumping its llmkit
    requirement), then `agentkit/mcp`. Then bump the requirements here with
-   `GOWORK=off go get github.com/richardwooding/agentkit@v0.x.0 …` and
-   `GOWORK=off go mod tidy`.
+   `go get github.com/richardwooding/agentkit@v0.x.0 …` and `go mod tidy`.
 3. Move `CHANGELOG.md` `[Unreleased]` to the version; update README status.
 4. `goreleaser check && goreleaser release --snapshot --clean --skip=publish,docker`
    to see the archives and cask, and
