@@ -358,8 +358,10 @@ func (d *Deps) snapshot(ctx context.Context, abs string) error {
 }
 
 // refuseWrite is the defence-in-depth check for write and edit targets.
-func (d *Deps) refuseWrite(abs string) error {
+func (d *Deps) refuseWrite(abs string, inside bool) error {
 	switch {
+	case !inside:
+		return fmt.Errorf("%w: %s is outside the workspace (add the directory with --add-dir)", ErrRefused, abs)
 	case d.WS.IsProtected(abs):
 		return fmt.Errorf("%w: %s is a protected path", ErrRefused, d.rel(abs))
 	case d.WS.IsSecretFile(abs):

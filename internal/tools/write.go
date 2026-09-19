@@ -56,7 +56,7 @@ func (d *Deps) runWriteFile(ctx context.Context, a writeArgs) (agentkit.Output, 
 	if err != nil {
 		return agentkit.Output{}, err
 	}
-	if err := d.refuseWrite(abs); err != nil {
+	if err := d.refuseWrite(abs, inside); err != nil {
 		return agentkit.Output{}, err
 	}
 	mode, err := d.prepareTarget(abs, inside)

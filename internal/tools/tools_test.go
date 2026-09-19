@@ -220,7 +220,8 @@ func TestWriteFile(t *testing.T) {
 		{name: "overwrite", args: map[string]any{"path": "exists.txt", "content": "new\n"}, want: "Wrote 4 bytes (1 lines) to exists.txt"},
 		{name: "protected .git", args: map[string]any{"path": ".git/config", "content": "x"}, wantErr: "protected path"},
 		{name: "secret name", args: map[string]any{"path": "conf/.env", "content": "x"}, wantErr: "credential file"},
-		{name: "outside missing parent", args: map[string]any{"path": filepath.Join(outside, "no", "such", "f.txt"), "content": "x"}, wantErr: "only created inside the workspace"},
+		{name: "outside missing parent", args: map[string]any{"path": filepath.Join(outside, "no", "such", "f.txt"), "content": "x"}, wantErr: "outside the workspace"},
+		{name: "outside existing dir", args: map[string]any{"path": filepath.Join(outside, "f.txt"), "content": "x"}, wantErr: "outside the workspace"},
 		{name: "directory target", args: map[string]any{"path": "a", "content": "x"}, wantErr: "is a directory"},
 	}
 	for _, tt := range tests {

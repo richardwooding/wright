@@ -59,11 +59,11 @@ func (d *Deps) describeEdit(args json.RawMessage) (policy.Request, Preview, erro
 }
 
 func (d *Deps) runEditFile(ctx context.Context, a editArgs) (agentkit.Output, error) {
-	abs, _, err := d.resolve(a.Path)
+	abs, inside, err := d.resolve(a.Path)
 	if err != nil {
 		return agentkit.Output{}, err
 	}
-	if err := d.refuseWrite(abs); err != nil {
+	if err := d.refuseWrite(abs, inside); err != nil {
 		return agentkit.Output{}, err
 	}
 	e, err := d.computeEdit(abs, a)
