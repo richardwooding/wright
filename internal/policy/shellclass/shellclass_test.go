@@ -2,6 +2,7 @@ package shellclass_test
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -136,8 +137,10 @@ var table = []row{
 	{cmd: "git branch -D feature", class: shellclass.Destructive},
 	{cmd: "git push --force origin feature", class: shellclass.Destructive},
 	{cmd: "echo '' > main.go", class: shellclass.Destructive},
-	{cmd: "find . -name '*.tmp' -delete", class: shellclass.Destructive},
-	{cmd: "find . -name '*.log' -exec rm {} \\;", class: shellclass.Destructive},
+	// -delete and -exec carry a payload a bare `find *` prefix rule cannot
+	// see, so they are opaque as well as destructive.
+	{cmd: "find . -name '*.tmp' -delete", class: shellclass.Destructive, unknown: true},
+	{cmd: "find . -name '*.log' -exec rm {} \\;", class: shellclass.Destructive, unknown: true},
 	{cmd: "find . -name *.tmp -delete", class: shellclass.Destructive, unknown: true}, // unquoted glob
 	{cmd: "find . -type f | xargs rm", class: shellclass.Destructive},
 	{cmd: "docker system prune -af", class: shellclass.Destructive},
@@ -270,6 +273,14 @@ var table = []row{
 	{cmd: `GIT_PAGER=/tmp/evil git log`, class: shellclass.SafeRead, unknown: true},
 	{cmd: `GIT_CONFIG_COUNT=1 git status`, class: shellclass.SafeRead, unknown: true},
 	{cmd: `env GIT_EDITOR=/tmp/evil git commit`, class: shellclass.MutatingWorkspace, unknown: true},
+	// --- find -exec hides its payload from prefix rules (adversarial review H2)
+	{cmd: `find . -name x -exec awk 'BEGIN{system("id")}' {} \;`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -exec chmod 777 {} \;`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -exec mv main.go /tmp/x \;`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -execdir touch {} \;`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -name '*.go' -exec cat {} \;`, class: shellclass.MutatingWorkspace},
+	{cmd: `find . -name '*.go' -fprint out.txt`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `find . -exec cp main.go .git/hooks/pre-commit \;`, class: shellclass.Destructive, hardDeny: true, unknown: true},
 }
 
 func TestAnalyzeTable(t *testing.T) {
@@ -305,6 +316,37 @@ func TestCommandsAndWrites(t *testing.T) {
 	}
 	if a.Raw == "" {
 		t.Error("Raw not preserved")
+	}
+}
+
+// TestExecPayloadPathsAreDeclared pins that paths named inside a find -exec
+// or xargs payload reach the analysis: path deny rules match on the declared
+// reads and writes, so a payload that launders them past those rules is a
+// hole even when the class is right.
+func TestExecPayloadPathsAreDeclared(t *testing.T) {
+	tests := []struct {
+		cmd         string
+		read, write string
+	}{
+		{cmd: `find . -exec mv main.go /tmp/x \;`, read: root + "/main.go", write: "/tmp/x"},
+		{cmd: `find . -exec tee out.txt \;`, write: root + "/out.txt"},
+		{cmd: `find . -type f | xargs mv main.go /tmp/x`, read: root + "/main.go", write: "/tmp/x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.cmd, func(t *testing.T) {
+			a := shellclass.Analyze(tt.cmd, fakeWS{})
+			var reads, writes []string
+			for _, c := range a.Commands {
+				reads = append(reads, c.Reads...)
+				writes = append(writes, c.Writes...)
+			}
+			if tt.read != "" && !slices.Contains(reads, tt.read) {
+				t.Errorf("reads = %v, want %q", reads, tt.read)
+			}
+			if tt.write != "" && !slices.Contains(writes, tt.write) {
+				t.Errorf("writes = %v, want %q", writes, tt.write)
+			}
+		})
 	}
 }
 

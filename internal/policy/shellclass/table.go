@@ -258,19 +258,23 @@ func handleFind(a *analyzer, name string, args []word) result {
 		switch t {
 		case "-delete":
 			r.raise(Destructive)
+			r.unknown = true
 			r.reason = joinReason(r.reason, "find -delete removes matches")
 		case "-exec", "-execdir", "-ok", "-okdir":
 			end := i + 1
 			for end < len(args) && args[end].text != ";" && args[end].text != "+" {
 				end++
 			}
-			a.foldExec(&r, args[i+1:end])
+			if !a.foldExec(&r, args[i+1:end]) {
+				r.unknown = true
+			}
 			i = end
 		case "-fprint", "-fprintf", "-fls", "-fprint0":
 			if i+1 < len(args) {
 				a.writeFiles(&r, args[i+1:i+2], true)
 				i++
 			}
+			r.unknown = true
 		}
 		i++
 	}
@@ -278,8 +282,14 @@ func handleFind(a *analyzer, name string, args []word) result {
 }
 
 // foldExec classifies the -exec payload ({} placeholders stripped) and merges
-// it into r at no less than MutatingWorkspace.
-func (a *analyzer) foldExec(r *result, payload []word) {
+// it into r at no less than MutatingWorkspace. The payload's declared reads
+// and writes are merged too: path deny rules match on the declared paths, and
+// a payload whose paths never surfaced was invisible to them.
+//
+// safeReader reports a payload that is itself a recognised safe reader. Any
+// other payload must not be coverable by a bare `find *` argv-prefix rule —
+// the rule cannot see what the payload does — so handleFind marks it opaque.
+func (a *analyzer) foldExec(r *result, payload []word) (safeReader bool) {
 	inner := make([]word, 0, len(payload))
 	for _, w := range payload {
 		if w.text != "{}" {
@@ -287,17 +297,21 @@ func (a *analyzer) foldExec(r *result, payload []word) {
 		}
 	}
 	if len(inner) == 0 {
-		return
+		return false
 	}
 	ir := a.classify(inner)
+	safeReader = ir.class == SafeRead && !ir.unknown && ir.hardDeny == ""
 	ir.raise(MutatingWorkspace)
 	r.raise(ir.class)
 	r.network = r.network || ir.network
 	r.unknown = r.unknown || ir.unknown
+	r.reads = append(r.reads, ir.reads...)
+	r.writes = append(r.writes, ir.writes...)
 	if r.hardDeny == "" {
 		r.hardDeny = ir.hardDeny
 	}
 	r.reason = joinReason(r.reason, "find -exec "+inner[0].text+": "+ir.reason)
+	return safeReader
 }
 
 // ---- build tools ----------------------------------------------------------------
