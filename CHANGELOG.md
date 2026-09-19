@@ -8,6 +8,31 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `internal/skillsdir`: Agent Skills discovery — merges
+  `~/.config/wright/skills`, `<ws>/.agents/skills`, `<ws>/.wright/skills`,
+  `skills.extraDirs` and (opt-in) `<ws>/.claude/skills`, later directories
+  winning; a malformed `SKILL.md` is reported as a problem, not a failure.
+  `wright skills` and `/skills` list what was found.
+- `internal/mcpclient`: MCP servers behind consent and a trust record.
+  Stdio servers run inside the OS sandbox with the filtered environment and
+  no network unless declared; HTTP servers go through the ssrfguard client
+  with configured headers. The first connection shows the command or URL and
+  every tool with its annotations, then records the binary hash, arguments,
+  URL and tool list in `trust.json`; any change re-asks with a diff. Tools
+  register as `mcp_<server>_<tool>` and are addressed by policy as
+  `mcp:<server>:<tool>`, with `readOnlyHint` carried through as advisory
+  only. `wright mcp list|add|remove` and `/mcp`.
+- `internal/agents`: the built-in read-only `explore` sub-agent and custom
+  agents from `.wright/agents/*.md` (frontmatter `name`, `description`,
+  `tools`, `model`, `read-only`; the body is the instructions). Sub-agents
+  run through the engine's own middleware chain and are approved at depth 1
+  by a child policy engine, so a child can never widen what the parent may
+  do. `/agents`.
+- `internal/engine`: `Engine.Middleware` exposes the approval/audit/untrusted
+  chain for sub-agents, and `Approve` evaluates depth > 0 against
+  `policy.Engine.Child`.
+- `internal/config`: `mcpServers` entries gain `headers`, `prefix`, `network`
+  and `trusted`; `Layered.SaveProject` writes `.wright/settings.json`.
 - `internal/headless`: `wright -p` runner with `text`, `json` and
   `stream-json` output, the documented exit codes (0/1/2/3/4/130) and
   interrupt handling through the engine.
