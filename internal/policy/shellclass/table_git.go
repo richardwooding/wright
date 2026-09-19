@@ -12,12 +12,12 @@ var defaultProtectedBranches = []string{"main", "master", "release/*"}
 
 var (
 	gitSafeRead = map[string]bool{
-		"status": true, "diff": true, "log": true, "show": true, "blame": true, "rev-parse": true, "describe": true,
+		"status": true, "diff": true, "log": true, "show": true, "rev-parse": true, "describe": true,
 		"shortlog": true, "ls-files": true, "ls-tree": true, "cat-file": true, "rev-list": true, "name-rev": true,
 		"help": true, "version": true, "--version": true, "check-ignore": true, "check-attr": true,
 		"merge-base": true, "diff-tree": true, "diff-index": true, "diff-files": true, "for-each-ref": true, "var": true,
 		"count-objects": true, "fsck": true, "whatchanged": true, "range-diff": true, "show-ref": true, "verify-commit": true,
-		"verify-tag": true, "cherry": true, "annotate": true, "show-branch": true, "status-porcelain": true,
+		"verify-tag": true, "cherry": true, "show-branch": true, "status-porcelain": true,
 	}
 	gitMutating = map[string]bool{
 		"add": true, "commit": true, "switch": true, "merge": true, "rebase": true, "cherry-pick": true, "revert": true,
@@ -233,6 +233,8 @@ var gitSubcommands = map[string]func(a *analyzer, rest []word) result{
 	"update-ref": gitUpdateRef,
 	"bisect":     gitBisect,
 	"grep":       gitGrep,
+	"blame":      gitBlame,
+	"annotate":   gitBlame,
 }
 
 // gitPush: a plain push is Network(+mutating remote). Forced or deleting
@@ -438,6 +440,27 @@ func gitTag(a *analyzer, rest []word) result {
 		return safe("git tag list")
 	}
 	return mutating("git tag create")
+}
+
+// gitBlameFiles are the blame options whose value is a file blame opens:
+// --contents supplies the text to annotate and -S a file of revisions.
+var gitBlameFiles = []string{"--contents", "-S"}
+
+// gitBlame: `git blame --contents <path> HEAD -- <tracked>` prints every line
+// of <path> with the annotation, whatever and wherever <path> is — a private
+// key, an .env file, anything outside the workspace. The handler never parsed
+// the option, so the path was not a declared read and neither the
+// secret-file hard deny nor the containment check ever saw it. Declaring it
+// puts both back in the way. `annotate` is the same command under its older
+// name.
+func gitBlame(a *analyzer, rest []word) result {
+	r := safe("git blame")
+	for _, opt := range gitBlameFiles {
+		if v, ok := flagValue(rest, opt); ok {
+			a.readFiles(&r, []word{v})
+		}
+	}
+	return r
 }
 
 // gitGrepSpec reads git grep's options with the reader machinery so that an

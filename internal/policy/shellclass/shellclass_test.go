@@ -352,6 +352,15 @@ var table = []row{
 	{cmd: `git grep -n TODO`, class: shellclass.SafeRead},
 	{cmd: `git grep -C 3 TODO -- main.go`, class: shellclass.SafeRead},
 	{cmd: `git grep --no-index -e TODO main.go`, class: shellclass.SafeRead},
+	// --- git blame --contents prints any file it is given (review C5)
+	{cmd: `git blame --contents ~/.ssh/id_rsa HEAD -- f.txt`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git blame --contents=.env HEAD -- main.go`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git annotate --contents .env main.go`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git blame -S .env main.go`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git blame --contents patched.go HEAD -- main.go`, class: shellclass.SafeRead},
+	{cmd: `git blame --contents - main.go`, class: shellclass.SafeRead},
+	{cmd: `git blame -L 1,10 main.go`, class: shellclass.SafeRead},
+	{cmd: `git annotate main.go`, class: shellclass.SafeRead},
 }
 
 func TestAnalyzeTable(t *testing.T) {

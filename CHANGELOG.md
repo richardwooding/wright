@@ -168,6 +168,12 @@ redaction and a tamper-evident audit log between the model and the machine.
   after a `--` separator, and with `--no-index` the operands after the
   pattern — are declared reads, so `git grep --no-index -e . -- .env` meets
   the secret-file deny instead of printing the file.
+- `git blame --contents <path> HEAD -- <tracked>` prints every line of
+  `<path>`, wherever it is: `git blame --contents ~/.ssh/id_rsa …` was
+  allowed and returned the key. `blame` and its older name `annotate` now
+  declare the value of `--contents` and `-S` as reads, so the secret-file
+  hard deny and the outside-the-workspace checks see the path the command
+  actually opens.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a
