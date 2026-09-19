@@ -281,6 +281,16 @@ var table = []row{
 	{cmd: `find . -name '*.go' -exec cat {} \;`, class: shellclass.MutatingWorkspace},
 	{cmd: `find . -name '*.go' -fprint out.txt`, class: shellclass.MutatingWorkspace, unknown: true},
 	{cmd: `find . -exec cp main.go .git/hooks/pre-commit \;`, class: shellclass.Destructive, hardDeny: true, unknown: true},
+	// --- go's exec-injection flags rode the `go test *` allow (review H5)
+	{cmd: `go test -exec /tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -toolexec=/tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go vet -vettool=/tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -overlay=/tmp/overlay.json ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -pkgdir /tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -ldflags '-extld /tmp/evil' ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go test -gcflags=all=-toolexec=/tmp/evil ./...`, class: shellclass.Privilege, unknown: true},
+	{cmd: `go build -ldflags '-s -w' ./...`, class: shellclass.MutatingWorkspace},
+	{cmd: `go test -run TestX ./...`, class: shellclass.MutatingWorkspace},
 }
 
 func TestAnalyzeTable(t *testing.T) {

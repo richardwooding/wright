@@ -339,7 +339,42 @@ func registerBuildTools() {
 	register(func(a *analyzer, name string, args []word) result { return network("downloads toolchain") }, "rustup", "govulncheck", "nvm", "fnm", "volta", "asdf", "mise", "sdk", "pyenv", "rbenv", "gvm")
 }
 
+// goExecFlags name go options whose value is a program the toolchain runs, or
+// a file that replaces what it compiles.
+var goExecFlags = []string{"-exec", "-toolexec", "-vettool", "-overlay", "-pkgdir"}
+
+// goCompilerFlags pass options through to the compiler and linker, which have
+// exec-injection options of their own (-toolexec, -extld).
+var goCompilerFlags = []string{"-gcflags", "-ldflags", "-asmflags", "-gccgoflags"}
+
+// goInjection reports the go option that would run a program of the caller's
+// choosing. `go test -exec /tmp/evil ./...` ran it under the builtin
+// `bash(go test *)` allow rule, which sees only the argv prefix.
+func goInjection(args []word) (string, bool) {
+	for i, w := range args {
+		opt, val, hasEq := strings.Cut(w.text, "=")
+		if slices.Contains(goExecFlags, opt) {
+			return opt, true
+		}
+		if !slices.Contains(goCompilerFlags, opt) {
+			continue
+		}
+		if !hasEq && i+1 < len(args) {
+			val = args[i+1].text
+		}
+		if strings.Contains(val, "-toolexec") || strings.Contains(val, "-extld") {
+			return opt, true
+		}
+	}
+	return "", false
+}
+
 func handleGo(a *analyzer, name string, args []word) result {
+	if opt, ok := goInjection(args); ok {
+		// Opaque as well as Privilege: an argv-prefix allow rule must never
+		// cover a command that names its own executor.
+		return result{class: Privilege, unknown: true, reason: "go " + opt + " runs a program of the caller's choosing"}
+	}
 	sub := first(args)
 	rest := nonFlags(args)
 	switch sub {
