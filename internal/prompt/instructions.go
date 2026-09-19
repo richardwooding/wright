@@ -115,7 +115,7 @@ func walkDirs(root, cwd string) []string {
 		return dirs
 	}
 	cur := root
-	for _, seg := range strings.Split(rel, string(filepath.Separator)) {
+	for seg := range strings.SplitSeq(rel, string(filepath.Separator)) {
 		cur = filepath.Join(cur, seg)
 		dirs = append(dirs, cur)
 	}
