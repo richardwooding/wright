@@ -389,9 +389,14 @@ func TestDescribePreviews(t *testing.T) {
 		}
 	})
 	t.Run("symlink out resolves", func(t *testing.T) {
+		// t.TempDir is itself under a symlink on macOS (/var → /private/var),
+		// so the expectation is the resolved directory, not the one handed out.
 		outside := t.TempDir()
 		if err := os.Symlink(outside, filepath.Join(f.root, "link")); err != nil {
 			t.Skip("symlinks unavailable")
+		}
+		if real, err := filepath.EvalSymlinks(outside); err == nil {
+			outside = real
 		}
 		d, _ := tools.Lookup(f.ts, tools.NameWriteFile)
 		req, _, err := d.Describe(json.RawMessage(`{"path":"link/f.txt","content":"x"}`))

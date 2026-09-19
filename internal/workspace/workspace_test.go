@@ -124,7 +124,10 @@ func TestResolve(t *testing.T) {
 		{"symlink escape nonexistent tail", "escape/a/b/c", filepath.Join(fx.outside, "a", "b", "c"), false},
 		{"symlink inside", "inner/z", filepath.Join(fx.root, "sub", "z"), true},
 		{"absolute inside", filepath.Join(fx.root, "sub"), filepath.Join(fx.root, "sub"), true},
-		{"absolute outside", "/etc/passwd", "/etc/passwd", false},
+		// Resolve evaluates symlinks, and on macOS /etc is a link to
+		// /private/etc, so the expectation has to be resolved the same way
+		// rather than spelled out.
+		{"absolute outside", "/etc/passwd", resolved(t, "/etc/passwd"), false},
 		{"prefix trick", fx.root + "2/file", fx.root + "2/file", false},
 	}
 	for _, tt := range tests {
@@ -321,4 +324,16 @@ func FuzzResolve(f *testing.F) {
 			t.Fatalf("Resolve(%q) = %q inside but not under root", in, abs)
 		}
 	})
+}
+
+// resolved is the path after symlink evaluation, which is what Resolve
+// returns. It keeps expectations portable between Linux and macOS.
+func resolved(t *testing.T, path string) string {
+	t.Helper()
+	dir, base := filepath.Split(path)
+	real, err := filepath.EvalSymlinks(filepath.Clean(dir))
+	if err != nil {
+		return path
+	}
+	return filepath.Join(real, base)
 }
