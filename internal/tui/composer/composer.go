@@ -288,9 +288,16 @@ func (m Model) updatePopup(key tea.KeyPressMsg) (Model, tea.Cmd, Event) {
 	case "esc":
 		m.popup = nil
 		return m, nil, Event{}
-	case "tab", "enter":
+	case "tab":
 		m.accept()
 		return m, nil, Event{}
+	case "enter":
+		if m.completes() {
+			m.accept()
+			return m, nil, Event{}
+		}
+		m.popup = nil
+		return m.submit()
 	case "up", "ctrl+p":
 		p.sel = (p.sel + len(p.items) - 1) % max(len(p.items), 1)
 		return m, nil, Event{}
@@ -322,6 +329,17 @@ func (m *Model) refilter(key tea.KeyPressMsg) {
 	}
 	p.items = fuzzy.Filter(p.all, p.query)
 	p.sel = 0
+}
+
+// completes reports whether Enter should complete rather than submit: there
+// is something to complete and, for commands, the user has not already
+// typed the whole name ("/help⏎" must run /help, not add a space).
+func (m Model) completes() bool {
+	p := m.popup
+	if len(p.items) == 0 {
+		return false
+	}
+	return p.kind != PopupCommands || !strings.EqualFold(p.items[p.sel], p.query)
 }
 
 // accept replaces the trigger and query with the selected completion.

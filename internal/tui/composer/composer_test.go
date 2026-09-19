@@ -170,6 +170,17 @@ func TestCommandCompletion(t *testing.T) {
 	if got := m.Value(); got != "/model " {
 		t.Fatalf("value %q", got)
 	}
+	// Enter on a fully typed command submits it instead of completing.
+	m = typeText(newComposer(nil), "/help")
+	_, ev := press(m, "enter")
+	if !ev.Submitted || ev.Text != "/help" {
+		t.Fatalf("exact command not submitted: %+v", ev)
+	}
+	// Enter with no matches submits what was typed.
+	m = typeText(newComposer(nil), "/zzz")
+	if _, ev = press(m, "enter"); !ev.Submitted || ev.Text != "/zzz" {
+		t.Fatalf("unmatched command not submitted: %+v", ev)
+	}
 	// A slash mid-sentence is just a character.
 	m = typeText(newComposer(nil), "a /b")
 	if m.Popup() != composer.PopupNone {
