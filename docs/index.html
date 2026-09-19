@@ -284,7 +284,7 @@ not approved: bash requires interactive approval in headless mode
         </div>
         <div class="gl-snip">
           <span class="lbl">podman</span>
-          <code id="i3">podman run --rm -it -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY ghcr.io/richardwooding/wright</code>
+          <code id="i3">podman run --rm -it --userns=keep-id -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY ghcr.io/richardwooding/wright</code>
           <button class="gl-copy" data-gl-copy="i3">Copy</button>
         </div>
         <div class="gl-snip">

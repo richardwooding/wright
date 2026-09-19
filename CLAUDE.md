@@ -72,7 +72,7 @@ goreleaser release --snapshot --clean --skip=publish,docker   # local release dr
 CGO_ENABLED=0 GOOS=linux go build -trimpath -o dist/wright-local ./cmd/wright
 podman build -f Containerfile.local -t wright:dev .
 podman run --rm wright:dev --version
-podman run --rm -v "$PWD:/workspace:Z" wright:dev doctor   # container detected; selected = landlock when the host kernel allows it
+podman run --rm --userns=keep-id -v "$PWD:/workspace:Z" wright:dev doctor   # container detected; selected = landlock
 ```
 
 This module depends on the *tagged* `agentkit` and `llmkit` releases. To develop against an

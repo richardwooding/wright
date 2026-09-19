@@ -4,7 +4,7 @@
 #
 #   CGO_ENABLED=0 GOOS=linux go build -trimpath -o dist/wright-local ./cmd/wright
 #   podman build -f Containerfile.local -t wright:dev .
-#   podman run --rm -it -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY wright:dev
+#   podman run --rm -it --userns=keep-id -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY wright:dev
 FROM cgr.dev/chainguard/wolfi-base:latest
 
 RUN apk add --no-cache \

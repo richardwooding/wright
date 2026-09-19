@@ -149,5 +149,5 @@ release:
     ```sh
     brew install --cask richardwooding/tap/wright
     go install github.com/richardwooding/wright/cmd/wright@{{ .Tag }}
-    podman run --rm -it -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY ghcr.io/richardwooding/wright:{{ .Version }}
+    podman run --rm -it --userns=keep-id -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY ghcr.io/richardwooding/wright:{{ .Version }}
     ```

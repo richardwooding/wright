@@ -46,8 +46,15 @@ go install github.com/richardwooding/wright/cmd/wright@latest
 the container itself is the sandbox boundary):
 
 ```sh
-podman run --rm -it -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY ghcr.io/richardwooding/wright
+podman run --rm -it --userns=keep-id -v "$PWD:/workspace:Z" -e ANTHROPIC_API_KEY ghcr.io/richardwooding/wright
 ```
+
+`--userns=keep-id` maps your user into the container so the agent can write to
+the mounted workspace; without it rootless Podman maps the image's user to a
+different host uid and every write fails with "permission denied". It also lets
+the sandbox apply its read-only mounts over `.git/hooks` and `.wright` — wright
+says so on stderr when it cannot.
+
 
 Or download a prebuilt binary for macOS or Linux from the
 [releases page](https://github.com/richardwooding/wright/releases). It is a
