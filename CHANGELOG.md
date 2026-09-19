@@ -195,6 +195,14 @@ redaction and a tamper-evident audit log between the model and the machine.
   read", with the path invisible to both. The value of `--file`/`-f` is now
   declared, and it is no longer counted as a config key when deciding whether
   the command reads or writes.
+- The same audit covered the rest of the git table: `difftool`/`mergetool`
+  `--extcmd`/`-x` run a command of the caller's choosing for every changed
+  file (now opaque and privileged) and `--tool` runs a configured one (now
+  opaque); `git archive -o`, `git format-patch -o` and `git bundle create`
+  declare the file or directory they write, and `git archive --remote`
+  reports that it needs the network. `git for-each-ref --format` was checked
+  and does not execute anything: its `--shell`/`--python`/`--perl` switches
+  only quote the output.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a

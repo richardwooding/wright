@@ -24,7 +24,7 @@ var (
 		"mv": true, "rm": true, "apply": true, "am": true, "init": true, "notes": true, "update-index": true,
 		"replace": true, "commit-tree": true, "write-tree": true, "read-tree": true, "mktree": true, "hash-object": true,
 		"fast-import": true, "fast-export": true, "format-patch": true, "archive": true, "bundle": true, "mailinfo": true,
-		"mergetool": true, "difftool": true, "rerere": true, "sparse-checkout": true, "maintenance": true, "symbolic-ref": true,
+		"rerere": true, "sparse-checkout": true, "maintenance": true, "symbolic-ref": true,
 		"pack-refs": true, "repack": true, "lfs": true,
 	}
 	gitNetwork = map[string]bool{
@@ -278,32 +278,37 @@ func gitConfigInert(key string) bool {
 
 // gitSubcommands need argument inspection.
 var gitSubcommands = map[string]func(a *analyzer, rest []word) result{
-	"push":        gitPush,
-	"config":      gitConfig,
-	"branch":      gitBranch,
-	"checkout":    gitCheckout,
-	"reset":       gitReset,
-	"clean":       gitClean,
-	"stash":       gitStash,
-	"reflog":      gitReflog,
-	"gc":          gitGC,
-	"remote":      gitRemote,
-	"submodule":   gitSubmodule,
-	"worktree":    gitWorktree,
-	"tag":         gitTag,
-	"update-ref":  gitUpdateRef,
-	"bisect":      gitBisect,
-	"grep":        gitGrep,
-	"blame":       gitBlame,
-	"annotate":    gitBlame,
-	"diff":        gitDiffFamily("diff"),
-	"show":        gitDiffFamily("show"),
-	"log":         gitDiffFamily("log"),
-	"whatchanged": gitDiffFamily("whatchanged"),
-	"range-diff":  gitDiffFamily("range-diff"),
-	"diff-tree":   gitDiffFamily("diff-tree"),
-	"diff-index":  gitDiffFamily("diff-index"),
-	"diff-files":  gitDiffFamily("diff-files"),
+	"push":         gitPush,
+	"config":       gitConfig,
+	"branch":       gitBranch,
+	"checkout":     gitCheckout,
+	"reset":        gitReset,
+	"clean":        gitClean,
+	"stash":        gitStash,
+	"reflog":       gitReflog,
+	"gc":           gitGC,
+	"remote":       gitRemote,
+	"submodule":    gitSubmodule,
+	"worktree":     gitWorktree,
+	"tag":          gitTag,
+	"update-ref":   gitUpdateRef,
+	"bisect":       gitBisect,
+	"grep":         gitGrep,
+	"blame":        gitBlame,
+	"annotate":     gitBlame,
+	"diff":         gitDiffFamily("diff"),
+	"show":         gitDiffFamily("show"),
+	"log":          gitDiffFamily("log"),
+	"whatchanged":  gitDiffFamily("whatchanged"),
+	"range-diff":   gitDiffFamily("range-diff"),
+	"diff-tree":    gitDiffFamily("diff-tree"),
+	"diff-index":   gitDiffFamily("diff-index"),
+	"diff-files":   gitDiffFamily("diff-files"),
+	"difftool":     gitToolCommand("difftool"),
+	"mergetool":    gitToolCommand("mergetool"),
+	"archive":      gitArchive,
+	"format-patch": gitFormatPatch,
+	"bundle":       gitBundle,
 }
 
 // gitPush: a plain push is Network(+mutating remote). Forced or deleting
@@ -542,6 +547,84 @@ func gitDiffFamily(sub string) func(a *analyzer, rest []word) result {
 		}
 		return r
 	}
+}
+
+// gitToolCommand builds the handler for difftool/mergetool: `--extcmd=<cmd>`
+// (`-x`) runs that command for every changed or conflicted file, and
+// `--tool=<name>` selects a tool whose command line comes from
+// configuration. Neither may ride an allow rule written for the command
+// name alone.
+func gitToolCommand(sub string) func(a *analyzer, rest []word) result {
+	label := "git " + sub
+	return func(a *analyzer, rest []word) result {
+		switch {
+		case hasFlag(rest, "--extcmd", "-x"):
+			return result{class: Privilege, unknown: true, reason: label + " --extcmd runs a program of the caller's choosing"}
+		case hasFlag(rest, "--tool", "-t"):
+			return opaque(label + " --tool runs a configured program")
+		}
+		return mutating(label)
+	}
+}
+
+// gitArchive writes the file named by -o/--output, anywhere on the disk, and
+// reaches the network with --remote; both were invisible in a bare
+// "git archive" classification.
+func gitArchive(a *analyzer, rest []word) result {
+	r := mutating("git archive")
+	if hasFlag(rest, "--remote") {
+		r = network("git archive --remote")
+	}
+	if v, ok := flagValue(rest, "-o", "--output"); ok {
+		a.writeFiles(&r, gitFileOperand(v), true)
+	}
+	return r
+}
+
+// gitFormatPatch writes one file per commit into the directory named by
+// -o/--output-directory (the working directory by default).
+func gitFormatPatch(a *analyzer, rest []word) result {
+	r := mutating("git format-patch")
+	if v, ok := flagValue(rest, "-o", "--output-directory"); ok {
+		a.writeFiles(&r, gitFileOperand(v), false)
+	}
+	return r
+}
+
+// gitBundle: `create` writes the bundle file it is given — any file, including
+// one outside the repository — and the others read one.
+func gitBundle(a *analyzer, rest []word) result {
+	sub := first(rest)
+	label := strings.TrimRight("git bundle "+sub, " ")
+	nf := nonFlags(rest)
+	var operand []word
+	if len(nf) > 1 {
+		operand = gitFileOperand(nf[1])
+	}
+	switch sub {
+	case "create":
+		r := mutating(label)
+		a.writeFiles(&r, operand, true)
+		return r
+	case "verify", "list-heads":
+		r := safe(label)
+		a.readFiles(&r, operand)
+		return r
+	case "unbundle":
+		r := mutating(label)
+		a.readFiles(&r, operand)
+		return r
+	}
+	return mutating(label)
+}
+
+// gitFileOperand drops the "-" that means stdin or stdout, which is not a
+// file the workspace rules apply to.
+func gitFileOperand(v word) []word {
+	if v.text == "-" {
+		return nil
+	}
+	return []word{v}
 }
 
 // gitBlameFiles are the blame options whose value is a file blame opens:

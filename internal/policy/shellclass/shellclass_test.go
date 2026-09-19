@@ -388,6 +388,21 @@ var table = []row{
 	{cmd: `git config --file .env --list`, class: shellclass.Destructive, hardDeny: true},
 	{cmd: `git config --file=local.ini --list`, class: shellclass.SafeRead},
 	{cmd: `git config --file local.ini foo.bar baz`, class: shellclass.MutatingWorkspace},
+	// --- the *tool commands run the program they are given (audit)
+	{cmd: `git difftool --extcmd='sh -c id' HEAD`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git difftool -x /tmp/evil`, class: shellclass.Privilege, unknown: true},
+	{cmd: `git mergetool --tool=/tmp/evil`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git difftool -t vimdiff`, class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: `git difftool HEAD`, class: shellclass.MutatingWorkspace},
+	// --- the commands that write an archive name the file (audit)
+	{cmd: `git archive -o ~/.ssh/authorized_keys HEAD`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git archive --output=out.tar HEAD`, class: shellclass.MutatingWorkspace},
+	{cmd: `git archive --remote=ssh://host HEAD`, class: shellclass.Network, network: true},
+	{cmd: `git format-patch -o /etc HEAD`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git format-patch -o patches HEAD~3`, class: shellclass.MutatingWorkspace},
+	{cmd: `git bundle create ~/.bashrc HEAD`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git bundle create /tmp/x.bundle HEAD`, class: shellclass.MutatingWorkspace},
+	{cmd: `git bundle verify /tmp/x.bundle`, class: shellclass.SafeRead},
 }
 
 func TestAnalyzeTable(t *testing.T) {
