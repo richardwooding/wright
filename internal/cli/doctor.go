@@ -29,6 +29,13 @@ var providerEnvKeys = []string{
 	"OLLAMA_HOST",
 }
 
+// Report section headings.
+const (
+	sectionSandbox = "Sandbox"
+	sectionTools   = "Tools"
+	sectionCreds   = "Credentials (names only)"
+)
+
 // DoctorCmd reports what the machine offers: sandbox backends, external tools
 // and which provider credentials are configured.
 type DoctorCmd struct{}
@@ -82,19 +89,19 @@ func sandboxRows(ctx context.Context, want string) []doctorRow {
 		if !st.Available {
 			status = statusWarn
 		}
-		rows = append(rows, doctorRow{section: "Sandbox", name: st.Name, detail: st.Detail, status: status})
+		rows = append(rows, doctorRow{section: sectionSandbox, name: st.Name, detail: st.Detail, status: status})
 	}
 	if abi, err := sandbox.LandlockABI(); err == nil {
-		rows = append(rows, doctorRow{section: "Sandbox", name: "landlock ABI", detail: fmt.Sprintf("v%d (network restriction needs v4+)", abi), status: statusInfo})
+		rows = append(rows, doctorRow{section: sectionSandbox, name: "landlock ABI", detail: fmt.Sprintf("v%d (network restriction needs v4+)", abi), status: statusInfo})
 	}
 	backend, warnings := sandbox.Detect(ctx, want)
 	status := statusOK
 	if backend.Name() == "none" {
 		status = statusBad
 	}
-	rows = append(rows, doctorRow{section: "Sandbox", name: "selected", detail: backend.Name(), status: status})
+	rows = append(rows, doctorRow{section: sectionSandbox, name: "selected", detail: backend.Name(), status: status})
 	for _, w := range warnings {
-		rows = append(rows, doctorRow{section: "Sandbox", name: "warning", detail: w.String(), status: statusWarn})
+		rows = append(rows, doctorRow{section: sectionSandbox, name: "warning", detail: w.String(), status: statusWarn})
 	}
 	return rows
 }
@@ -111,7 +118,7 @@ func toolRows(ctx context.Context) []doctorRow {
 				status = statusBad
 			}
 		}
-		rows = append(rows, doctorRow{section: "Tools", name: t.name, detail: detail, status: status})
+		rows = append(rows, doctorRow{section: sectionTools, name: t.name, detail: detail, status: status})
 	}
 	return rows
 }
@@ -121,9 +128,9 @@ func credentialRows() []doctorRow {
 	rows := make([]doctorRow, 0, len(providerEnvKeys))
 	for _, k := range providerEnvKeys {
 		if _, ok := os.LookupEnv(k); ok {
-			rows = append(rows, doctorRow{section: "Credentials (names only)", name: k, detail: "present", status: statusOK})
+			rows = append(rows, doctorRow{section: sectionCreds, name: k, detail: "present", status: statusOK})
 		} else {
-			rows = append(rows, doctorRow{section: "Credentials (names only)", name: k, detail: "absent", status: statusInfo})
+			rows = append(rows, doctorRow{section: sectionCreds, name: k, detail: "absent", status: statusInfo})
 		}
 	}
 	return rows

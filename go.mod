@@ -26,4 +26,5 @@ require (
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 	kernel.org/pub/linux/libs/security/libcap/psx v1.2.77 // indirect
+	mvdan.cc/sh/v3 v3.14.1 // indirect
 )

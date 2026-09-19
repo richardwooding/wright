@@ -1,5 +1,7 @@
-# golangci-lint configuration (v2). The repo relies on the default linter
-# set; this file exists for two targeted adjustments.
+# golangci-lint configuration (v2). The default linter set plus complexity
+# and duplicate-literal checks; the bar is 0 issues.
+#
+# Targeted exclusions, each with a reason:
 #
 # 1. staticcheck SA5011 ("possible nil pointer dereference") produces
 #    nondeterministic false positives in test files around the standard
@@ -12,9 +14,26 @@
 #    capture it), which defeats errcheck's built-in os.Stdout/os.Stderr
 #    exemption for fmt.Fprint*. A failed write to the terminal is not
 #    something a CLI can act on, so those calls are excluded explicitly.
+#
+# 3. goconst is off for internal/policy/shellclass: the package is mostly
+#    data tables of command and subcommand names ("delete", "init", "env"…)
+#    and a named constant per verb would make them harder to read and audit,
+#    not easier. It is also off in tests, where repeated literals are table
+#    rows.
 version: "2"
 linters:
+  enable:
+    - gocyclo
+    - gocognit
+    - goconst
   settings:
+    gocyclo:
+      min-complexity: 16
+    gocognit:
+      min-complexity: 21
+    goconst:
+      min-len: 3
+      min-occurrences: 4
     errcheck:
       exclude-functions:
         - fmt.Fprint
@@ -26,3 +45,9 @@ linters:
         linters:
           - staticcheck
         text: SA5011
+      - path: _test\.go
+        linters:
+          - goconst
+      - path: internal/policy/shellclass/
+        linters:
+          - goconst
