@@ -174,6 +174,14 @@ redaction and a tamper-evident audit log between the model and the machine.
   declare the value of `--contents` and `-S` as reads, so the secret-file
   hard deny and the outside-the-workspace checks see the path the command
   actually opens.
+- The commands that take git's diff options write the file named by
+  `--output=<file>`: `git show --output=/etc/x HEAD` and `git diff
+  --output=/tmp/z` both classified `allow (safe-read)` while writing a file
+  the policy never saw — anywhere at all without a sandbox, and in plan mode
+  a "read-only" command that writes. `diff`, `show`, `log`, `whatchanged`,
+  `range-diff` and the `diff-tree`/`diff-index`/`diff-files` plumbing now
+  declare that value as a write, the way the reader specs already treat
+  `sort -o`.
 - The workspace containment checks now run *before* the allow rules. An
   argv-prefix rule such as the builtin `bash(grep *)` matches on the command
   alone, so it covered paths the command was never checked against: a

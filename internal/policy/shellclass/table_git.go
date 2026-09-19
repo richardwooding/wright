@@ -12,11 +12,11 @@ var defaultProtectedBranches = []string{"main", "master", "release/*"}
 
 var (
 	gitSafeRead = map[string]bool{
-		"status": true, "diff": true, "log": true, "show": true, "rev-parse": true, "describe": true,
+		"status": true, "rev-parse": true, "describe": true,
 		"shortlog": true, "ls-files": true, "ls-tree": true, "cat-file": true, "rev-list": true, "name-rev": true,
 		"help": true, "version": true, "--version": true, "check-ignore": true, "check-attr": true,
-		"merge-base": true, "diff-tree": true, "diff-index": true, "diff-files": true, "for-each-ref": true, "var": true,
-		"count-objects": true, "fsck": true, "whatchanged": true, "range-diff": true, "show-ref": true, "verify-commit": true,
+		"merge-base": true, "for-each-ref": true, "var": true,
+		"count-objects": true, "fsck": true, "show-ref": true, "verify-commit": true,
 		"verify-tag": true, "cherry": true, "show-branch": true, "status-porcelain": true,
 	}
 	gitMutating = map[string]bool{
@@ -217,24 +217,32 @@ func gitConfigInert(key string) bool {
 
 // gitSubcommands need argument inspection.
 var gitSubcommands = map[string]func(a *analyzer, rest []word) result{
-	"push":       gitPush,
-	"config":     gitConfig,
-	"branch":     gitBranch,
-	"checkout":   gitCheckout,
-	"reset":      gitReset,
-	"clean":      gitClean,
-	"stash":      gitStash,
-	"reflog":     gitReflog,
-	"gc":         gitGC,
-	"remote":     gitRemote,
-	"submodule":  gitSubmodule,
-	"worktree":   gitWorktree,
-	"tag":        gitTag,
-	"update-ref": gitUpdateRef,
-	"bisect":     gitBisect,
-	"grep":       gitGrep,
-	"blame":      gitBlame,
-	"annotate":   gitBlame,
+	"push":        gitPush,
+	"config":      gitConfig,
+	"branch":      gitBranch,
+	"checkout":    gitCheckout,
+	"reset":       gitReset,
+	"clean":       gitClean,
+	"stash":       gitStash,
+	"reflog":      gitReflog,
+	"gc":          gitGC,
+	"remote":      gitRemote,
+	"submodule":   gitSubmodule,
+	"worktree":    gitWorktree,
+	"tag":         gitTag,
+	"update-ref":  gitUpdateRef,
+	"bisect":      gitBisect,
+	"grep":        gitGrep,
+	"blame":       gitBlame,
+	"annotate":    gitBlame,
+	"diff":        gitDiffFamily("diff"),
+	"show":        gitDiffFamily("show"),
+	"log":         gitDiffFamily("log"),
+	"whatchanged": gitDiffFamily("whatchanged"),
+	"range-diff":  gitDiffFamily("range-diff"),
+	"diff-tree":   gitDiffFamily("diff-tree"),
+	"diff-index":  gitDiffFamily("diff-index"),
+	"diff-files":  gitDiffFamily("diff-files"),
 }
 
 // gitPush: a plain push is Network(+mutating remote). Forced or deleting
@@ -440,6 +448,24 @@ func gitTag(a *analyzer, rest []word) result {
 		return safe("git tag list")
 	}
 	return mutating("git tag create")
+}
+
+// gitDiffFamily builds the handler for a read-only command that takes git's
+// diff options. `--output=<file>` is one of them: `git show --output=/etc/x
+// HEAD` and `git diff --output=/tmp/z` both classified safe-read while
+// writing a file the policy never saw — outside the sandbox that lands
+// anywhere, and in plan mode it let a "read-only" command write at all. The
+// value is now a declared write, the way the reader specs treat `sort -o`.
+func gitDiffFamily(sub string) func(a *analyzer, rest []word) result {
+	label := "git " + sub
+	return func(a *analyzer, rest []word) result {
+		r := safe(label)
+		if v, ok := flagValue(rest, "--output"); ok {
+			r.reason = joinReason(r.reason, label+" writes its output file")
+			a.writeFiles(&r, []word{v}, true)
+		}
+		return r
+	}
 }
 
 // gitBlameFiles are the blame options whose value is a file blame opens:

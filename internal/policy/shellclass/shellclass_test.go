@@ -361,6 +361,17 @@ var table = []row{
 	{cmd: `git blame --contents - main.go`, class: shellclass.SafeRead},
 	{cmd: `git blame -L 1,10 main.go`, class: shellclass.SafeRead},
 	{cmd: `git annotate main.go`, class: shellclass.SafeRead},
+	// --- the diff family writes the file named by --output (review H2)
+	{cmd: `git show --output=/etc/x HEAD`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git diff --output=/tmp/z`, class: shellclass.MutatingWorkspace},
+	{cmd: `git log --output out.txt -1`, class: shellclass.MutatingWorkspace},
+	{cmd: `git show --output=main.go HEAD`, class: shellclass.Destructive},
+	{cmd: `git diff --output=.env`, class: shellclass.Destructive, hardDeny: true},
+	{cmd: `git whatchanged --output=out.txt`, class: shellclass.MutatingWorkspace},
+	{cmd: `git range-diff --output=out.txt a b`, class: shellclass.MutatingWorkspace},
+	{cmd: `git diff-tree --output=out.txt HEAD`, class: shellclass.MutatingWorkspace},
+	{cmd: `git diff --output-indicator-new=x HEAD`, class: shellclass.SafeRead},
+	{cmd: `git show HEAD`, class: shellclass.SafeRead},
 }
 
 func TestAnalyzeTable(t *testing.T) {
