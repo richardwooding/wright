@@ -111,6 +111,7 @@ func BwrapArgs(spec Spec, home string) ([]string, error) {
 		}
 		args = append(args, "--ro-bind", ro, ro)
 	}
+	args = append(args, protectArgs(spec.ReadWrite)...)
 	if spec.Network {
 		if _, err := os.Stat("/etc/resolv.conf"); err == nil {
 			args = append(args, "--ro-bind", "/etc/resolv.conf", "/etc/resolv.conf")
@@ -130,4 +131,24 @@ func BwrapArgs(spec Spec, home string) ([]string, error) {
 	args = append(args, "--")
 	args = append(args, spec.Argv...)
 	return args, nil
+}
+
+// protectArgs re-binds the paths that must stay read-only on top of the
+// read-write binds. bwrap applies operations in order, so these must come
+// *after* the `--bind` of the root that contains them (and after any
+// `sandbox.extraReadWrite`, which may name a parent of them) to win.
+// wright's own config and state directories get a tmpfs instead of a
+// read-only bind: hidden is strictly better than readable, and the sandbox
+// already hides $HOME the same way.
+func protectArgs(rw []string) []string {
+	var args []string
+	for _, root := range rw {
+		for _, p := range ProtectedIn(root) {
+			args = append(args, "--ro-bind", p, p)
+		}
+	}
+	for _, d := range UserDirs() {
+		args = append(args, "--tmpfs", d)
+	}
+	return args
 }

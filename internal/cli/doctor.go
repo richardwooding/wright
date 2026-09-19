@@ -92,7 +92,10 @@ func sandboxRows(ctx context.Context, want string) []doctorRow {
 		rows = append(rows, doctorRow{section: sectionSandbox, name: st.Name, detail: st.Detail, status: status})
 	}
 	if abi, err := sandbox.LandlockABI(); err == nil {
-		rows = append(rows, doctorRow{section: sectionSandbox, name: "landlock ABI", detail: fmt.Sprintf("v%d (network restriction needs v4+)", abi), status: statusInfo})
+		rows = append(rows, doctorRow{section: sectionSandbox, name: "landlock ABI", detail: fmt.Sprintf("v%d", abi), status: statusInfo})
+		// Landlock's own network support is TCP-only, so say what actually
+		// confines the network rather than quoting the ABI version.
+		rows = append(rows, doctorRow{section: sectionSandbox, name: "landlock net", detail: sandbox.LandlockNetwork(), status: statusInfo})
 	}
 	backend, warnings := sandbox.Detect(ctx, want)
 	status := statusOK

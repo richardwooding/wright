@@ -24,6 +24,9 @@ func LandlockWithExecutable(string) Backend { return landlockBackend{} }
 // LandlockABI reports 0 and ErrUnsupported off Linux.
 func LandlockABI() (int, error) { return 0, ErrUnsupported }
 
+// LandlockNetwork reports that the backend does not exist off Linux.
+func LandlockNetwork() string { return "not supported on this platform" }
+
 func enterLandlock([]string, []string, bool) (int, error) { return 0, ErrUnsupported }
 
 func sysExec(path string, argv, env []string) error { return syscall.Exec(path, argv, env) }

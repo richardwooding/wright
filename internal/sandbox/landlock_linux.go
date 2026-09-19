@@ -80,7 +80,37 @@ func (b landlockBackend) Command(ctx context.Context, spec Spec) (*exec.Cmd, err
 	cmd := exec.CommandContext(ctx, exe, append([]string{"__sandbox"}, h.Args()...)...)
 	cmd.Env = spec.Env
 	cmd.Stdin = spec.Stdin
+	if !spec.Network {
+		// Landlock alone would leave UDP, ICMP and DNS reachable; the empty
+		// network namespace is what actually makes "no network" true.
+		cmd.SysProcAttr = netnsAttr()
+	}
 	return cmd, nil
+}
+
+// Warnings reports what this backend cannot enforce on this machine, so the
+// UI never claims more confinement than is in force.
+func (landlockBackend) Warnings() []Warning {
+	warns := []Warning{{
+		Backend: NameLandlock,
+		Message: "Landlock rules are additive, so the workspace root is granted entry by entry to keep .git and .wright read-only: a shell command cannot create new entries directly in the workspace root or in .git (bwrap has no such limit)",
+	}}
+	if err := netnsAvailable(); err != nil {
+		warns = append(warns, Warning{
+			Backend: NameLandlock,
+			Message: "no unprivileged network namespace here (" + err.Error() + "): with network off Landlock restricts TCP only — UDP, ICMP and DNS stay reachable",
+		})
+	}
+	return warns
+}
+
+// LandlockNetwork describes, for `wright doctor`, what "no network" actually
+// means for the landlock backend on this machine.
+func LandlockNetwork() string {
+	if err := netnsAvailable(); err != nil {
+		return "TCP only (no network namespace: " + err.Error() + "); UDP, ICMP and DNS remain reachable"
+	}
+	return "network namespace + Landlock TCP restriction"
 }
 
 // enterLandlock applies the filesystem and (unless net) TCP restrictions to
@@ -91,10 +121,16 @@ func enterLandlock(rw, ro []string, net bool) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+	// The requested read-write roots are split so that no rule covers a
+	// protected subpath (.git/hooks, .git/config, .wright): Landlock unions
+	// the rules of every ancestor, so a subtree can never be subtracted from
+	// a read-write rule — only never granted. The split roots stay readable.
+	splitRO, splitRW, splitRWFiles := splitReadWrite(rw)
 	rules := []landlock.Rule{
 		landlock.RODirs(append(systemRO, ro...)...).IgnoreIfMissing(),
-		landlock.RWDirs(append(systemRW, rw...)...).IgnoreIfMissing().WithRefer(),
-		landlock.RWFiles(systemRWFiles...).IgnoreIfMissing(),
+		landlock.RODirs(splitRO...).IgnoreIfMissing(),
+		landlock.RWDirs(append(systemRW, splitRW...)...).IgnoreIfMissing().WithRefer(),
+		landlock.RWFiles(append(systemRWFiles, splitRWFiles...)...).IgnoreIfMissing(),
 	}
 	cfg := landlock.V5.BestEffort()
 	if err := cfg.RestrictPaths(rules...); err != nil {

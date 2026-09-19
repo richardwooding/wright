@@ -108,7 +108,7 @@ func Detect(ctx context.Context, want string) (Backend, []Warning) {
 			return b, []Warning{{Backend: NameNone, Message: "OS sandbox disabled by request: shell commands run unconfined (policy only)"}}
 		default:
 			if err := b.Available(ctx); err == nil {
-				return b, nil
+				return b, backendWarnings(b)
 			} else {
 				warnings = append(warnings, Warning{Backend: want, Message: "requested but unavailable: " + err.Error()})
 			}
@@ -119,11 +119,25 @@ func Detect(ctx context.Context, want string) (Backend, []Warning) {
 			if b.Name() == NameContainer {
 				warnings = append(warnings, Warning{Backend: NameContainer, Message: "running inside a container: the container is the sandbox boundary"})
 			}
-			return b, warnings
+			return b, append(warnings, backendWarnings(b)...)
 		}
 	}
 	warnings = append(warnings, Warning{Backend: NameNone, Message: "no OS sandbox available: shell commands run unconfined (policy only)"})
 	return noneBackend{}, warnings
+}
+
+// warner is the optional Backend interface for a backend that cannot fully
+// deliver what its name implies on this machine. Detect surfaces what it
+// says, because a confinement the UI claims but does not enforce is worse
+// than no sandbox at all.
+type warner interface{ Warnings() []Warning }
+
+// backendWarnings collects a backend's own limitations, if it reports any.
+func backendWarnings(b Backend) []Warning {
+	if w, ok := b.(warner); ok {
+		return w.Warnings()
+	}
+	return nil
 }
 
 // Probe reports the availability of every backend for `wright doctor`.

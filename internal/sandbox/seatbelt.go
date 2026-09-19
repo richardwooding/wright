@@ -62,6 +62,11 @@ func SeatbeltProfile(spec Spec, home string) string {
 	for _, rw := range spec.ReadWrite {
 		fmt.Fprintf(&b, "(allow file-write* (subpath %s))\n", sbplString(rw))
 	}
+	// SBPL takes the *last* matching rule, so the protected paths are denied
+	// after the read-write allows that contain them.
+	for _, p := range ProtectedPaths(spec.ReadWrite) {
+		fmt.Fprintf(&b, "(deny file-write* (subpath %s))\n", sbplString(p))
+	}
 	if spec.Network {
 		b.WriteString("(allow network*)\n")
 	} else {
