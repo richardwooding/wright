@@ -42,7 +42,10 @@ internal/
   cli/        kong CLI struct + Run methods; the only importer of app; hidden `__sandbox` landlock helper
   app/        composition root (config → model → tools → policy → engine → tui | headless); DAG/network tests
   engine/     (next) wraps agentkit: runs, fan-in Event channel, Approver, Inbox steering
-  tui/        (next) Bubble Tea v2 root model; imports engine/theme/config/session/model/cost/git only
+  tui/        Bubble Tea v2 root model (Controller + Event channel → engine); --plain loop; subpackages
+              transcript (block list + render cache), composer (textarea, history, @ and / popups),
+              overlay (approval/question/picker/help/todos/confirm/input), markdown (glamour cache),
+              diffview (coloured unified diff), fuzzy (substring/subsequence matcher)
   headless/   (next) -p mode: text | json | stream-json
   tools/      agentkit.Func tools + Describer (resolved policy.Request + Preview); bash cwd/trailer, rg|Go grep, web_fetch robots/rate limit, Clip spill
   policy/     rule grammar, modes, verdict lattice, hard-deny set, grants, child engines
@@ -64,7 +67,8 @@ docs/         gloam Pages site (gloam.css/gloam.js vendored; sync-gloam.sh + glo
 ```
 
 Import DAG, enforced by `TestImportDAG` in `internal/app` over `go list -deps`:
-`tui` never imports `tools`, `policy`, `sandbox`; `tools` never imports `tui`
+`tui` never imports `tools`, `sandbox`, `policy/shellclass` (it may name
+`policy.Mode`/`GrantOffer`, which `engine.Approval` carries); `tools` never imports `tui`
 or `engine`; `policy` never imports `tui`, `engine`, `tools`; `shellclass`
 imports nothing internal (it takes a small `Workspace` interface that
 `policy.NewShellWorkspace` adapts). `engine` is the seam between agent and UI.
@@ -141,6 +145,42 @@ is handed the ssrfguard client by `app`).
   the process environment or the network itself — `env` and `probeOllama` are
   injected — and `ProbeOllama` refuses non-loopback hosts unless `OLLAMA_HOST`
   is set.
+
+### TUI
+
+- **Alt-screen, one root model.** `tui.Model` owns a transcript viewport, the
+  composer, at most one overlay and the status bar; `Run` returns the
+  end-of-run summary to print after the alt screen is gone. `--plain`
+  (`Options.Plain`, implied by `NO_COLOR`/`TERM=dumb`/non-TTY) never starts
+  Bubble Tea: `plain.go` prints events as lines and reads answers from stdin,
+  denying any prompt that is still open when stdin closes.
+- **The engine is the only source of truth.** The UI reaches the engine
+  through `Controller` and reads it through `engine.Event`; nothing in `tui`
+  decides permissions. Overlays cannot mutate the root model, so pickers and
+  the confirm prompt hand results back as messages (`pickedMsg`); approval and
+  question overlays call `Controller.Reply/Answer` directly.
+- **33 ms coalescing.** `KindText`/`KindReasoning` deltas only append to the
+  live block and arm a single in-flight `flushMsg` tick (`flushInterval`); the
+  live block is re-rendered on the flush, so a fast stream costs one glamour
+  render per frame, not per token. Every other event refreshes at once.
+- **Render cache invalidation.** `transcript.Model` caches each block's lines;
+  a delta invalidates only the live block (`Invalidate`), a finished block is
+  never re-rendered, and only `Lines(width)` with a new width, `SetTheme`
+  (after `tea.BackgroundColorMsg`) or `SetShowReasoning` invalidate
+  everything. `markdown.Renderer` caches one glamour renderer per
+  `(width, isDark)`. Break either rule and a long transcript re-renders on
+  every keystroke.
+- **UI honesty.** Every status is glyph + word (`✓ ok`, `✗ denied`,
+  `⛔ bypass`, `sandbox off`), never colour alone; the approval prompt focuses
+  deny for `SeverityDestructive`, offers "allow…" only when the engine
+  produced `Offers`, shows each offer's exact rule text and scope, validates
+  edited arguments with `json.Valid`, and `esc` is deny. Bypass is reachable
+  only through the typed-word confirm and still goes through
+  `Controller.SetMode`, which the policy engine refuses without the flag.
+- **charm v2 gotchas.** Import paths are `charm.land/...`; `lipgloss.Style.Width`
+  is the whole block including border and padding; `textarea` handles
+  `tea.PasteMsg` itself; `tea.KeyPressMsg.String()` spells keys as
+  `shift+tab`, `ctrl+j`, `pgup`, `pgdown`, `alt+enter`.
 
 ### Why these choices
 

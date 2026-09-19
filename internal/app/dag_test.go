@@ -47,7 +47,9 @@ func TestImportDAG(t *testing.T) {
 		from string
 		to   []string
 	}{
-		{"tui", []string{"tools", "policy", "sandbox", "policy/shellclass"}},
+		// tui may name policy's Mode/GrantOffer types (engine.Approval carries
+		// them and Controller.SetMode takes a Mode) but never the classifier.
+		{"tui", []string{"tools", "sandbox", "policy/shellclass"}},
 		{"tools", []string{"tui", "engine"}},
 		{"policy", []string{"tui", "engine", "tools"}},
 		{"policy/shellclass", []string{"tui", "engine", "tools", "policy", "workspace"}},
