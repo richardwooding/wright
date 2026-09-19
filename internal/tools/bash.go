@@ -102,7 +102,10 @@ func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error)
 	spec := d.SandboxSpec
 	spec.Argv = []string{"bash", "-lc", script + "\nprintf '\\n" + cwdMarker + "%s\\n' \"$PWD\""}
 	spec.Dir = d.Cwd.Get()
-	spec.Network = a.Network
+	// a.Network is trustworthy only because the engine rewrites it to the
+	// policy verdict before the call reaches here; spec.Network carries the
+	// --allow-network flag.
+	spec.Network = spec.Network || a.Network
 	if allow, ok := NetworkFrom(ctx); ok {
 		spec.Network = allow
 	}

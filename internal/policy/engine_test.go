@@ -188,14 +188,18 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "bash destructive bypass allows", mode: policy.ModeBypass, req: f.bash("rm -rf build"), want: policy.Allow},
 		{name: "bash privilege denied everywhere", mode: policy.ModeBypass, req: f.bash("apt-get install x"), want: policy.Deny, reason: "privilege"},
 		{name: "bash privilege hard-denied", mode: policy.ModeBypass, req: f.bash("mkfs.ext4 /dev/sda"), want: policy.Deny, hard: true},
-		{name: "user allow beats builtin ask for git push", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(git push origin feature)")}, req: f.bash("git push origin feature"), want: policy.Allow},
+		{name: "user allow beats builtin ask for git push", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(git push origin feature) +net")}, req: f.bash("git push origin feature"), want: policy.Allow, network: true},
 		{name: "project ask beats user allow", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, userAllow, rules(t, policy.Ask, policy.SourceProject, "bash(npm *)")}, req: f.bash("npm test"), want: policy.Ask},
 		{name: "bash unknown default asks no offers", mode: policy.ModeDefault, req: f.bash("frobnicate --all"), want: policy.Ask, noOffers: true},
 		{name: "bash unknown bypass allows", mode: policy.ModeBypass, req: f.bash("frobnicate --all"), want: policy.Allow},
 		{name: "bash read outside asks", mode: policy.ModeDefault, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
 		{name: "bash read protected denies", mode: policy.ModeDefault, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
 		{name: "bash write outside asks", mode: policy.ModeDefault, req: f.bash("echo x > " + filepath.Join(f.home, "notes", "b.md")), want: policy.Ask, reason: "outside"},
-		{name: "bash bypass network flag", mode: policy.ModeBypass, req: f.bash("go get x"), want: policy.Allow, network: true},
+		{name: "bash bypass never grants network", mode: policy.ModeBypass, req: f.bash("go get x"), want: policy.Allow, network: false},
+		{name: "model network request asks even for reads", mode: policy.ModeDefault, req: withNet(f.bash("git status")), want: policy.Ask, reason: "network"},
+		{name: "allow rule without +net does not cover a network request", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(git status *)")}, req: withNet(f.bash("git status")), want: policy.Ask, reason: "network"},
+		{name: "allow rule without +net does not cover a network command", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(go get *)")}, req: f.bash("go get x"), want: policy.Ask, reason: "network"},
+		{name: "allow rule with +net covers and grants network", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(go get *) +net")}, req: f.bash("go get x"), want: policy.Allow, network: true},
 		{name: "bash plan safe read allowed", mode: policy.ModePlan, req: f.bash("git log"), want: policy.Allow},
 		{name: "bash plan network denied", mode: policy.ModePlan, req: f.bash("go get x"), want: policy.Deny},
 		{name: "bash without analysis denied", mode: policy.ModeBypass, req: policy.Request{Tool: "bash"}, want: policy.Deny},
@@ -418,4 +422,10 @@ func TestShellWorkspaceAdapter(t *testing.T) {
 	if a := shellclass.Analyze("git push --force origin main", sh); a.HardDeny != "" {
 		t.Error("override should replace the default set")
 	}
+}
+
+// withNet marks a request as one where the model asked for network access.
+func withNet(r policy.Request) policy.Request {
+	r.Network = true
+	return r
 }

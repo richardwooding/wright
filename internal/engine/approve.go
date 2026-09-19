@@ -106,17 +106,18 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 	}
 }
 
-// allowed builds the Allow decision, rewriting bash arguments when network
-// access was granted so the tool runs the sandbox with networking on.
+// allowed builds the Allow decision. For bash the "network" argument is
+// always rewritten to the verdict, so the tool never acts on the model's own
+// request: only a +net rule or the user's answer turns networking on.
 func (e *Engine) allowed(c agentkit.Call, verdict policy.Verdict, edited json.RawMessage) agentkit.Decision {
 	args := edited
-	if verdict.Network && c.Call.Name == "bash" {
+	if c.Call.Name == "bash" {
 		src := args
 		if src == nil {
 			src = c.Call.Arguments
 		}
-		if withNet, err := setJSONBool(src, "network", true); err == nil {
-			args = withNet
+		if pinned, err := setJSONBool(src, "network", verdict.Network); err == nil {
+			args = pinned
 		}
 	}
 	if args == nil {

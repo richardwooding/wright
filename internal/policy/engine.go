@@ -416,7 +416,9 @@ func (ev *eval) allowNetwork(rule *Rule) bool {
 	if ev.kind != kindBash {
 		return false
 	}
-	return rule.Net() || ev.req.Network
+	// The model asking for network (Request.Network) never grants it; only a
+	// +net rule or the user's answer to a prompt does.
+	return rule.Net()
 }
 
 // coverage checks the allow rules against the request's elements. It returns
@@ -470,6 +472,9 @@ func (ev *eval) coverBash(allow []*Rule) (bool, *Rule, string) {
 		}
 		if !matched {
 			return false, nil, "command `" + strings.Join(c.Argv, " ") + "`"
+		}
+		if (c.Network || ev.req.Network) && !last.Net() {
+			return false, nil, "network access for `" + strings.Join(c.Argv, " ") + "` (the allow rule has no +net)"
 		}
 	}
 	if last == nil {
@@ -602,8 +607,7 @@ func (ev *eval) modeBash() {
 		return
 	}
 	if ev.mode == ModeBypass {
-		ev.v.Network = ev.req.Network || sh.NeedsNetwork
-		ev.decide(Allow, "bypass mode: "+summary, nil)
+		ev.decide(Allow, "bypass mode (network stays off unless --allow-network): "+summary, nil)
 		return
 	}
 	deny, ask := ev.outsideShell(sh)
@@ -612,6 +616,8 @@ func (ev *eval) modeBash() {
 		ev.decide(Deny, deny, nil)
 	case sh.Unknown:
 		ev.decide(Ask, "opaque shell (cannot be auto-allowed): "+summary, nil)
+	case ev.req.Network:
+		ev.decide(Ask, "requests network access: "+summary, nil)
 	case sh.Class == shellclass.SafeRead && ask == "":
 		ev.decide(Allow, "read-only command: "+summary, nil)
 	case ask != "":
