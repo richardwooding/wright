@@ -223,7 +223,7 @@ func TestDeleteRemovesEverything(t *testing.T) {
 	if err := f.store.Touch(ctx, session.Meta{ID: "d"}); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{f.store.AuditPath("d"), filepath.Join(f.store.SnapshotDir("d"), "blob")} {
+	for _, p := range []string{f.store.AuditPath("d"), filepath.Join(f.store.SnapshotDir("d"), "blob"), filepath.Join(f.store.DebugDir("d"), "dump.txt")} {
 		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
 			t.Fatal(err)
 		}
@@ -234,7 +234,7 @@ func TestDeleteRemovesEverything(t *testing.T) {
 	if err := f.store.Delete(ctx, "d"); err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range []string{filepath.Join(f.store.Dir(), "d.jsonl"), filepath.Join(f.store.MetaDir(), "d.meta.json"), f.store.AuditPath("d"), f.store.SnapshotDir("d")} {
+	for _, p := range []string{filepath.Join(f.store.Dir(), "d.jsonl"), filepath.Join(f.store.MetaDir(), "d.meta.json"), f.store.AuditPath("d"), f.store.SnapshotDir("d"), f.store.DebugDir("d")} {
 		if _, err := os.Stat(p); !errors.Is(err, os.ErrNotExist) {
 			t.Errorf("%s still exists (err=%v)", p, err)
 		}

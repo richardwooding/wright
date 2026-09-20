@@ -14,11 +14,15 @@ import (
 )
 
 // Command runs the slash commands that need app-level services rather than
-// the engine: /diff /audit /init /redaction /trust /mcp /skills /jobs. The
+// the engine: /diff /audit /init /redaction /trust /mcp /skills /jobs /debug. The
 // name is given without the slash. Unknown names are an error so the UI
 // can say so.
 func (b *Built) Command(ctx context.Context, name string, args []string) (string, error) {
-	switch strings.TrimPrefix(strings.ToLower(name), "/") {
+	name = strings.TrimPrefix(strings.ToLower(name), "/")
+	if text, ok := b.describe(name); ok {
+		return text, nil
+	}
+	switch name {
 	case "diff":
 		staged := len(args) > 0 && (args[0] == "--staged" || args[0] == "--cached")
 		out, err := git.Diff(ctx, b.WS.Root(), staged)
@@ -37,17 +41,30 @@ func (b *Built) Command(ctx context.Context, name string, args []string) (string
 		return b.redaction(args)
 	case "trust":
 		return b.trustProject()
-	case "mcp":
-		return b.mcpStatus(), nil
-	case "skills":
-		return b.skillsStatus(), nil
-	case "agents":
-		return b.agentsStatus(), nil
-	case "jobs":
-		return b.jobsStatus(), nil
+	case "debug":
+		if len(args) > 0 && args[0] == "dump" {
+			return b.dumpNow()
+		}
+		return b.debugReport(), nil
 	default:
 		return "", fmt.Errorf("unknown command /%s", name)
 	}
+}
+
+// describe covers the commands that only say what the session already has:
+// no context, no arguments, nothing that can fail.
+func (b *Built) describe(name string) (string, bool) {
+	switch name {
+	case "mcp":
+		return b.mcpStatus(), true
+	case "skills":
+		return b.skillsStatus(), true
+	case "agents":
+		return b.agentsStatus(), true
+	case "jobs":
+		return b.jobsStatus(), true
+	}
+	return "", false
 }
 
 // jobsStatus is /jobs: the background commands this session started, running

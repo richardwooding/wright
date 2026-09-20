@@ -61,6 +61,10 @@ func TestImportDAG(t *testing.T) {
 		{"mcpclient", []string{"tui", "engine", "tools", "app"}},
 		{"skillsdir", []string{"tui", "engine", "tools", "app"}},
 		{"agents", []string{"tui", "engine", "app"}},
+		// diag renders sections it is handed; knowing what an engine or a
+		// tool is would make the thing being debugged a dependency of the
+		// debugger.
+		{"diag", []string{"tui", "engine", "tools", "app", "policy"}},
 	}
 	for _, rule := range forbidden {
 		from := pkg(rule.from)
@@ -97,6 +101,14 @@ func TestNoUnexpectedNetwork(t *testing.T) {
 		pkg("app"),       // constructs that client (ssrfguard.New().Client() + CheckRedirect re-validation)
 		pkg("mcpclient"), // takes that same client for HTTP MCP transports and adds the configured headers
 		pkg("websearch"), // queries the configured search API, through the same guarded client; absent unless the user names a provider
+		// diag *listens*; it never dials. The claim this test defends is
+		// that wright sends nothing anywhere, and a server bound to a
+		// loopback address at the user's explicit request sends nothing —
+		// it answers the user's own browser. It is off unless --debug-addr
+		// is passed, and diag.CheckAddr refuses any address that is not a
+		// loopback IP. If this package ever grows an outbound request, it
+		// belongs somewhere else, not on this list.
+		pkg("diag"),
 	}
 	graph := importGraph(t)
 	for p, imports := range graph {

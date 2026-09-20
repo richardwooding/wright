@@ -15,6 +15,7 @@ import (
 
 	"github.com/richardwooding/wright/internal/agents"
 	"github.com/richardwooding/wright/internal/config"
+	"github.com/richardwooding/wright/internal/diag"
 	"github.com/richardwooding/wright/internal/engine"
 	"github.com/richardwooding/wright/internal/git"
 	"github.com/richardwooding/wright/internal/mcpclient"
@@ -61,6 +62,13 @@ type RunOptions struct {
 
 	MaxSteps  int
 	Reasoning string
+
+	// DebugAddr turns on the diagnostics endpoint (--debug-addr). It is a
+	// flag only: there is no environment variable and no settings key, so a
+	// repository cannot open a port on the machine of anyone who runs
+	// wright in it, and neither can anything that can write the user's
+	// environment. It must be a loopback address.
+	DebugAddr string
 
 	Plain           bool
 	Verbose         bool
@@ -111,6 +119,11 @@ type Built struct {
 	Agents []agents.Definition
 	Close  func() error
 
+	// diag is the session's self-inspection: the dump signal, and the
+	// endpoint when one was asked for. Unexported because it is reached
+	// through /debug and the status bar, never by a caller poking at it.
+	diag *diag.Server
+
 	opts RunOptions
 	// jobs is the session's background commands, for /jobs. It is not
 	// exported: a UI shows them through Command, and nothing outside the
@@ -128,6 +141,10 @@ type InteractiveDeps struct {
 	InitialPrompt string
 	Warnings      []string
 	Models        func(ctx context.Context) []model.Choice
+	// DebugAddr is the diagnostics endpoint's address, empty when none is
+	// running. The UI shows it so a user who started one can find it
+	// without remembering what they typed.
+	DebugAddr string
 	// Command runs a slash command the UI does not implement itself:
 	// /init /mcp /skills /audit /trust /diff /redaction. It returns text to
 	// show the user.
@@ -149,6 +166,7 @@ func Build(ctx context.Context, o RunOptions) (*Built, error) {
 		b.permissions,
 		b.modelAndSession,
 		b.toolsAndEngine,
+		b.diagnostics,
 	} {
 		if err := phase(); err != nil {
 			b.cleanup()

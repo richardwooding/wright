@@ -170,18 +170,21 @@ func (b *builder) cleanup() {
 	if b.jobs != nil {
 		_ = b.jobs.Close()
 	}
+	if b.diag != nil {
+		_ = b.diag.Close()
+	}
 	if b.eng == nil && b.auditLog != nil {
 		_ = b.auditLog.Close()
 	}
 }
 
 func (b *builder) built() *Built {
-	eng, mcp, jobs := b.eng, b.mcp, b.jobs
+	eng, mcp, jobs, dg := b.eng, b.mcp, b.jobs, b.diag
 	return &Built{
 		Engine: eng, Store: b.store, WS: b.ws, Layered: b.layered, Settings: b.settings,
 		Warnings: b.warnings, Sandbox: b.backend, Choice: b.choice, SessionID: b.sessionID,
 		Trusted: b.trusted, WorkspaceTrusted: b.workspaceTrusted,
-		Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o, jobs: jobs,
+		Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o, jobs: jobs, diag: dg,
 		// Closing the engine ends the run; closing the MCP set terminates
 		// the server processes it started; closing the job set kills the
 		// background commands, which hold whatever their own approval
@@ -195,6 +198,9 @@ func (b *builder) built() *Built {
 				if cerr := jobs.Close(); err == nil {
 					err = cerr
 				}
+			}
+			if cerr := dg.Close(); err == nil {
+				err = cerr
 			}
 			return err
 		},

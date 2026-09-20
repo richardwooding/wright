@@ -158,6 +158,7 @@ func (b *Built) interactiveDeps() InteractiveDeps {
 		InitialPrompt: b.opts.Prompt,
 		Warnings:      b.Warnings,
 		Models:        func(context.Context) []model.Choice { return model.List(env) },
+		DebugAddr:     b.diag.Addr(),
 		Command:       b.Command,
 	}
 }

@@ -90,6 +90,13 @@ func (s *Store) SnapshotDir(id string) string {
 	return filepath.Join(s.project, "snapshots", id)
 }
 
+// DebugDir is where diagnostics dumps for id are written. It is per session
+// rather than per project so deleting a session takes its dumps with it: a
+// dump quotes the commands that session ran.
+func (s *Store) DebugDir(id string) string {
+	return filepath.Join(s.project, "debug", id)
+}
+
 // NewID returns a sortable, human-readable ID: "20260919-153012-a1b2". The
 // timestamp makes listings chronological without reading files; the random
 // suffix keeps two sessions started in the same second apart.
@@ -262,6 +269,7 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 		func() error { return os.Remove(s.metaPath(id)) },
 		func() error { return os.Remove(s.AuditPath(id)) },
 		func() error { return os.RemoveAll(s.SnapshotDir(id)) },
+		func() error { return os.RemoveAll(s.DebugDir(id)) },
 	} {
 		if err := rm(); err != nil && !errors.Is(err, os.ErrNotExist) {
 			return fmt.Errorf("session: %w", err)

@@ -14,6 +14,7 @@ import (
 	"github.com/richardwooding/wright/internal/agents"
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/config"
+	"github.com/richardwooding/wright/internal/diag"
 	"github.com/richardwooding/wright/internal/engine"
 	"github.com/richardwooding/wright/internal/mcpclient"
 	"github.com/richardwooding/wright/internal/model"
@@ -63,7 +64,8 @@ type builder struct {
 	auditLog  *audit.Log
 	snaps     *snapshot.Store
 
-	eng *engine.Engine
+	eng  *engine.Engine
+	diag *diag.Server
 }
 
 func (b *builder) warn(format string, args ...any) {
