@@ -22,6 +22,12 @@ const (
 	GlyphExpanded  = "▾"
 )
 
+// MoonFrames animate the window title while a run is in progress. The title
+// is the one place a glyph may move: it is what a user sees in the tab list
+// of a terminal they are not looking at, and a static dot there says
+// "something happened" rather than "this is working now".
+var MoonFrames = []string{"🌑", "🌒", "🌓", "🌔", "🌕", "🌖", "🌗", "🌘"}
+
 // Palette holds the resolved colours for one background (light or dark).
 type Palette struct {
 	Accent    color.Color // brand purple: titles, active elements

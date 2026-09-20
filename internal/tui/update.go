@@ -67,6 +67,10 @@ func (m Model) onInternal(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.running {
 			return m, nil
 		}
+		m.ticks++
+		if m.ticks%titleEvery == 0 {
+			m.titleFrame++
+		}
 		var cmd tea.Cmd
 		m.spin, cmd = m.spin.Update(msg)
 		return m, cmd
@@ -121,6 +125,9 @@ func (m Model) onKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		model, scmd := m.submit(ev.Text)
 		return model, tea.Batch(cmd, scmd)
 	}
+	if ev.Scroll != 0 {
+		m = m.scrollLines(ev.Scroll)
+	}
 	return m, cmd
 }
 
@@ -157,7 +164,7 @@ func (m Model) onGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	case "alt+m":
 		m.toggleMouse()
 		return true, m, nil
-	case "pgup", "pgdown", "shift+up", "shift+down":
+	case "pgup", "pgdown", "shift+up", "shift+down", "home", "end":
 		return true, m.scroll(msg.String()), nil
 	}
 	return false, m, nil
@@ -191,6 +198,18 @@ func (m Model) onCtrlC() (tea.Model, tea.Cmd) {
 // scroll moves the transcript and stops following the tail until the user
 // scrolls back to the bottom. shift+up/shift+down are the line-granularity
 // pair that replaces the wheel when the mouse is off (the default).
+// scrollLines moves the transcript by n lines, negative for back, and keeps
+// the follow bookkeeping in step.
+func (m Model) scrollLines(n int) Model {
+	if n < 0 {
+		m.vp.ScrollUp(-n)
+	} else {
+		m.vp.ScrollDown(n)
+	}
+	m.follow = m.vp.AtBottom()
+	return m
+}
+
 func (m Model) scroll(key string) Model {
 	switch key {
 	case "pgup":
@@ -201,6 +220,10 @@ func (m Model) scroll(key string) Model {
 		m.vp.ScrollUp(1)
 	case "shift+down":
 		m.vp.ScrollDown(1)
+	case "home":
+		m.vp.GotoTop()
+	case "end":
+		m.vp.GotoBottom()
 	}
 	m.follow = m.vp.AtBottom()
 	return m

@@ -38,6 +38,10 @@ type Options struct {
 type Event struct {
 	Submitted bool
 	Text      string
+	// Scroll asks the caller to move the transcript: -1 a line back, +1 a
+	// line forward. The composer reports it rather than acting, because the
+	// transcript belongs to the root model.
+	Scroll int
 }
 
 // PopupKind identifies which completion popup is open.
@@ -213,13 +217,28 @@ func (m Model) updateKey(key tea.KeyPressMsg) (Model, tea.Cmd, Event) {
 	case "ctrl+u":
 		m.Reset()
 		return m, nil, Event{}
-	case "up":
-		if m.ta.Line() == 0 && m.historyStep(-1) {
+	case "ctrl+p":
+		if m.historyStep(-1) {
 			return m, nil, Event{}
 		}
-	case "down":
-		if m.ta.Line() == m.ta.LineCount()-1 && m.historyStep(1) {
+	case "ctrl+n":
+		if m.historyStep(1) {
 			return m, nil, Event{}
+		}
+	// At the edges of the box, up and down scroll the transcript.
+	//
+	// They used to recall history, which left no key at all for the thing a
+	// user reaches for first — and on a VTE terminal the mouse wheel in the
+	// alternate screen *is* these two keys, so the wheel did nothing either.
+	// History moved to ctrl+p/ctrl+n, readline's own spelling. Inside a
+	// multi-line draft the cursor still moves: only the edges scroll.
+	case "up":
+		if m.ta.Line() == 0 {
+			return m, nil, Event{Scroll: -1}
+		}
+	case "down":
+		if m.ta.Line() == m.ta.LineCount()-1 {
+			return m, nil, Event{Scroll: 1}
 		}
 	}
 	wasEmpty := strings.TrimSpace(m.ta.Value()) == ""

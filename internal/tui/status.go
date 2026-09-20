@@ -43,6 +43,11 @@ func (m Model) statusBar() string {
 	if m.running {
 		segs = append(segs, th.Warm.Render(m.spin.View()+" running"))
 	}
+	if !m.follow {
+		// Scrolled back. Without this the state is invisible: new output
+		// stops appearing at the bottom and nothing says why.
+		segs = append(segs, th.Warm.Render("↑ scrolled · end to follow"))
+	}
 	if m.hint != "" {
 		segs = append(segs, th.Warm.Render(m.hint))
 	}

@@ -42,6 +42,10 @@ func keyFor(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
 	case "ctrl+u":
 		return tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}
+	case "ctrl+p":
+		return tea.KeyPressMsg{Code: 'p', Mod: tea.ModCtrl}
+	case "ctrl+n":
+		return tea.KeyPressMsg{Code: 'n', Mod: tea.ModCtrl}
 	case "up":
 		return tea.KeyPressMsg{Code: tea.KeyUp}
 	case "down":
@@ -94,23 +98,88 @@ func TestNewlineKeys(t *testing.T) {
 	}
 }
 
+// History is on ctrl+p/ctrl+n — readline's spelling — because up and down
+// are what a user reaches for to scroll, and on a VTE terminal they are also
+// what the mouse wheel becomes in the alternate screen.
 func TestHistoryRecall(t *testing.T) {
 	m := typeText(newComposer(nil), "first")
 	m, _ = press(m, "enter")
 	m = typeText(m, "second")
 	m, _ = press(m, "enter")
 	m = typeText(m, "draft")
-	m, _ = press(m, "up")
+	m, _ = press(m, "ctrl+p")
 	if m.Value() != "second" {
-		t.Fatalf("after up: %q", m.Value())
+		t.Fatalf("after ctrl+p: %q", m.Value())
 	}
-	m, _ = press(m, "up")
+	m, _ = press(m, "ctrl+p")
 	if m.Value() != "first" {
-		t.Fatalf("after up up: %q", m.Value())
+		t.Fatalf("after ctrl+p ctrl+p: %q", m.Value())
 	}
-	m, _ = press(m, "down", "down")
+	m, _ = press(m, "ctrl+n", "ctrl+n")
 	if m.Value() != "draft" {
 		t.Fatalf("draft not restored: %q", m.Value())
+	}
+}
+
+// TestEdgesScrollTheTranscript is the fix for "I can't scroll up to see the
+// history": the composer reports the intent and the root model moves the
+// viewport. Inside a draft the cursor still moves, so a multi-line message
+// is still editable.
+func TestEdgesScrollTheTranscript(t *testing.T) {
+	tests := []struct {
+		name  string
+		setup func() composer.Model
+		key   string
+		want  int
+	}{
+		{name: "up in an empty box", setup: func() composer.Model { return newComposer(nil) }, key: "up", want: -1},
+		{name: "down in an empty box", setup: func() composer.Model { return newComposer(nil) }, key: "down", want: 1},
+		{
+			name:  "up on the first line of a draft",
+			setup: func() composer.Model { return typeText(newComposer(nil), "one") },
+			key:   "up", want: -1,
+		},
+		{
+			name: "up from the second line moves the cursor instead",
+			setup: func() composer.Model {
+				m := typeText(newComposer(nil), "one")
+				m, _ = press(m, "ctrl+j")
+				return typeText(m, "two")
+			},
+			key: "up", want: 0,
+		},
+		{
+			name: "down on the last line of a draft",
+			setup: func() composer.Model {
+				m := typeText(newComposer(nil), "one")
+				m, _ = press(m, "ctrl+j")
+				return typeText(m, "two")
+			},
+			key: "down", want: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ev := press(tt.setup(), tt.key)
+			if ev.Scroll != tt.want {
+				t.Errorf("Scroll = %d, want %d", ev.Scroll, tt.want)
+			}
+		})
+	}
+}
+
+// The keys that used to recall history must no longer do so, or a user
+// pressing up to scroll would silently lose the message they were writing.
+func TestUpNoLongerRecallsHistory(t *testing.T) {
+	m := typeText(newComposer(nil), "first")
+	m, _ = press(m, "enter")
+	m = typeText(m, "draft")
+	m, ev := press(m, "up")
+	if m.Value() != "draft" {
+		t.Errorf("up replaced the draft with %q", m.Value())
+	}
+	if ev.Scroll != -1 {
+		t.Errorf("Scroll = %d, want -1", ev.Scroll)
 	}
 }
 

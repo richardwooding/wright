@@ -222,7 +222,10 @@ func (m *Model) applyApprovalRequest(ev engine.Event) {
 	}
 	ctl, id := m.ctl, a.ID
 	m.showOverlay(overlay.NewApproval(a, m.th, func(d engine.Decision) { ctl.Reply(id, d) }))
-	m.follow = true
+	// Deliberately does not re-pin the transcript. The overlay is modal and
+	// is shown wherever the viewport happens to be, so snapping to the
+	// bottom gains nothing and throws away a scroll the user made on
+	// purpose — mid-run is exactly when they are reading back.
 }
 
 func (m *Model) applyApprovalDecided(ev engine.Event) {

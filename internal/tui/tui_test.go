@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/richardwooding/wright/internal/engine"
 	"github.com/richardwooding/wright/internal/policy"
+	"github.com/richardwooding/wright/internal/theme"
 	"github.com/richardwooding/wright/internal/tui"
 )
 
@@ -717,12 +720,56 @@ func TestWindowTitleSaysWhenWorking(t *testing.T) {
 		t.Errorf("idle title = %q", title)
 	}
 	m = event(m, engine.Event{Kind: engine.KindRunStarted})
-	if title := m.View().WindowTitle; title != "● wright — wright" {
-		t.Errorf("running title = %q, want the working mark", title)
+	running := m.View().WindowTitle
+	if !strings.HasSuffix(running, " wright — wright") || running == "wright — wright" {
+		t.Errorf("running title = %q, want a mark before the name", running)
+	}
+	if !slices.ContainsFunc(theme.MoonFrames, func(f string) bool { return strings.HasPrefix(running, f) }) {
+		t.Errorf("running title = %q, want one of the animation frames", running)
 	}
 	m = event(m, engine.Event{Kind: engine.KindRunFinished, Finish: &engine.Finish{Steps: 1}})
 	if title := m.View().WindowTitle; title != "wright — wright" {
 		t.Errorf("title after the run = %q", title)
+	}
+}
+
+// TestWindowTitleAnimatesWhileWorking is the complaint this answers: the
+// title said "running" with a dot that never moved, because nothing
+// recomputed it between state changes. It rides the spinner's own tick, so
+// there is no second timer to keep in step.
+func TestWindowTitleAnimatesWhileWorking(t *testing.T) {
+	m := newModel(t, &fakeController{}, 80, 24)
+	m = event(m, engine.Event{Kind: engine.KindRunStarted})
+
+	seen := map[string]bool{m.View().WindowTitle: true}
+	for range 40 {
+		m = update(m, spinner.TickMsg{})
+		seen[m.View().WindowTitle] = true
+	}
+	if len(seen) < 3 {
+		t.Errorf("the title took %d distinct values over 40 ticks, want it to animate: %v", len(seen), seen)
+	}
+
+	// One frame must last several ticks: a title is an escape sequence
+	// written to the terminal, and 12 a second is wasteful for something
+	// the eye reads as movement at a third of that.
+	m2 := newModel(t, &fakeController{}, 80, 24)
+	m2 = event(m2, engine.Event{Kind: engine.KindRunStarted})
+	before := m2.View().WindowTitle
+	m2 = update(m2, spinner.TickMsg{})
+	if m2.View().WindowTitle != before {
+		t.Errorf("the title advanced on a single tick (%q → %q); it should be throttled", before, m2.View().WindowTitle)
+	}
+
+	// Idle is still a plain name: a wright that is not working must not
+	// decorate the user's tab list.
+	m = event(m, engine.Event{Kind: engine.KindRunFinished, Finish: &engine.Finish{Steps: 1}})
+	idle := m.View().WindowTitle
+	for range 5 {
+		m = update(m, spinner.TickMsg{})
+		if got := m.View().WindowTitle; got != idle {
+			t.Errorf("an idle title changed: %q → %q", idle, got)
+		}
 	}
 }
 
@@ -1109,4 +1156,80 @@ func TestGitHubCommandAsksBeforeHandingOverACredential(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestScrollingTheTranscript covers the complaint directly: a full
+// transcript that the user cannot get back to. The composer reports the
+// intent at its edges and the root model moves the viewport.
+func TestScrollingTheTranscript(t *testing.T) {
+	fill := func(t *testing.T) tui.Model {
+		t.Helper()
+		m := newModel(t, &fakeController{}, 80, 12)
+		m = event(m, engine.Event{Kind: engine.KindRunStarted})
+		// Notices render one line each; streamed text would be reflowed
+		// into a paragraph and fit on screen, leaving nothing to scroll.
+		for i := range 60 {
+			m = event(m, engine.Event{Kind: engine.KindNotice, Text: fmt.Sprintf("line %d", i)})
+		}
+		return event(m, engine.Event{Kind: engine.KindRunFinished, Finish: &engine.Finish{Steps: 1}})
+	}
+
+	t.Run("up scrolls back and end returns", func(t *testing.T) {
+		m := fill(t)
+		bottom := content(m)
+		for range 5 {
+			m = update(m, key("up"))
+		}
+		if got := content(m); got == bottom {
+			t.Fatalf("up did not move the transcript:\n%s", got)
+		}
+		if !strings.Contains(content(m), "scrolled") {
+			t.Errorf("no marker while scrolled back:\n%s", content(m))
+		}
+		m = update(m, key("end"))
+		if content(m) != bottom {
+			t.Errorf("end did not return to the bottom")
+		}
+		if strings.Contains(content(m), "↑ scrolled") {
+			t.Errorf("the scrolled marker survived end")
+		}
+	})
+
+	// The regression this also fixes: an approval arriving mid-run used to
+	// snap the transcript back to the bottom, throwing away a scroll made
+	// on purpose. The overlay is modal, so it is shown either way.
+	t.Run("an approval does not yank the viewport back", func(t *testing.T) {
+		m := fill(t)
+		for range 5 {
+			m = update(m, key("up"))
+		}
+		scrolled := content(m)
+		m = event(m, engine.Event{Kind: engine.KindApprovalRequest, Call: call("c1", "bash", ""), Approval: &engine.Approval{
+			ID: "a1", Tool: "bash", Preview: engine.Preview{Title: "x", Body: "x"},
+		}})
+		m = update(m, key("esc")) // answer it; the overlay closes
+		if got := content(m); got != scrolled {
+			t.Errorf("the approval re-pinned the transcript:\nwant %q\ngot  %q",
+				lastLine(scrolled), lastLine(got))
+		}
+	})
+
+	// A new run is the one thing that should return to following: the user
+	// just asked for something and wants to watch it happen.
+	t.Run("a new run follows again", func(t *testing.T) {
+		m := fill(t)
+		for range 5 {
+			m = update(m, key("up"))
+		}
+		m = event(m, engine.Event{Kind: engine.KindRunStarted})
+		if strings.Contains(content(m), "↑ scrolled") {
+			t.Errorf("a new run did not resume following:\n%s", content(m))
+		}
+	})
+}
+
+// lastLine is the final non-empty line, for a readable failure message.
+func lastLine(s string) string {
+	lines := strings.Split(strings.TrimRight(s, "\n "), "\n")
+	return lines[len(lines)-1]
 }

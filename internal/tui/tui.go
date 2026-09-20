@@ -91,6 +91,8 @@ type Options struct {
 // Timings. Deltas are coalesced so a fast stream re-renders the live block
 // at most ~30 times a second; ctrl+c must be repeated within the window.
 const (
+	// titleEvery is how many spinner ticks one title frame lasts.
+	titleEvery    = 3
 	flushInterval = 33 * time.Millisecond
 	gitInterval   = 5 * time.Second
 	ctrlCWindow   = 1500 * time.Millisecond
@@ -161,6 +163,12 @@ type Model struct {
 	follow     bool // keep the viewport at the bottom
 	mouse      bool // cell-motion tracking: off so the terminal keeps selection
 
+	// titleFrame indexes the window title's animation. It advances on every
+	// titleEvery-th spinner tick: the spinner runs at 12 fps and a title is
+	// an escape sequence written to the terminal, so a third of that reads
+	// as movement at a third of the cost.
+	titleFrame  int
+	ticks       int
 	lastCtrlC   time.Time
 	hint        string
 	exitSummary string
@@ -306,10 +314,13 @@ func clampRows(s string, n int) string {
 // left working in another tab says so from the window list.
 func (m Model) windowTitle() string {
 	title := "wright — " + filepath.Base(m.opts.WorkspaceRoot)
-	if m.running {
-		return theme.GlyphRunning + " " + title
+	if !m.running {
+		return title
 	}
-	return title
+	// Bubble Tea writes OSC 2 only when the string changes, so a title that
+	// varies with the frame animates by itself — no new timer, because the
+	// spinner is already producing frames for the whole run.
+	return theme.MoonFrames[m.titleFrame%len(theme.MoonFrames)] + " " + title
 }
 
 // rule is the divider drawn above and below the composer. U+2500 is one
