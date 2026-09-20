@@ -47,7 +47,7 @@ func init() {
 		{"skills", "", "loaded skills", hook("skills")},
 		{"ps", "", "what is running right now", (*Model).cmdPs},
 		{"jobs", "", "background commands this session started", hook("jobs")},
-		{"debug", "[dump]", "diagnostics endpoint, and write a dump of this session", hook("debug")},
+		{"debug", "[dump|inject on|off]", "diagnostics endpoint, dumps, and whether it may send this session prompts", (*Model).cmdDebug},
 		{"github", "[on|off]", "let commands authenticate to GitHub as you", (*Model).cmdGitHub},
 		{"agents", "", "the sub-agents this session can call", hook("agents")},
 		{"todos", "", "show the task list", (*Model).cmdTodos},
@@ -203,6 +203,25 @@ func (m *Model) cmdMode(args []string) tea.Cmd {
 		return nil
 	}
 	m.setMode(mode)
+	return nil
+}
+
+// cmdDebug is /debug. Arming the endpoint's input lets anything that can
+// reach the port and present this session's token put a prompt into it, so it
+// asks the way /github on and bypass mode do — the typed word, and a prompt
+// spelling out what is being handed over. Everything else /debug does only
+// reports.
+func (m *Model) cmdDebug(args []string) tea.Cmd {
+	if len(args) < 2 || args[0] != "inject" || !strings.EqualFold(args[1], "on") {
+		return hook("debug")(m, args)
+	}
+	run := hook("debug")
+	m.showOverlay(overlay.NewConfirm("accept prompts from the debug endpoint",
+		"Anything that can reach this session's debug port and present its token will be able to put a prompt "+
+			"into this session — starting a run, or steering one already going — for the rest of the session, "+
+			"with no further asking. Every such prompt is marked in the transcript and recorded in the audit log. "+
+			"`/debug inject off` ends it.",
+		"yes", m.th, func() tea.Cmd { return run(m, args) }))
 	return nil
 }
 

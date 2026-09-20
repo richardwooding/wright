@@ -46,6 +46,12 @@ const (
 	KindNotice        Kind = "notice"
 	KindError         Kind = "error"
 	KindHardDenyAbort Kind = "hard_deny_abort"
+	// KindEndpointPrompt is a prompt that arrived on the diagnostics
+	// endpoint rather than being typed. Deliberately not named "injection":
+	// KindInjection above already means prompt-injection *detected in tool
+	// output*, and a log read under pressure must not confuse the two.
+	KindEndpointPrompt Kind = "endpoint_prompt"
+	KindEndpointArmed  Kind = "endpoint_input_armed"
 )
 
 // maxArgs caps the recorded tool arguments so a large file write does not
@@ -70,6 +76,7 @@ type Event struct {
 	Files    []File    `json:"files,omitempty"`
 	Command  *Command  `json:"command,omitempty"`
 	Model    *Model    `json:"model,omitempty"`
+	Input    *Input    `json:"input,omitempty"`
 	Text     string    `json:"text,omitempty"`
 	MCP      *MCP      `json:"mcp,omitempty"`
 	Error    string    `json:"error,omitempty"`
@@ -130,6 +137,13 @@ func (d Decision) SavedRules() []string {
 		return []string{d.Grant}
 	}
 	return nil
+}
+
+// Input records where a prompt came from, when it was not typed.
+type Input struct {
+	Source string `json:"source"`
+	Remote string `json:"remote,omitempty"`
+	Bytes  int    `json:"bytes"`
 }
 
 // Result summarises a tool result.

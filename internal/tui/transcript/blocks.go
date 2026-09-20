@@ -43,7 +43,12 @@ const (
 )
 
 // User is a message the user sent.
-type User struct{ Text string }
+type User struct {
+	Text string
+	// Source names where the turn came from when it was not typed here —
+	// the diagnostics endpoint. Empty for an ordinary message.
+	Source string
+}
 
 // Assistant is one model turn: markdown text plus optional reasoning. Live is
 // true while it is still streaming.
@@ -93,7 +98,13 @@ type Error struct{ Text string }
 
 func (u *User) render(ctx renderContext) []string {
 	prefix := ctx.th.UserPrompt.Render("› ")
-	return prefixed(prefix, "  ", wrap(u.Text, ctx.width-2))
+	out := prefixed(prefix, "  ", wrap(u.Text, ctx.width-2))
+	if u.Source == "" {
+		return out
+	}
+	// Above the turn, not beside it: a reader scanning the conversation has
+	// to see that this one was not typed here before they read it.
+	return append([]string{ctx.th.Subtle.Render("  via " + u.Source)}, out...)
 }
 
 func (a *Assistant) render(ctx renderContext) []string {

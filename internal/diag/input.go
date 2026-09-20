@@ -119,8 +119,7 @@ func (s *Server) input(w http.ResponseWriter, r *http.Request) {
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxInputBytes))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&body); err != nil {
-		var tooBig *http.MaxBytesError
-		if errors.As(err, &tooBig) {
+		if _, ok := errors.AsType[*http.MaxBytesError](err); ok {
 			s.countRefused("too large")
 			http.Error(w, "diag: a prompt may be at most 16 KiB", http.StatusRequestEntityTooLarge)
 			return

@@ -174,25 +174,38 @@ func (b *builder) cleanup() {
 	if b.diag != nil {
 		_ = b.diag.Close()
 	}
+	if b.inject != nil {
+		_ = b.inject.Close()
+	}
 	if b.eng == nil && b.auditLog != nil {
 		_ = b.auditLog.Close()
 	}
 }
 
 func (b *builder) built() *Built {
-	eng, mcp, jobs, dg := b.eng, b.mcp, b.jobs, b.diag
+	eng, mcp, jobs, dg, inj := b.eng, b.mcp, b.jobs, b.diag, b.inject
 	return &Built{
 		Engine: eng, Store: b.store, WS: b.ws, Layered: b.layered, Settings: b.settings,
 		Warnings: b.warnings, Sandbox: b.backend, Choice: b.choice, SessionID: b.sessionID,
 		Trusted: b.trusted, WorkspaceTrusted: b.workspaceTrusted,
 		Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o, jobs: jobs, diag: dg,
-		gitHub: b.gitHub, redactor: b.redactor, ghResolve: b.ghResolve,
+		gitHub: b.gitHub, redactor: b.redactor, ghResolve: b.ghResolve, inject: b.inject,
 		// Closing the engine ends the run; closing the MCP set terminates
 		// the server processes it started; closing the job set kills the
 		// background commands, which hold whatever their own approval
 		// granted them and so must not outlive the session that granted it.
 		Close: func() error {
-			err := eng.Close()
+			// Order matters. Stop admitting requests, then drain and stop
+			// the goroutine that feeds the engine, and only then close the
+			// engine: the other way round, a prompt already accepted would
+			// be submitted to a session that had gone.
+			err := dg.Close()
+			if cerr := inj.Close(); err == nil {
+				err = cerr
+			}
+			if cerr := eng.Close(); err == nil {
+				err = cerr
+			}
 			if cerr := mcp.Close(); err == nil {
 				err = cerr
 			}
@@ -200,9 +213,6 @@ func (b *builder) built() *Built {
 				if cerr := jobs.Close(); err == nil {
 					err = cerr
 				}
-			}
-			if cerr := dg.Close(); err == nil {
-				err = cerr
 			}
 			return err
 		},

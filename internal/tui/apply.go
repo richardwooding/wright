@@ -118,6 +118,12 @@ func (m *Model) applyNotice(ev engine.Event) {
 			// copy of it behind the first.
 			m.ov = overlay.NewTodos(m.todos, m.th)
 		}
+	case engine.KindExternalPrompt:
+		// Where a typed prompt would go, so the conversation reads in
+		// order, but marked so nobody attributes it to the person here.
+		m.finishLive()
+		m.tr.Append(&transcript.User{Text: ev.Text, Source: ev.Source})
+		m.follow = true
 	case engine.KindQueued:
 		m.queued = ev.Queued
 		m.pending = nil

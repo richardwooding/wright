@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -18,12 +19,20 @@ import (
 // one who was told the port was taken.
 func (b *builder) diagnostics() error {
 	start := time.Now()
+	// The endpoint can only hand prompts to a session that exists, so the
+	// hook is wired only when there is one to hand them to.
+	var input func(diag.Prompt) error
+	if b.o.DebugAddr != "" && b.eng != nil {
+		b.inject = newInjector(b.eng)
+		input = b.inject.post
+	}
 	srv, err := diag.Open(diag.Options{
 		Addr:    b.o.DebugAddr,
 		Source:  func() []diag.Section { return b.sections(start) },
 		DumpDir: b.store.DebugDir(b.sessionID),
 		Redact:  b.redactText,
 		OnDump:  b.onDump,
+		Input:   input,
 	})
 	if err != nil {
 		return err
@@ -106,6 +115,16 @@ func (b *builder) stateSection() diag.Section {
 	if s.SandboxNet {
 		net = "network"
 	}
+	endpointInput := "off"
+	if st := b.diag.InputStatus(); st.Available {
+		endpointInput = "not armed (/debug inject on)"
+		if st.Armed {
+			endpointInput = fmt.Sprintf("ARMED · %d accepted, %d refused", st.Accepted, st.Refused)
+			if !st.Last.IsZero() {
+				endpointInput += " · last " + st.Last.UTC().Format("15:04:05Z")
+			}
+		}
+	}
 	github := "off"
 	if b.gitHub.On() {
 		// The source's *name*, never the token. "why can this session push"
@@ -120,6 +139,7 @@ func (b *builder) stateSection() diag.Section {
 		fmt.Sprintf("context: %d of %d tokens", s.ContextUsed, s.ContextWindow),
 		fmt.Sprintf("usage:   %d tokens", s.Usage.TotalTokens),
 		"github:  " + github,
+		"prompts: " + endpointInput,
 	}}
 }
 
@@ -204,12 +224,71 @@ func (b *Built) debugReport() string {
 	if diagSignal != "" {
 		fmt.Fprintf(&out, "  dump       kill -s %s %d (no endpoint needed), or /debug dump\n", diagSignal, os.Getpid())
 	}
+	fmt.Fprintf(&out, "  prompts    %s\n", b.injectLine())
 	fmt.Fprintf(&out, "  dumps in   %s\n", b.diag.DumpDir())
 	if last := b.diag.LastDump(); last != "" {
 		fmt.Fprintf(&out, "  last dump  %s\n", last)
 	}
-	out.WriteString("\nDumps and the endpoint carry the same redaction as tool output, and the endpoint listens on loopback only.")
+	out.WriteString("\nDumps and the endpoint carry the same redaction as tool output, and the endpoint listens on loopback only." +
+		"\nIt only reads, until you arm its input with `/debug inject on`; from then until the session ends it can also" +
+		"\nput a prompt into this session, and every one of those is marked in the transcript and in the audit log.")
 	return out.String()
+}
+
+// injectCommand is /debug inject on|off: whether this session will take a
+// prompt from its own diagnostics endpoint.
+//
+// Session-scoped and never written to a file, like arming bypass mode. The
+// audit log is therefore the only durable record that it happened, which is
+// why the engine records it rather than this function.
+func (b *Built) injectCommand(args []string) (string, error) {
+	if b.diag.URL() == "" {
+		return "", errors.New("this session has no debug endpoint; restart with --debug-addr 127.0.0.1:6060")
+	}
+	if b.inject == nil {
+		return "", errors.New("this session cannot accept prompts")
+	}
+	switch {
+	case len(args) == 0:
+		return b.injectStatus(), nil
+	case strings.EqualFold(args[0], "off"):
+		b.diag.ArmInput(false)
+		b.Engine.ArmedInput(false)
+		return "The debug endpoint will no longer accept prompts. The token it was using is dead.", nil
+	case strings.EqualFold(args[0], "on"):
+		token := b.diag.ArmInput(true)
+		b.Engine.ArmedInput(true)
+		return "The debug endpoint will accept prompts for the rest of this session.\n\n" +
+			"  curl -sS -X POST " + b.diag.URL() + "debug/input \\\n" +
+			"       -H 'Content-Type: application/json' \\\n" +
+			"       -H 'X-Wright-Debug-Token: " + token + "' \\\n" +
+			`       -d '{"prompt":"…"}'` + "\n\n" +
+			"Every prompt that arrives is marked in the transcript and recorded in the audit log." +
+			"\n`/debug inject off` ends it.", nil
+	}
+	return "", errors.New("usage: /debug inject [on|off]")
+}
+
+// injectLine is the one-line form for /debug.
+func (b *Built) injectLine() string {
+	st := b.diag.InputStatus()
+	switch {
+	case !st.Available:
+		return "not available in this session"
+	case !st.Armed:
+		return "refused — `/debug inject on` allows them for this session"
+	default:
+		return fmt.Sprintf("ARMED — %d taken, %d refused", st.Accepted, st.Refused)
+	}
+}
+
+func (b *Built) injectStatus() string {
+	st := b.diag.InputStatus()
+	if !st.Armed {
+		return "The debug endpoint does not accept prompts. `/debug inject on` allows it for this session."
+	}
+	return fmt.Sprintf("The debug endpoint accepts prompts: %d taken, %d refused. `/debug inject off` ends it.",
+		st.Accepted, st.Refused)
 }
 
 // dumpNow writes a dump on request, so /debug dump does not need a second

@@ -137,6 +137,7 @@ type Built struct {
 	// redactor is kept so /github can say truthfully whether a token it
 	// resolved later is masked.
 	gitHub    *tools.GitHubAuth
+	inject    *injector
 	redactor  *redact.Redactor
 	ghResolve func() (ghauth.Result, error)
 

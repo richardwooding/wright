@@ -172,6 +172,8 @@ func (r *plainRunner) event(ev engine.Event) {
 	switch ev.Kind {
 	case engine.KindRunStarted:
 		r.running = true
+	case engine.KindExternalPrompt:
+		r.line("[" + ev.Source + "] › " + ev.Text)
 	case engine.KindText:
 		fmt.Fprint(r.out, ev.Text)
 		r.midLine = !strings.HasSuffix(ev.Text, "\n")

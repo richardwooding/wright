@@ -33,6 +33,15 @@ func (e *Engine) Submit(text string, parts ...core.Part) error {
 	if strings.TrimSpace(text) == "" && len(parts) == 0 {
 		return errors.New("engine: empty message")
 	}
+	select {
+	case <-e.closed:
+		// A caller that is not the UI — the debug endpoint's drain
+		// goroutine — can still be holding a reference while the session
+		// shuts down. Starting a run here would launch work on
+		// context.Background() that nothing will ever stop.
+		return errors.New("engine: the session is closed")
+	default:
+	}
 	e.mu.Lock()
 	if e.running {
 		e.inbox.Post(append([]core.Part{core.Text(text)}, parts...)...)

@@ -64,6 +64,32 @@ func (e *Engine) gitHubAuth() bool {
 	return e.githubAuth
 }
 
+// ArmedInput records that the user allowed, or stopped allowing, prompts
+// from the debug endpoint. It is a session-scoped permission and never a
+// stored setting, so the audit log is the only durable record of it.
+func (e *Engine) ArmedInput(on bool) {
+	state := "disarmed"
+	if on {
+		state = "armed"
+	}
+	e.audit(audit.Event{Kind: audit.KindEndpointArmed, Text: state})
+	e.emit(Event{Kind: KindNotice, Text: "debug endpoint prompts: " + state})
+}
+
+// ExternalPrompt records a prompt that arrived from outside the UI and shows
+// it in the transcript, so a reader can tell it from one the user typed.
+//
+// It is emitted before the prompt is submitted, so the block appears where a
+// typed one would: a reader who finds it off to the side as a notice will
+// still attribute the turn to the person at the terminal.
+func (e *Engine) ExternalPrompt(source, remote, text string) {
+	e.audit(audit.Event{
+		Kind: audit.KindEndpointPrompt, Text: text,
+		Input: &audit.Input{Source: source, Remote: remote, Bytes: len(text)},
+	})
+	e.emit(Event{Kind: KindExternalPrompt, Text: text, Source: source})
+}
+
 // waiter is one blocked approval: the channel its goroutine is parked on,
 // plus enough about the prompt to describe it in a dump.
 type waiter struct {

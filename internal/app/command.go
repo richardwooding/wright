@@ -45,13 +45,21 @@ func (b *Built) Command(ctx context.Context, name string, args []string) (string
 	case "github":
 		return b.gitHubCommand(args)
 	case "debug":
-		if len(args) > 0 && args[0] == "dump" {
-			return b.dumpNow()
-		}
-		return b.debugReport(), nil
+		return b.debugCommand(args)
 	default:
 		return "", fmt.Errorf("unknown command /%s", name)
 	}
+}
+
+// debugCommand is /debug and its two subcommands.
+func (b *Built) debugCommand(args []string) (string, error) {
+	switch {
+	case len(args) > 0 && args[0] == "dump":
+		return b.dumpNow()
+	case len(args) > 0 && args[0] == "inject":
+		return b.injectCommand(args[1:])
+	}
+	return b.debugReport(), nil
 }
 
 // describe covers the commands that only say what the session already has:

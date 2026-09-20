@@ -78,6 +78,8 @@ type builder struct {
 	// gitHub is the holder the bash tool reads per call. It exists whether
 	// or not a credential was resolved, so /github on can fill it later.
 	gitHub *tools.GitHubAuth
+	// inject carries prompts from the diagnostics endpoint to the engine.
+	inject *injector
 	// ghResolve replaces the real resolver in tests.
 	ghResolve func() (ghauth.Result, error)
 }

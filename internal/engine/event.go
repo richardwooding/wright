@@ -38,6 +38,11 @@ const (
 	KindRunFinished
 	KindError
 	KindNotice
+	// KindExternalPrompt is a prompt that arrived from outside the UI — the
+	// diagnostics endpoint. The UI shows it where a typed one would go, but
+	// marked, so nobody reading back attributes the turn to the person at
+	// the terminal.
+	KindExternalPrompt
 )
 
 var kindNames = [...]string{
@@ -47,6 +52,7 @@ var kindNames = [...]string{
 	KindQuestion: "question", KindRetry: "retry", KindCompact: "compact", KindUsage: "usage",
 	KindRedacted: "redacted", KindInjection: "injection", KindTodos: "todos", KindQueued: "queued",
 	KindRunFinished: "run_finished", KindError: "error", KindNotice: "notice",
+	KindExternalPrompt: "external_prompt",
 }
 
 // String returns the snake_case name used in stream-json output.
@@ -66,7 +72,10 @@ type Event struct {
 	Step  int
 	Time  time.Time
 
-	Text string // Text, Reasoning, ToolProgress, Notice, Error, Redacted, Injection
+	Text string // Text, Reasoning, ToolProgress, Notice, Error, Redacted, Injection, ExternalPrompt
+	// Source names where an ExternalPrompt came from. It is a label, never
+	// a credential: the endpoint's token is not in it.
+	Source string
 
 	Call     *core.ToolCall   // ToolCall, ToolProgress, ToolResult, ApprovalRequest, ApprovalDecided
 	Result   *core.ToolResult // ToolResult
