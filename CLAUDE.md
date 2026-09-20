@@ -478,6 +478,27 @@ client to HTTP MCP transports).
   elapsed, so the process it spawned can still be alive. Ask the operating
   system (`syscall.Kill(pid, 0)`), as `TestJobSetCloseKillsTheProcessTree`
   does.
+- **A mode's toolset must match what that mode's policy can permit.** Plan
+  mode filters the registered tools down to `Options.ReadOnlyTools`, and the
+  system prompt describes tools regardless, so a tool the policy allows but
+  the filter drops comes back as `agentkit: tool not found` — no prompt, no
+  explanation, 0 ms. That shipped in v0.2.0 because plan mode reused
+  `tools.ReadOnlyNames`, which is the *explore sub-agent's* set: two
+  different questions sharing one list. `tools.PlanNames` is plan mode's own
+  (it allows read-only `bash` via `modeBashPlan`, asks for web access via
+  `planMayAsk`, and allows `otherTools`), and
+  `TestPlanModeKeepsEveryToolItCanPermit` evaluates every built-in tool
+  against plan-mode policy and fails if the two lists disagree either way.
+  Plan mode also consults no allow rules, so `Suggest` returns nothing there:
+  an offer that cannot take effect is worse than none — the overlay would
+  invite "always allow" and then keep asking.
+- **A session exists from the moment it starts, not when a run ends.**
+  `engine.New` writes the sidecar, because both it and the transcript used to
+  be written only by `touch` at the end of a run: for the whole of the first
+  run `/sessions` listed nothing and `/export` said "no such session" about
+  the id in the status bar. The transcript itself is still agentkit's to
+  write at run end, so a mid-run export says so rather than emitting a bare
+  header.
 - **Skills are text, not capability.** `skills.Use` adds the catalog to the
   prompt and registers `skill`/`skill_file`, which only return text and
   bundled files (hence their place in `policy.otherTools`). A script a skill

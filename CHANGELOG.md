@@ -21,6 +21,9 @@ All notable changes to this project are documented here. The format follows
   "always allow", which then kept asking, and a headless denial named a
   `--allow` flag that changed nothing. Plan mode now offers no saved rule and
   says what would actually help.
+- Exporting a session whose first run is still going produced a header and
+  nothing else, which reads as lost data. It now says the transcript is
+  written when a run finishes.
 - **A session did not exist until its first run finished.** Both the sidecar
   and the transcript were written only at the end of a run, so during the
   first one `/sessions` listed nothing and `/export` failed with "no such

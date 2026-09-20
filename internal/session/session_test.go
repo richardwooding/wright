@@ -520,3 +520,31 @@ func TestStoreSatisfiesAgentkitStore(t *testing.T) {
 		t.Fatalf("Load = %v, %v", msgs, err)
 	}
 }
+
+// TestExportMidRunSaysSoRatherThanLookingEmpty pins what an export of a
+// session whose first run is still going produces. The session exists from
+// the moment it starts, but the transcript is written when a run finishes,
+// so the export has a header and nothing else — which reads as lost data
+// unless it says otherwise.
+func TestExportMidRunSaysSoRatherThanLookingEmpty(t *testing.T) {
+	dir := t.TempDir()
+	ws, err := workspace.Open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := session.Open(filepath.Join(dir, "data"), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "20260920-101010-aaaa"
+	if err := store.Touch(context.Background(), session.Meta{ID: id, Model: "m"}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := store.ExportMarkdown(context.Background(), id, &buf); err != nil {
+		t.Fatalf("export of a started session must not fail: %v", err)
+	}
+	if !strings.Contains(buf.String(), "no messages yet") {
+		t.Errorf("export = %q, want it to say the transcript is not written yet", buf.String())
+	}
+}
