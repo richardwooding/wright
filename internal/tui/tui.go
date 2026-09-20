@@ -240,6 +240,7 @@ func (m Model) View() tea.View {
 	if m.width == 0 {
 		v := tea.NewView("starting…")
 		v.AltScreen = !m.opts.Plain
+		v.WindowTitle = m.windowTitle()
 		return v
 	}
 	vpH, stripH := m.viewportHeight()
@@ -256,7 +257,7 @@ func (m Model) View() tea.View {
 	v := tea.NewView(strings.Join(parts, "\n"))
 	v.AltScreen = !m.opts.Plain
 	v.MouseMode = tea.MouseModeCellMotion
-	v.WindowTitle = "wright — " + filepath.Base(m.opts.WorkspaceRoot)
+	v.WindowTitle = m.windowTitle()
 	if m.ov == nil {
 		if c := m.comp.Cursor(); c != nil {
 			c.Y += vpH + stripH
@@ -264,6 +265,16 @@ func (m Model) View() tea.View {
 		}
 	}
 	return v
+}
+
+// windowTitle names the workspace and marks a run in progress, so a wright
+// left working in another tab says so from the window list.
+func (m Model) windowTitle() string {
+	title := "wright — " + filepath.Base(m.opts.WorkspaceRoot)
+	if m.running {
+		return theme.GlyphRunning + " " + title
+	}
+	return title
 }
 
 // viewportHeight is the transcript height after the fixed rows, and the

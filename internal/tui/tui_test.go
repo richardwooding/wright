@@ -595,6 +595,26 @@ func TestViewMetadata(t *testing.T) {
 	}
 }
 
+func TestWindowTitleSaysWhenWorking(t *testing.T) {
+	// Before the first WindowSizeMsg the view is a placeholder, but the
+	// window still deserves a name.
+	if title := tui.New(&fakeController{}, tui.Options{WorkspaceRoot: "/ws/wright"}).View().WindowTitle; title != "wright — wright" {
+		t.Errorf("title before the first resize = %q", title)
+	}
+	m := newModel(t, &fakeController{}, 80, 24)
+	if title := m.View().WindowTitle; title != "wright — wright" {
+		t.Errorf("idle title = %q", title)
+	}
+	m = event(m, engine.Event{Kind: engine.KindRunStarted})
+	if title := m.View().WindowTitle; title != "● wright — wright" {
+		t.Errorf("running title = %q, want the working mark", title)
+	}
+	m = event(m, engine.Event{Kind: engine.KindRunFinished, Finish: &engine.Finish{Steps: 1}})
+	if title := m.View().WindowTitle; title != "wright — wright" {
+		t.Errorf("title after the run = %q", title)
+	}
+}
+
 // promptWriter collects output and closes seen once marker has been printed,
 // so a scripted stdin can answer a prompt only after it has appeared.
 type promptWriter struct {
