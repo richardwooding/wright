@@ -92,6 +92,7 @@ type CLI struct {
 	Reasoning              string           `help:"Reasoning effort hint passed to the model (low, medium, high)."`
 	Plain                  bool             `env:"WRIGHT_PLAIN" help:"Plain output: no alternate screen, numbered prompts (implied by NO_COLOR, TERM=dumb or a non-TTY)."`
 	StrictInjection        bool             `help:"Treat prompt-injection signals in web/MCP content as needing approval."`
+	GitHubAuth             bool             `name:"github-auth" help:"Let shell commands that run with network access authenticate to GitHub as you: a token from gh, and git's credential helper pointed at it. Off by default; flag only, with no environment variable."`
 	DebugAddr              string           `name:"debug-addr" placeholder:"127.0.0.1:6060" help:"Serve diagnostics and pprof on this loopback address (off by default). Flag only: no environment variable and no settings key."`
 	Verbose                bool             `short:"v" help:"Verbose diagnostics on stderr."`
 	Version                kong.VersionFlag `short:"V" help:"Print version and exit."`
@@ -226,6 +227,7 @@ func (c *RunCmd) Run(g *Globals) error {
 		Verbose:                f.Verbose,
 		StrictInjection:        f.StrictInjection,
 		DebugAddr:              f.DebugAddr,
+		GitHubAuth:             f.GitHubAuth,
 		Version:                g.Build.Version,
 		Stdin:                  g.Stdin,
 		Stdout:                 g.Stdout,

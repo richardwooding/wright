@@ -35,9 +35,22 @@ func (b *builder) modelAndSession() error {
 	}
 	b.restoreMode()
 	if b.settings.RedactionEnabled() {
-		b.redactor = redact.New()
+		// The resolved GitHub token goes in as a literal. The default
+		// patterns already know the common gh spellings; this catches the
+		// ones they do not (a legacy hex PAT matches nothing by shape) and
+		// a token abutting other characters. It is a backstop, not a
+		// boundary: a base64 defeats every pattern, which is why the
+		// per-call network gate is the control that matters.
+		var opts []redact.Option
+		if b.githubToken != "" {
+			opts = append(opts, redact.WithExtra(redact.Literal("github-token", b.githubToken, 4)))
+		}
+		b.redactor = redact.New(opts...)
 	} else {
 		b.warn("secret redaction is OFF (settings.redaction=false)")
+		if b.githubToken != "" {
+			b.warn("github auth is on with redaction off: the token can appear verbatim in tool output and the audit log")
+		}
 	}
 	anchors := audit.OpenAnchors(b.layered.Paths.AuditAnchorDir())
 	if b.auditLog, err = audit.OpenAnchored(store.AuditPath(b.sessionID), b.redactor, anchors); err != nil {

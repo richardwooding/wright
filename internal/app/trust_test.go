@@ -254,3 +254,41 @@ func TestTrustSurvivesAPersistedGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestProjectSettingsCannotEnableGitHubAuth pins the one setting that is not
+// merely trust-gated but user-only. Trust is answered once for a whole
+// settings file, and the workspace-trust prompt promises "It does not allow:
+// network access"; a repository that could flip on credential injection by
+// being trusted once would contradict the assurance that prompt gives.
+func TestProjectSettingsCannotEnableGitHubAuth(t *testing.T) {
+	for _, file := range []string{"settings.json", "settings.local.json"} {
+		t.Run(file, func(t *testing.T) {
+			ws := isolate(t)
+			writeFile(t, filepath.Join(ws, ".wright", file), `{"github":{"auth":true}}`)
+			acceptProject(t, ws)
+			eff, err := app.LoadEffective(ws, os.Getenv)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !eff.Trusted {
+				t.Fatal("the project should be trusted for this test to mean anything")
+			}
+			if eff.Settings.GitHub.Auth {
+				t.Error("a trusted project turned on GitHub authentication")
+			}
+		})
+	}
+}
+
+// The user's own config is exactly where it belongs.
+func TestUserSettingsCanEnableGitHubAuth(t *testing.T) {
+	ws := isolate(t)
+	writeFile(t, filepath.Join(os.Getenv("WRIGHT_CONFIG_DIR"), "config.json"), `{"github":{"auth":true}}`)
+	eff, err := app.LoadEffective(ws, os.Getenv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !eff.Settings.GitHub.Auth {
+		t.Error("the user's own config did not turn it on")
+	}
+}

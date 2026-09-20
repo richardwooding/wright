@@ -33,6 +33,7 @@ type Settings struct {
 	Skills       Skills               `json:"skills,omitzero"`
 	Search       Search               `json:"search,omitzero"`
 	Git          Git                  `json:"git,omitzero"`
+	GitHub       GitHub               `json:"github,omitzero"`
 	Redaction    *bool                `json:"redaction,omitempty"`
 	Instructions Instructions         `json:"instructions,omitzero"`
 	Updates      Updates              `json:"updates,omitzero"`
@@ -107,6 +108,16 @@ type Git struct {
 	Attribution       *bool    `json:"attribution,omitempty"`
 	Trailer           string   `json:"trailer,omitempty"`
 	ProtectedBranches []string `json:"protectedBranches,omitempty"`
+}
+
+// GitHub configures the opt-in GitHub credential. It is deliberately its own
+// block rather than a key under Git: Git is about commits, this is about a
+// service and a credential.
+type GitHub struct {
+	// Auth lets commands that run with network access authenticate to
+	// GitHub as the user. Honoured from the user's own config only — see
+	// app.effectiveSettings.
+	Auth bool `json:"auth,omitempty"`
 }
 
 // Instructions lists project instruction files and the CLAUDE.md fallback
@@ -294,6 +305,7 @@ func Merge(dst *Settings, src Settings) {
 		dst.Git.Attribution = src.Git.Attribution
 	}
 	setIf(&dst.Git.Trailer, src.Git.Trailer)
+	dst.GitHub.Auth = dst.GitHub.Auth || src.GitHub.Auth
 	dst.Git.ProtectedBranches = appendDedupe(dst.Git.ProtectedBranches, src.Git.ProtectedBranches)
 	if src.Redaction != nil {
 		dst.Redaction = src.Redaction

@@ -49,6 +49,7 @@ func (b *builder) toolsAndEngine() error {
 		Fetch:       fetchClient(),
 		SpillDir:    b.spillDir(),
 		Cwd:         tools.NewCwd(b.cwd),
+		GitHub:      b.gitHub,
 		Todos:       todos,
 		Jobs:        b.jobs,
 		OnRedacted:  late.redacted,

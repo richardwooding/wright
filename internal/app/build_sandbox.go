@@ -41,6 +41,13 @@ func (b *builder) sandboxing() error {
 		ReadOnly:  expandAll(b.ws, b.settings.Sandbox.ExtraRO),
 		Network:   b.o.AllowNetwork || b.settings.Sandbox.AllowNetwork,
 	}
+	// A gh under $HOME is invisible inside the sandbox, so the credential
+	// helper that names it would fail with "command not found" a long way
+	// from its cause. Read-only: the agent may run it, never replace it.
+	if b.githubGhDir != "" {
+		b.spec.ReadOnly = append(b.spec.ReadOnly, b.githubGhDir)
+	}
+	b.gitHubWarnings(b.spec.Network)
 	// What the backend can enforce depends on this workspace, not just on
 	// the machine, so the limits are asked for with the spec in hand.
 	for _, w := range sandbox.SpecWarnings(backend, b.spec) {

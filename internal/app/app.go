@@ -63,6 +63,14 @@ type RunOptions struct {
 	MaxSteps  int
 	Reasoning string
 
+	// GitHubAuth lets commands that run with network access authenticate to
+	// GitHub as the user (--github-auth). Like DebugAddr it is a flag with
+	// no environment variable: an env var can be set by a .envrc, a direnv
+	// hook or a wrapper a repository ships, and this one hands over a
+	// credential. The settings equivalent is honoured from the user's own
+	// config only.
+	GitHubAuth bool
+
 	// DebugAddr turns on the diagnostics endpoint (--debug-addr). It is a
 	// flag only: there is no environment variable and no settings key, so a
 	// repository cannot open a port on the machine of anyone who runs
@@ -162,6 +170,7 @@ func Build(ctx context.Context, o RunOptions) (*Built, error) {
 	b := &builder{ctx: ctx, o: o}
 	for _, phase := range []func() error{
 		b.workspaceAndConfig,
+		b.githubAuth,
 		b.sandboxing,
 		b.permissions,
 		b.modelAndSession,

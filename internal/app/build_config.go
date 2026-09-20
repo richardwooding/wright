@@ -16,6 +16,7 @@ import (
 	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/diag"
 	"github.com/richardwooding/wright/internal/engine"
+	"github.com/richardwooding/wright/internal/ghauth"
 	"github.com/richardwooding/wright/internal/mcpclient"
 	"github.com/richardwooding/wright/internal/model"
 	"github.com/richardwooding/wright/internal/policy"
@@ -66,6 +67,19 @@ type builder struct {
 
 	eng  *engine.Engine
 	diag *diag.Server
+
+	// The GitHub credential, when this session asked for one. githubToken
+	// is the value and must never reach a warning or the audit log;
+	// githubSource is its origin's *name*, which may go anywhere.
+	githubToken  string
+	githubSource string
+	githubEnv    map[string]string
+	githubGhDir  string
+	// gitHub is the holder the bash tool reads per call. It exists whether
+	// or not a credential was resolved, so /github on can fill it later.
+	gitHub *tools.GitHubAuth
+	// ghResolve replaces the real resolver in tests.
+	ghResolve func() (ghauth.Result, error)
 }
 
 func (b *builder) warn(format string, args ...any) {
@@ -185,7 +199,7 @@ func (b *builder) projectFiles() string {
 // saying nothing, because the user reads it as an assurance.
 const untrustedNote = "its allow rules, permission mode, additional directories, env passthrough, " +
 	"MCP servers, sandbox settings (network, extra read-write and read-only mounts), " +
-	"model, skills directories, git trailer, instruction files, web-search provider and any \"redaction\": false are ignored; " +
+	"model, skills directories, git trailer, GitHub authentication, instruction files, web-search provider and any \"redaction\": false are ignored; " +
 	"its ask and deny rules and \"redaction\": true still apply"
 
 // trustState is what the two independent trust questions resolved to for
@@ -348,6 +362,13 @@ func effectiveSettings(l *config.Layered, user config.Settings, trusted bool, en
 		config.Merge(&s, tighteningOnly(l.Project))
 		config.Merge(&s, tighteningOnly(l.ProjectLocal))
 	}
+	// GitHub auth is the user's to grant and nobody else's. Trust is
+	// answered once for a whole settings file, and the workspace-trust
+	// prompt promises "It does not allow: network access"; a repository that
+	// could flip on credential injection by being trusted once would
+	// contradict the assurance that prompt gives. So it is taken from the
+	// user's own config even when the project is trusted.
+	s.GitHub = user.GitHub
 	if v := env("WRIGHT_MODEL"); v != "" {
 		s.Model.Default = v
 	}
