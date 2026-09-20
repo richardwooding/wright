@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The window (and process) title says when wright is working: `● wright — <dir>`
+  while a run is in flight, `wright — <dir>` when it is idle, so a session left
+  working in another tab is visible from the window list. The title is also set
+  before the first terminal size arrives, which previously left the window
+  unnamed for a frame.
+- A horizontal divider above **and** below the input box, separating the
+  composer from the transcript and from the status bar.
+- `shift+up` / `shift+down` scroll the transcript a line at a time — the
+  keyboard replacement for the wheel, which is off by default (below).
+  `pgup` / `pgdn` still page.
+- `alt+m` and `/mouse` toggle mouse tracking for the session.
+
+### Changed
+
+- **The mouse is off by default, so your terminal's own text selection works
+  again.** Mouse tracking was only ever used for wheel-scrolling the
+  transcript, and it cost click-and-drag selection and copy everywhere in the
+  window. Turn it back on for a session with `alt+m` or `/mouse`.
+- `/help`'s key table groups related keys on one row; the overlay is as tall as
+  the transcript and the two new divider rows made it shorter.
+
+### Fixed
+
+- An overlay on a very short terminal no longer pushes the composer and status
+  bar off the screen: the overlay box has a minimum height and was not clipped
+  to the space it was given.
+
 ## [0.1.3] - 2026-09-20
 
 From a user's session log: the sandbox's own restrictions were invisible to
