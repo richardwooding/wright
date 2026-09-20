@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-09-20
+
+Resuming a session now continues it: same permission mode, recorded when you
+change it rather than when a run happens to finish.
+
 ### Fixed
 
 - **Resuming a session lost its permission mode.** A session switched to plan
