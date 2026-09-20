@@ -248,3 +248,92 @@ func TestSessionIsVisibleBeforeTheFirstRunEnds(t *testing.T) {
 		t.Errorf("export = %q, want the session id", buf.String())
 	}
 }
+
+// TestTranscriptIsVisibleDuringTheRun is the second half of what a user hit:
+// a session existed but held no transcript until its run ended, so watching a
+// run make a dozen tool calls and then exporting it produced a bare header.
+//
+// It observes the store from inside the run — a tool that reads the session it
+// is running in — because the property is about what is on disk *while* the
+// run is still going, which nothing after the run can distinguish.
+func TestTranscriptIsVisibleDuringTheRun(t *testing.T) {
+	dir := t.TempDir()
+	ws, err := workspace.Open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := session.Open(filepath.Join(dir, ".data"), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "20260920-110000-abcd"
+
+	var seen []int // messages in the store at each tool call
+	peek := agentkit.Func("peek", "peek", func(ctx context.Context, _ struct{}) (string, error) {
+		msgs, err := store.Load(ctx, id)
+		if err != nil {
+			return "", err
+		}
+		seen = append(seen, len(msgs))
+		return "ok", nil
+	})
+
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.CallResp("c1", "peek", `{}`),
+		enginetest.CallResp("c2", "peek", `{}`),
+		enginetest.TextResp("done"),
+	}}
+	f := newFixture(t, client, func(o *engine.Options) {
+		o.Store, o.SessionID, o.Tools = store, id, agentkit.Toolset{peek}
+	})
+	if err := f.eng.Submit("go"); err != nil {
+		t.Fatal(err)
+	}
+	f.collect(t, func(ev engine.Event) {
+		if ev.Kind == engine.KindApprovalRequest {
+			f.eng.Reply(ev.Approval.ID, engine.Decision{Allow: true})
+		}
+	})
+
+	if len(seen) != 2 {
+		t.Fatalf("the peek tool ran %d times, want 2", len(seen))
+	}
+	// The first call is inside step one, which has not completed, so nothing
+	// of this run is stored yet. The second is inside step two, by which time
+	// step one has been recorded.
+	if seen[0] != 0 {
+		t.Errorf("store held %d messages inside the first step, want 0", seen[0])
+	}
+	if seen[1] == 0 {
+		t.Error("the store was still empty inside the second step: the first step was not recorded")
+	}
+
+	// And the finished run recorded everything exactly once.
+	msgs, err := store.Load(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	counts := map[string]int{}
+	for _, m := range msgs {
+		counts[messageKey(m)]++
+	}
+	for k, n := range counts {
+		if n > 1 {
+			t.Errorf("message %q stored %d times", k, n)
+		}
+	}
+}
+
+// messageKey identifies a message for duplicate detection. Text alone is not
+// enough: an assistant message carrying tool calls has none, and so does the
+// tool message answering it.
+func messageKey(m core.Message) string {
+	key := string(m.Role) + "|" + m.Text()
+	for _, c := range m.ToolCalls() {
+		key += "|call:" + c.ID
+	}
+	for _, r := range m.ToolResults() {
+		key += "|result:" + r.CallID
+	}
+	return key
+}

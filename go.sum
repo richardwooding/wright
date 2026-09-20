@@ -82,10 +82,10 @@ github.com/muesli/cancelreader v0.2.2 h1:3I4Kt4BQjOR54NavqnDogx/MIoWBFa0StPA8ELU
 github.com/muesli/cancelreader v0.2.2/go.mod h1:3XuTXfFS2VjM+HTLZY9Ak0l6eUKfijIfMUZ4EgX0QYo=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
-github.com/richardwooding/agentkit v0.3.0 h1:JU4hia23XH4rPWO0iiC4DvlsQ+90WJ+OJJHz9TavckE=
-github.com/richardwooding/agentkit v0.3.0/go.mod h1:miEcal/Pvh+zYGG/ZZD6vYTBWVQb5JOm69qjJTLoZxk=
-github.com/richardwooding/agentkit/mcp v0.3.0 h1:MiiqNrKNLbzGTs/nZIoiPm5D+2BdoMG9WpPg/6If/ys=
-github.com/richardwooding/agentkit/mcp v0.3.0/go.mod h1:qi4pDQP5bGOl0qZQti872KwKqSRO0TsvbekYPasBm40=
+github.com/richardwooding/agentkit v0.4.0 h1:EMX822tf+70aNUfTDDizCWJFRrd75i6Sw/2sKuKK//I=
+github.com/richardwooding/agentkit v0.4.0/go.mod h1:miEcal/Pvh+zYGG/ZZD6vYTBWVQb5JOm69qjJTLoZxk=
+github.com/richardwooding/agentkit/mcp v0.4.0 h1:/SyF5vVa7y5t2Zo0uR3mvqOhjGOJ+TsJKzSyUJHQY2A=
+github.com/richardwooding/agentkit/mcp v0.4.0/go.mod h1:bGeaUGsRxrY1/g5sFxOj+YxSsUTKFYXEVqqoW7Ejo+g=
 github.com/richardwooding/llmkit v0.3.0 h1:1gpxFqNhXGcjxVUvxn/tnVkQKA7LK3q6eDb9PuQFIwo=
 github.com/richardwooding/llmkit v0.3.0/go.mod h1:HkivIVVayrt98U1sbwytl3YMenoZya8K7P4gYZEgLv8=
 github.com/richardwooding/ssrfguard v0.2.2 h1:/EtPjdiMUkA1EKTgbaCrumgiDkul5bEi77A57KxJJz8=

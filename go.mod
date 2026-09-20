@@ -15,8 +15,8 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/landlock-lsm/go-landlock v0.10.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/richardwooding/agentkit v0.3.0
-	github.com/richardwooding/agentkit/mcp v0.3.0
+	github.com/richardwooding/agentkit v0.4.0
+	github.com/richardwooding/agentkit/mcp v0.4.0
 	github.com/richardwooding/llmkit v0.3.0
 	github.com/richardwooding/ssrfguard v0.2.2
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06

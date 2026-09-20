@@ -64,10 +64,10 @@ func (s *Store) ExportMarkdown(ctx context.Context, id string, w io.Writer) erro
 		fmt.Fprintf(bw, "_%s_\n\n", decisions.note)
 	}
 	if len(msgs) == 0 {
-		// A session exists from the moment it starts, but agentkit writes
-		// the transcript when a run finishes, so exporting mid-run finds
-		// nothing. A bare header reads as lost data; say which it is.
-		fmt.Fprint(bw, "_This session has no messages yet: the transcript is written when a run finishes._\n")
+		// A session exists from the moment it starts, and its transcript is
+		// written a step at a time, so this is the window before the first
+		// step completes. A bare header reads as lost data; say which it is.
+		fmt.Fprint(bw, "_This session has no messages yet: its first step has not finished._\n")
 	}
 	for _, m := range msgs {
 		writeMessage(bw, m, &decisions)

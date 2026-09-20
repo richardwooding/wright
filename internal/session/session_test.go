@@ -545,6 +545,6 @@ func TestExportMidRunSaysSoRatherThanLookingEmpty(t *testing.T) {
 		t.Fatalf("export of a started session must not fail: %v", err)
 	}
 	if !strings.Contains(buf.String(), "no messages yet") {
-		t.Errorf("export = %q, want it to say the transcript is not written yet", buf.String())
+		t.Errorf("export = %q, want it to say the first step has not finished", buf.String())
 	}
 }

@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **A session's transcript is now written as the run happens**, one completed
+  step at a time, rather than all at once when the run ends (agentkit v0.4.0).
+  `/export` during a long run shows the tool calls that have finished instead
+  of a bare header, `/sessions` shows the session with its title from the
+  first turn, and a run that is interrupted keeps the steps it completed. Only
+  the window before the first step finishes is empty, and the export says so.
+
 ## [0.2.1] - 2026-09-20
 
 Three bugs from a real v0.2.0 session, all of them wright contradicting

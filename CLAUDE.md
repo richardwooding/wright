@@ -493,11 +493,13 @@ client to HTTP MCP transports).
   an offer that cannot take effect is worse than none — the overlay would
   invite "always allow" and then keep asking.
 - **A session exists from the moment it starts, not when a run ends.**
-  `engine.New` writes the sidecar, because both it and the transcript used to
-  be written only by `touch` at the end of a run: for the whole of the first
-  run `/sessions` listed nothing and `/export` said "no such session" about
-  the id in the status bar. The transcript itself is still agentkit's to
-  write at run end, so a mid-run export says so rather than emitting a bare
+  `engine.New` writes the sidecar, because it used to be written only by
+  `touch` at the end of a run: for the whole of the first run `/sessions`
+  listed nothing and `/export` said "no such session" about the id in the
+  status bar. The transcript is agentkit's to write and lands one completed
+  step at a time (agentkit v0.4.0's `run.flush`), so `/export` during a run
+  shows the steps that have finished; only the window before the first step
+  completes is empty, and the export says so rather than emitting a bare
   header.
 - **Skills are text, not capability.** `skills.Use` adds the catalog to the
   prompt and registers `skill`/`skill_file`, which only return text and
