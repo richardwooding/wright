@@ -250,6 +250,13 @@ func (a *analyzer) walkCall(call *syntax.CallExpr, redirs []*syntax.Redirect) {
 		c.Reason = joinReason(c.Reason, "overrides "+envDanger)
 	}
 	a.redirects(redirs, &c)
+	// A redirect gives an otherwise inert command a path to act on, and it
+	// is attached here rather than by the classifier, so the decision to
+	// forgive its dynamic argument has to be revisited once it is known:
+	// `echo "$X"` cannot act on the value, `echo "$X" > f` can.
+	if c.dynamicArgs && (len(c.Writes) > 0 || len(c.Reads) > 0) {
+		c.Dynamic = true
+	}
 	a.add(c)
 }
 

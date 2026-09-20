@@ -299,7 +299,15 @@ func vals(flags ...string) map[string]int {
 }
 
 // noFiles is for commands whose positional arguments are not files.
-func noFiles(a *analyzer, name string, args []word) result { return safe("") }
+// noFiles is the handler for commands that take no file operands at all, so
+// nothing they are handed can become a path. That is what makes a dynamic
+// argument to one of them harmless: `echo "exit=$?"` cannot act on the value.
+// Contrast a reader such as `ls $(…)`, which does take file operands — it
+// simply cannot *declare* the read when the word is dynamic, which is exactly
+// when the script must stay opaque.
+func noFiles(a *analyzer, name string, args []word) result {
+	return result{class: SafeRead, inert: true}
+}
 
 // readerSpecs are the readers whose options need inspecting: a value that
 // looks like a file, a file they write, or a program they run.

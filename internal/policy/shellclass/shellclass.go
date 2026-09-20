@@ -58,6 +58,9 @@ type Command struct {
 	Reason string
 	// Dynamic is true when any argument depends on runtime expansion.
 	Dynamic bool
+	// dynamicArgs records that an argument was dynamic but the command was
+	// inert, so walkCall can revisit that once redirects are attached.
+	dynamicArgs bool
 	// Unrecognised is true when the program is not in the command table.
 	// Unlike Dynamic this does not make the script opaque: the argv is
 	// known, so a rule naming the program can cover the command.

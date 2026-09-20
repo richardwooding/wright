@@ -15,6 +15,9 @@ type result struct {
 	network  bool
 	installs bool
 	unknown  bool
+	// inert marks a command that takes no file operands, so a dynamic
+	// argument to it cannot become a path, a command or a request.
+	inert bool
 	// unrecognised marks a command whose argv is fully known but whose
 	// program is not in the table. That is a weaker fact than unknown and
 	// must not be confused with it: the script is perfectly legible, so a
@@ -38,6 +41,18 @@ var (
 	binDirs           = []string{"/usr/bin", "/bin", "/usr/local/bin", "/usr/sbin", "/sbin", "/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/local/go/bin", "/snap/bin"}
 )
 
+// inertResult reports whether a command cannot act on its arguments: a safe
+// read that declares no path, needs no network, installs nothing and is not
+// already opaque or unrecognised. echo, printf, true and pwd are the point —
+// what they are handed cannot become a command, a path or a request, so not
+// knowing its value costs nothing. A redirect is what keeps this precise
+// rather than a list of trusted names: `echo "$X" > f` declares the write and
+// so is not inert.
+func inertResult(r result) bool {
+	return r.inert && r.class == SafeRead && len(r.reads) == 0 && len(r.writes) == 0 &&
+		!r.network && !r.installs && !r.unknown && !r.unrecognised && r.hardDeny == ""
+}
+
 // classifyWords turns an expanded argv into a Command via the handler chain.
 func (a *analyzer) classifyWords(words []word) Command {
 	argv := make([]string, len(words))
@@ -46,10 +61,24 @@ func (a *analyzer) classifyWords(words []word) Command {
 		argv[i] = w.text
 		dynamic = dynamic || w.dynamic
 	}
-	c := Command{Argv: argv, Dynamic: dynamic}
+	c := Command{Argv: argv}
 	r := a.classify(words)
 	c.Class, c.Reason, c.Network, c.Installs = r.class, r.reason, r.network, r.installs
 	c.Writes, c.Reads = r.writes, r.reads
+	// A dynamic *argument* only makes the script unreadable when the command
+	// could act on the value. `echo "exit=$?"` is an idiom the agent writes
+	// constantly, and treating it as opaque made the whole script — the
+	// build and the test run in front of it — permanently un-allowable. A
+	// dynamic command *name* is a different matter and is already opaque by
+	// the time we get here (commandName), as is any command that reads,
+	// writes, reaches the network or is itself a shell.
+	if dynamic {
+		if inertResult(r) {
+			c.dynamicArgs = true // walkCall revisits this once redirects are known
+		} else {
+			c.Dynamic = true
+		}
+	}
 	if r.unknown {
 		c.Dynamic = true
 	}

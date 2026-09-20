@@ -795,3 +795,45 @@ func TestOpaqueVersusUnrecognised(t *testing.T) {
 		})
 	}
 }
+
+// TestDynamicArgumentOnlyPoisonsWhatCanActOnIt pins the narrowest possible
+// reading of "the analyser cannot see this".
+//
+// Any dynamic word used to make the whole script opaque, and an opaque script
+// matches no allow rule ever. That meant `echo "exit=$?"` — an idiom the agent
+// appends constantly — silently cost a rule for the build and the test run in
+// front of it. A command that takes no file operands cannot act on the value
+// it is handed, so not knowing that value costs nothing. Everything that could
+// turn a dynamic word into a path, a command or a request stays opaque.
+func TestDynamicArgumentOnlyPoisonsWhatCanActOnIt(t *testing.T) {
+	tests := []struct {
+		name   string
+		cmd    string
+		opaque bool
+	}{
+		// Cannot act on the value.
+		{name: "echoing the exit code", cmd: `echo "exit=$?"`},
+		{name: "printf", cmd: `printf '%s\n' "$x"`},
+		{name: "the real shape from the session", cmd: `cd d && ./bin/t --all 2>&1 | tail -70; echo "exit=$?"`},
+
+		// Could act on the value.
+		{name: "a reader with a dynamic path", cmd: "ls $(echo x)", opaque: true},
+		{name: "cat", cmd: "cat $FILE", opaque: true},
+		{name: "rm", cmd: "rm $TARGET", opaque: true},
+		{name: "a dynamic command name", cmd: "$TOOL --flag", opaque: true},
+		{name: "a shell", cmd: `sh -c "$CMD"`, opaque: true},
+		{name: "a dynamic wrapper argument", cmd: "timeout $N ./bin/t", opaque: true},
+		{name: "a redirect makes echo non-inert", cmd: `echo "$X" > f`, opaque: true},
+		{name: "a PATH override", cmd: "export PATH=$X", opaque: true},
+		{name: "a dangerous env prefix", cmd: "GOFLAGS=$F go build ./...", opaque: true},
+		{name: "network with a dynamic argument", cmd: "curl $URL", opaque: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shellclass.Analyze(tt.cmd, fakeWS{})
+			if got.Unknown != tt.opaque {
+				t.Errorf("Unknown = %v, want %v (%s)", got.Unknown, tt.opaque, got.Summary())
+			}
+		})
+	}
+}
