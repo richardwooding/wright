@@ -60,6 +60,12 @@ type Options struct {
 	// or with the error, so the UI can say so. It runs on the handler's
 	// goroutine and must not block.
 	OnDump func(path string, err error)
+	// Input delivers a prompt that arrived on the endpoint. Like Source it
+	// is called on an HTTP goroutine and **must not block**: it hands the
+	// text to something else and returns. A nil hook leaves the route
+	// unregistered, so a session that cannot accept prompts does not
+	// advertise that it might.
+	Input func(Prompt) error
 }
 
 // Server is a running diagnostics endpoint plus its signal handler.
@@ -73,6 +79,16 @@ type Server struct {
 	// UI while Close can run from the session shutting down.
 	mu   sync.Mutex
 	last string // path of the most recent dump
+	// The input side. armed and token are the whole of the permission: a
+	// bool and a string, so this package still knows nothing about engines
+	// or sessions and a handler never has to ask the thing being debugged
+	// whether it may proceed.
+	armed    bool
+	token    string
+	accepted int
+	refused  int
+	lastAt   time.Time
+	lastErr  string
 }
 
 // ErrNotLoopback is returned for a debug address that is not a loopback IP.
@@ -99,7 +115,16 @@ func Open(o Options) (*Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("diag: listen on %s: %w", o.Addr, err)
 		}
-		srv := &http.Server{Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}
+		srv := &http.Server{
+			Handler:           s.routes(),
+			ReadHeaderTimeout: 5 * time.Second,
+			ReadTimeout:       15 * time.Second,
+			IdleTimeout:       60 * time.Second,
+			// WriteTimeout is deliberately unset: /debug/pprof/profile and
+			// /debug/pprof/trace legitimately write for as long as the
+			// caller asked for, and a timeout would truncate a profile with
+			// no error at all.
+		}
 		s.ln, s.srv = ln, srv
 		// srv and ln are captured, not read from s: Close clears those
 		// fields, and a Close that lands before this goroutine is first

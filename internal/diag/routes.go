@@ -13,14 +13,26 @@ import (
 // what is listed and nothing a library happened to register globally.
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", s.index)
-	mux.HandleFunc("/debug/state", s.state)
-	mux.HandleFunc("/debug/pprof/", pprof.Index)
-	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
-	return mux
+	// Method-qualified patterns, so anything else gets a 405 with an Allow
+	// header for free. They used to be bare paths, which meant every route
+	// answered a POST as readily as a GET.
+	mux.HandleFunc("GET /{$}", s.index)
+	mux.HandleFunc("GET /debug/state", s.state)
+	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+	mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	// pprof's symbol handler documents POST as well as GET; a blanket
+	// GET-only rule would break `go tool pprof`.
+	mux.HandleFunc("POST /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+	if s.opts.Input != nil {
+		// Registered now because a mux cannot gain a route once it is
+		// serving; whether it *accepts* anything is decided per request by
+		// the armed flag.
+		mux.HandleFunc("POST /debug/input", s.input)
+	}
+	return s.guard(mux)
 }
 
 // endpoints is what the index lists, in the order a person needs them.
@@ -33,15 +45,19 @@ var endpoints = []struct{ path, what string }{
 	{"/debug/pprof/trace?seconds=5", "5 seconds of execution trace"},
 }
 
-func (s *Server) index(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
-		return
-	}
+func (s *Server) index(w http.ResponseWriter, _ *http.Request) {
 	var b strings.Builder
 	b.WriteString("wright diagnostics\n\n")
 	for _, e := range endpoints {
 		fmt.Fprintf(&b, "  %-32s %s\n", e.path, e.what)
+	}
+	if st := s.InputStatus(); st.Available {
+		b.WriteString("\n")
+		if st.Armed {
+			fmt.Fprintf(&b, "  %-32s %s\n", "POST /debug/input", "send this session a prompt (needs the token /debug prints)")
+		} else {
+			fmt.Fprintf(&b, "  %-32s %s\n", "POST /debug/input", "refused: run `/debug inject on` in the session to allow prompts")
+		}
 	}
 	b.WriteString("\nThis endpoint is local to this machine and serves this one session.\n")
 	writeText(w, b.String())
