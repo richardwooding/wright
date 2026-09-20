@@ -109,6 +109,14 @@ func runHeadless(ctx context.Context, o RunOptions, stdin string) (int, error) {
 
 func runInteractive(ctx context.Context, o RunOptions, interactive Interactive) (int, error) {
 	b, err := Build(ctx, o)
+	if errors.Is(err, ErrWorkspaceNotTrusted) {
+		// The user answered the startup question with "no". Nothing was
+		// started and no session exists; say so plainly and exit with the
+		// code that means exactly this, not a failure.
+		fmt.Fprintf(o.Stderr, "wright: %s is not trusted, so no session was started.\n", cwdOf(o))
+		fmt.Fprintln(o.Stderr, "wright: start it again and answer yes, pass --trust, or run `wright trust accept` to trust this directory.")
+		return ExitTrustDeclined, nil
+	}
 	if err != nil {
 		return headless.ExitError, err
 	}
@@ -127,6 +135,15 @@ func runInteractive(ctx context.Context, o RunOptions, interactive Interactive) 
 		return headless.ExitError, closeErr
 	}
 	return headless.ExitOK, nil
+}
+
+// cwdOf names the directory a run was refused for, without a workspace to
+// ask (Build never got that far).
+func cwdOf(o RunOptions) string {
+	if dir, err := resolveCwd(o.Cwd); err == nil {
+		return dir
+	}
+	return "this directory"
 }
 
 func (b *Built) interactiveDeps() InteractiveDeps {

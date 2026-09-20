@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	akskills "github.com/richardwooding/agentkit/skills"
 
@@ -35,8 +36,11 @@ type builder struct {
 	layered  *config.Layered
 	user     config.Settings // raw user layer, for rule attribution
 	settings config.Settings // effective, trust-gated
-	trusted  bool
-	warnings []string
+	trusted  bool            // the project's settings files were accepted
+	// workspaceTrusted is the other, independent acceptance: the user
+	// trusts this directory. It is never set for a headless run.
+	workspaceTrusted bool
+	warnings         []string
 
 	backend sandbox.Backend
 	spec    sandbox.Spec
@@ -97,7 +101,9 @@ func (b *builder) workspaceAndConfig() error {
 	}
 	b.ws, b.layered, b.user = ws, l, user
 	b.warnBrokenLayers()
-	b.trusted = b.checkTrust()
+	if err := b.resolveTrust(); err != nil {
+		return err
+	}
 	b.settings = effectiveSettings(l, user, b.trusted, b.env)
 	if extra := b.settings.Permissions.AdditionalDirs; b.trusted && len(extra) > 0 {
 		dirs := append(append([]string(nil), b.o.AddDirs...), expandAll(ws, extra)...)
@@ -177,35 +183,149 @@ const untrustedNote = "its allow rules, permission mode, additional directories,
 	"model, skills directories, git trailer, instruction files and any \"redaction\": false are ignored; " +
 	"its ask and deny rules and \"redaction\": true still apply"
 
-// checkTrust decides whether the project layers apply. With no project
-// settings file at all there is nothing to trust; as soon as one exists —
-// shared or local — the stored hash must match. An interactive terminal may
-// accept it now through Confirm, everything else runs with the project
-// layers inert and says so.
-func (b *builder) checkTrust() bool {
-	hash, err := ProjectHash(b.layered.Paths)
-	if err != nil {
-		b.warn("project settings unreadable (%v); treating as untrusted", err)
-		return false
-	}
-	if hash == "" {
-		return true
-	}
-	root := b.ws.Root()
-	store := trust.Open(b.layered.Paths.TrustFile())
-	if store.ProjectTrusted(root, hash) {
-		return true
-	}
-	if b.o.Confirm != nil && !b.headless() {
-		if b.o.Confirm(TrustPrompt(b.projectFiles(), b.layered.Project, b.layered.ProjectLocal)) {
-			if err := store.AcceptProject(root, hash); err != nil {
-				b.warn("could not record project trust: %v", err)
-			}
-			return true
+// trustState is what the two independent trust questions resolved to for
+// this run. They are answered together because a first run in a directory
+// that also ships settings would otherwise ask twice.
+type trustState struct {
+	store *trust.Store
+	root  string
+	// hash is the project settings hash to accept, set only when the
+	// settings are pending (askSettings).
+	hash        string
+	askSettings bool // the settings exist and have not been accepted
+	broken      bool // the settings could not be hashed at all
+	workspace   bool // the directory itself is accepted
+}
+
+// resolveTrust answers both trust questions with at most one prompt.
+//
+// They are separate propositions and stay separate in trust.json: the
+// settings question is "these exact bytes of .wright/settings*.json may
+// widen what the agent does", the workspace question is "this directory is
+// mine to work in". Accepting one never answers the other — but a first run
+// in a directory that has both pending asks once, and the fused prompt
+// states both.
+//
+// Declining the workspace ends the run (ErrWorkspaceNotTrusted): there is no
+// half-trusted interactive session to fall back to, and starting one anyway
+// would teach the user that the question is decorative.
+func (b *builder) resolveTrust() error {
+	st := b.pendingTrust()
+	// Headless (-p, or any non-terminal run) behaves exactly as it did
+	// before workspace trust existed: it never prompts, never exits over
+	// trust, and never takes the baseline — not even in a directory the
+	// user accepted interactively. A script's permissions must not depend
+	// on what someone once answered in a terminal.
+	if !b.headless() {
+		if err := b.askTrust(&st); err != nil {
+			return err
 		}
 	}
-	b.warn("%s is not trusted yet: %s (run /trust to review and accept it)", b.projectFiles(), untrustedNote)
-	return false
+	b.trusted = !st.askSettings && !st.broken
+	b.workspaceTrusted = st.workspace && !b.headless()
+	if st.askSettings {
+		b.warn("%s is not trusted yet: %s (run /trust to review and accept it)", b.projectFiles(), untrustedNote)
+	}
+	return nil
+}
+
+// pendingTrust reads what has already been accepted for this workspace.
+func (b *builder) pendingTrust() trustState {
+	st := trustState{store: trust.Open(b.layered.Paths.TrustFile()), root: b.ws.Root()}
+	hash, err := ProjectHash(b.layered.Paths)
+	switch {
+	case err != nil:
+		b.warn("project settings unreadable (%v); treating as untrusted", err)
+		st.broken = true
+	case hash == "":
+		// No project settings file at all: nothing to trust.
+	case st.store.ProjectTrusted(st.root, hash):
+		// The stored hash still matches these bytes.
+	default:
+		st.hash, st.askSettings = hash, true
+	}
+	st.workspace = st.store.WorkspaceTrusted(st.root)
+	return st
+}
+
+// askTrust puts the pending questions to the user. --trust answers the
+// workspace one in advance, for a wrapper script that starts a session in a
+// directory it already trusts; it never answers the settings question, which
+// is about content nobody has read.
+func (b *builder) askTrust(st *trustState) error {
+	if !st.workspace && b.o.TrustWorkspace {
+		b.acceptWorkspace(st)
+	}
+	if b.o.Confirm == nil {
+		return nil // nothing can be asked; the run continues with no baseline
+	}
+	if !st.workspace {
+		if !b.o.Confirm(b.workspaceQuestion(st.askSettings)) {
+			return ErrWorkspaceNotTrusted
+		}
+		b.acceptWorkspace(st)
+		if st.askSettings {
+			b.acceptSettings(st) // the fused prompt asked for both
+		}
+		return nil
+	}
+	if st.askSettings && b.o.Confirm(TrustPrompt(b.projectFiles(), b.layered.Project, b.layered.ProjectLocal)) {
+		b.acceptSettings(st)
+	}
+	return nil
+}
+
+// workspaceQuestion renders the startup question, fused with the settings
+// question when that one is pending too.
+func (b *builder) workspaceQuestion(withSettings bool) string {
+	settings := ""
+	if withSettings {
+		settings = trustPromptBody(b.projectFiles(), b.layered.Project, b.layered.ProjectLocal)
+	}
+	return WorkspaceTrustPrompt(b.ws.Root(), settings)
+}
+
+func (b *builder) acceptWorkspace(st *trustState) {
+	if err := st.store.AcceptWorkspace(st.root); err != nil {
+		b.warn("could not record workspace trust: %v", err)
+	}
+	st.workspace = true
+}
+
+func (b *builder) acceptSettings(st *trustState) {
+	if err := st.store.AcceptProject(st.root, st.hash); err != nil {
+		b.warn("could not record project trust: %v", err)
+	}
+	st.askSettings = false
+}
+
+// WorkspaceTrustPrompt is the startup question for a directory the user has
+// not accepted yet. It says what trust grants and — just as important — what
+// it does not: a user who reads it as "wright may now do as it likes" has
+// been misled by the prompt, not by the code. settings is TrustPromptBody
+// when the project also ships settings nobody has accepted, so one question
+// covers both; it is empty otherwise.
+func WorkspaceTrustPrompt(root, settings string) string {
+	s := "wright has not been trusted with " + root + " yet.\n" +
+		"Trusting this directory lets wright, without asking each time:\n" +
+		"  read the files in it\n" +
+		"  create and edit files in it\n" +
+		"It does not allow:\n" +
+		"  running shell commands — every command is still approved one at a time\n" +
+		"  network access, or reading or writing anything outside this directory\n" +
+		"  touching .git, .wright, ignored files, or files that look like secrets\n"
+	if settings != "" {
+		s += "\nThis directory also ships settings that have not been accepted.\n" + settings
+		return s + "Trust this directory and its settings? (answering no exits without starting a session)"
+	}
+	return s + "Trust this directory? (answering no exits without starting a session)"
+}
+
+// TrustPrompt renders what accepting a project's settings would enable, for
+// the trust question (interactive Confirm now, the TUI's /trust later). Both
+// project layers are shown: they are trusted, and dropped, together.
+func TrustPrompt(path string, layers ...config.Settings) string {
+	return trustPromptBody(path, layers...) + "Trust this project's settings?"
 }
 
 // effectiveSettings rebuilds the merged settings with *both* project layers
@@ -247,10 +367,9 @@ func tighteningOnly(p config.Settings) config.Settings {
 	return out
 }
 
-// TrustPrompt renders what accepting a project's settings would enable, for
-// the trust question (interactive Confirm now, the TUI's /trust later). Both
-// project layers are shown: they are trusted, and dropped, together.
-func TrustPrompt(path string, layers ...config.Settings) string {
+// trustPromptBody is TrustPrompt without its closing question, so the
+// workspace prompt can carry the same facts when the two are fused.
+func trustPromptBody(path string, layers ...config.Settings) string {
 	var p config.Settings
 	for _, l := range layers {
 		config.Merge(&p, l)
@@ -286,7 +405,90 @@ func TrustPrompt(path string, layers ...config.Settings) string {
 	if n := len(p.MCPServers); n > 0 {
 		s += fmt.Sprintf("  configure %d MCP server(s)\n", n)
 	}
-	return s + "Trust this project's settings?"
+	return s
+}
+
+// TrustEntry is one accepted directory, as `wright trust list` shows it.
+// The two acceptances are reported separately because they are separate:
+// Workspace is "edits here do not ask", Settings is "these settings files
+// were read and accepted".
+type TrustEntry struct {
+	Root      string
+	Workspace bool
+	Settings  bool
+	// Accepted is when the settings were accepted, zero when they never
+	// were; WorkspaceAccepted is when the directory was.
+	Accepted          time.Time
+	WorkspaceAccepted time.Time
+}
+
+// ListTrust reports every directory with a trust record, sorted by path.
+func ListTrust(cwd string) ([]TrustEntry, error) {
+	store, err := trustStore(cwd)
+	if err != nil {
+		return nil, err
+	}
+	records := store.Projects()
+	out := make([]TrustEntry, 0, len(records))
+	for _, r := range records {
+		out = append(out, TrustEntry{
+			Root:              r.Root,
+			Workspace:         !r.WorkspaceAccepted.IsZero(),
+			Settings:          r.SettingsHash != "",
+			Accepted:          r.Accepted,
+			WorkspaceAccepted: r.WorkspaceAccepted,
+		})
+	}
+	return out, nil
+}
+
+// AcceptWorkspaceTrust records a directory as trusted without starting a
+// session — the scripted equivalent of answering yes at startup. It accepts
+// the directory only: settings files are content someone has to read, so
+// they keep their own prompt. It returns the path as it was recorded.
+func AcceptWorkspaceTrust(cwd string) (string, error) {
+	dir, err := resolveCwd(cwd)
+	if err != nil {
+		return "", err
+	}
+	store, err := trustStore(dir)
+	if err != nil {
+		return "", err
+	}
+	if err := store.AcceptWorkspace(dir); err != nil {
+		return "", err
+	}
+	if r, ok := store.Project(dir); ok {
+		return r.Root, nil
+	}
+	return dir, nil
+}
+
+// ForgetTrust removes a directory's record, revoking both acceptances: the
+// workspace baseline and any accepted settings hash.
+func ForgetTrust(cwd string) (string, error) {
+	dir, err := resolveCwd(cwd)
+	if err != nil {
+		return "", err
+	}
+	store, err := trustStore(dir)
+	if err != nil {
+		return "", err
+	}
+	root := dir
+	if r, ok := store.Project(dir); ok {
+		root = r.Root
+	}
+	return root, store.ForgetProject(dir)
+}
+
+// trustStore opens trust.json for the config directory cwd resolves to.
+func trustStore(cwd string) (*trust.Store, error) {
+	dir, err := resolveCwd(cwd)
+	if err != nil {
+		return nil, err
+	}
+	return trust.Open(config.DefaultPaths(dir).TrustFile()), nil
 }
 
 // readLayer decodes one settings file; a missing file is an empty layer.

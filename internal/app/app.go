@@ -41,6 +41,11 @@ type RunOptions struct {
 
 	Bypass                 bool // --bypass-permissions
 	AllowUnsandboxedBypass bool // --allow-unsandboxed-bypass
+	// TrustWorkspace answers the startup trust question in advance
+	// (--trust), for a wrapper script that starts a session in a directory
+	// it already trusts. It is ignored by a headless run, which never asks
+	// the question and never takes the baseline.
+	TrustWorkspace bool
 
 	Resume   string // session ID to continue
 	Continue bool   // continue the most recent session
@@ -88,6 +93,9 @@ type Built struct {
 	Choice    model.Choice
 	SessionID string
 	Trusted   bool // project settings were accepted (or there are none)
+	// WorkspaceTrusted is the other acceptance: the user trusts this
+	// directory, so edits inside it do not prompt. Always false headless.
+	WorkspaceTrusted bool
 	// Skills is the merged skill set the agent was given (possibly empty).
 	Skills *akskills.Set
 	// MCP holds the connected servers and their tools; Close ends them.

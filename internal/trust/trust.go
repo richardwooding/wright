@@ -38,7 +38,10 @@ type Record struct {
 	// WorkspaceAccepted is when the user accepted the directory itself. It
 	// survives a settings change, because the settings were never what it
 	// vouched for.
-	WorkspaceAccepted time.Time `json:"workspaceAccepted,omitempty"`
+	// omitzero, not omitempty: a struct is never "empty", so omitempty
+	// would write a null-looking zero time for every record that has only
+	// ever accepted settings.
+	WorkspaceAccepted time.Time `json:"workspaceAccepted,omitzero"`
 }
 
 // ServerRecord is an accepted MCP server. The hashes pin exactly what was

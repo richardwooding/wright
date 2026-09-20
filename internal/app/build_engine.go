@@ -173,7 +173,8 @@ func (b *builder) built() *Built {
 	return &Built{
 		Engine: eng, Store: b.store, WS: b.ws, Layered: b.layered, Settings: b.settings,
 		Warnings: b.warnings, Sandbox: b.backend, Choice: b.choice, SessionID: b.sessionID,
-		Trusted: b.trusted, Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o,
+		Trusted: b.trusted, WorkspaceTrusted: b.workspaceTrusted,
+		Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o,
 		// Closing the engine ends the run; closing the MCP set terminates
 		// the server processes it started.
 		Close: func() error {
