@@ -96,6 +96,13 @@ All notable changes to this project are documented here. The format follows
   `ask_user` whether or not they were registered. A model told a tool exists
   calls it and reads "unknown tool"; the guidance is now filtered to the
   toolset it was built beside.
+- **auto-edit mode did nothing.** The builtin `edit_file($WORKSPACE/**)` ask
+  rule decided one step above the mode table, so with the builtin layer
+  loaded — which is to say, in every real run — `--mode auto-edit` asked for
+  every edit exactly like default mode, while the README's mode table said it
+  allowed them. Edits inside the workspace now run without asking, and the
+  sensitive-file, ignored-file, outside-the-workspace, `.git`, `.wright` and
+  secret floors all still fire, as does any ask rule you wrote yourself.
 - An overlay on a very short terminal no longer pushes the composer and status
   bar off the screen: the overlay box has a minimum height and was not clipped
   to the space it was given.

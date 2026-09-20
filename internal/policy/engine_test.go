@@ -208,6 +208,21 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "write auto-edit allows", mode: policy.ModeAutoEdit, req: f.write("main.go"), want: policy.Allow},
 		{name: "write auto-edit ignored asks", mode: policy.ModeAutoEdit, req: f.write("build/out"), want: policy.Ask, reason: "ignored"},
 		{name: "write auto-edit outside asks", mode: policy.ModeAutoEdit, req: f.write("../elsewhere/f.txt"), want: policy.Ask},
+		// The rows above omit the builtin layer, which the real program
+		// always loads. With it, edit_file($WORKSPACE/**) used to decide one
+		// step above the mode table and auto-edit asked for every edit — the
+		// mode did nothing at all, while the README said it allowed edits.
+		// These rows are the ones that would have caught that.
+		{name: "auto-edit allows with builtins loaded", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.write("main.go"), want: policy.Allow, reason: "auto-edit"},
+		{name: "auto-edit allows write_file with builtins", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.writeWith("write_file", "main.go"), want: policy.Allow},
+		{name: "auto-edit allows multi_edit with builtins", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.writeWith("multi_edit", "main.go"), want: policy.Allow},
+		{name: "auto-edit with builtins still asks for a sensitive file", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.write("prod.tfvars"), want: policy.Ask, reason: "sensitive"},
+		{name: "auto-edit with builtins still asks for an ignored file", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.write("build/out"), want: policy.Ask, reason: "ignored"},
+		{name: "auto-edit with builtins still asks outside", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.write("../elsewhere/f.txt"), want: policy.Ask, reason: "outside"},
+		{name: "auto-edit with builtins still hard-denies .git", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.write(".git/hooks/pre-commit"), want: policy.Deny, hard: true},
+		{name: "auto-edit with builtins still hard-denies a secret", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.write(".env"), want: policy.Deny, hard: true},
+		{name: "auto-edit does not widen an explicit user ask rule", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin, rules(t, policy.Ask, policy.SourceUser, "edit_file($WORKSPACE/**)")}, req: f.write("main.go"), want: policy.Ask, reason: "ask rule"},
+		{name: "auto-edit does not widen bash", mode: policy.ModeAutoEdit, layers: [][]policy.Rule{builtin}, req: f.bash("make build"), want: policy.Ask},
 		{name: "write bypass allows", mode: policy.ModeBypass, req: f.write("main.go"), want: policy.Allow},
 		{name: "write bypass outside allows", mode: policy.ModeBypass, req: f.write("../elsewhere/f.txt"), want: policy.Allow},
 		// --- mode table: bash

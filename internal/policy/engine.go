@@ -309,9 +309,10 @@ func (ev *eval) run() {
 	if ev.mode != ModePlan && ev.allowed() {
 		return
 	}
-	// The builtin ask rules superseded by workspace trust are skipped inside
-	// matchDecision, so a trusted write reaches the mode table, which is
-	// where the baseline is applied. See supersededByTrust and modeWrite.
+	// The builtin write asks are the default mode's own rule written as
+	// rules, so matchDecision skips them for a mode that answers differently
+	// — auto-edit, and default mode in a trusted workspace. That is what
+	// lets the write reach the mode table at all. See supersededByMode.
 	if ev.matchDecision(Ask, true) && ev.mode != ModeBypass {
 		ev.finishAsk()
 		return
@@ -322,35 +323,60 @@ func (ev *eval) run() {
 // workspaceAll is the path glob meaning "every path inside the workspace".
 const workspaceAll = "$WORKSPACE/**"
 
-// supersededByTrust reports whether a rule is one the workspace-trust
-// baseline replaces: the builtin write-tool ask over the whole workspace
-// ("write_file($WORKSPACE/**)", "edit_file($WORKSPACE/**)"), which is the
-// mode table's default for edits written as a rule. Those rules sit one step
-// above the mode table, so leaving them in place would make the baseline
-// unreachable — and an allow rule, which *is* consulted before them, is not
-// an option (see modeWriteDefault).
+// supersededByMode reports whether a rule is one the mode table answers for
+// itself: the builtin write-tool ask over the whole workspace
+// ("write_file($WORKSPACE/**)", "edit_file($WORKSPACE/**)",
+// "multi_edit($WORKSPACE/**)"), which is *the default mode's* write rule
+// written as a rule. Those rules sit one step above the mode table, so
+// leaving them in place pre-empts every mode whose own answer differs — and
+// an allow rule, which is consulted before them, is not an option (see
+// modeWriteDefault).
 //
 // It is deliberately narrow in both directions. A builtin ask rule for a
 // subset of the workspace — one added later for, say, edit_file(**/*.sql) —
 // is not the default and still decides. And skipping the default loses
-// nothing: modeWrite re-derives the same ask for every path the baseline
-// does not cover.
-func (ev *eval) supersededByTrust(r *Rule) bool {
+// nothing: modeWrite re-derives the same ask for every path the mode does
+// not cover.
+func (ev *eval) supersededByMode(r *Rule) bool {
 	return r.Decision == Ask && r.Source == SourceBuiltin &&
-		writeTools[r.Tool] && r.Pattern == workspaceAll && ev.trustBaseline()
+		writeTools[r.Tool] && r.Pattern == workspaceAll && ev.modeAnswersWrites()
 }
 
-// trustBaseline reports whether the workspace-trust baseline is in play for
-// this request. It is narrow on purpose: an accepted workspace, a write tool
-// with at least one declared write, and the default mode. Plan mode keeps
-// its refusal, auto-edit its own branch, and bypass is already decided.
+// modeAnswersWrites reports whether this mode has its own answer for this
+// write, so the builtin default ask must step aside and let the mode table
+// decide.
 //
-// It gates two steps that both have to agree, because neither is sufficient
-// alone: the builtin ask rules are skipped above so the request reaches the
-// mode table at all, and modeWrite's default branch grants it *after* the
-// outside-the-workspace, sensitive-file and ignored-file checks have run.
+// Two modes do. Auto-edit is defined as "edits inside the workspace without
+// asking" and was reachable only in tests before this: with the builtin
+// layer loaded — which is to say, in the real program — every edit asked, so
+// the mode did nothing. Default mode answers for itself only once the user
+// has accepted this workspace, which is the workspace-trust baseline.
+//
+// Plan mode keeps its refusal and bypass is already decided, so neither
+// wants the rule skipped. Neither does a write tool call that declares no
+// path: there is nothing for the mode table to check it against.
+//
+// This gates only the first of two steps. modeWrite still has to grant the
+// write, and it does so *after* the outside-the-workspace, sensitive-file
+// and ignored-file checks have run.
+func (ev *eval) modeAnswersWrites() bool {
+	if ev.kind != kindWrite || len(ev.req.Writes) == 0 {
+		return false
+	}
+	switch ev.mode {
+	case ModeAutoEdit:
+		return true
+	case ModeDefault:
+		return ev.trusted
+	default:
+		return false
+	}
+}
+
+// trustBaseline reports whether the workspace-trust baseline is in play: the
+// user accepted this directory, and this is an ordinary default-mode write.
 func (ev *eval) trustBaseline() bool {
-	return ev.trusted && ev.kind == kindWrite && ev.mode == ModeDefault && len(ev.req.Writes) > 0
+	return ev.trusted && ev.mode == ModeDefault && ev.modeAnswersWrites()
 }
 
 // hardDeny applies the set that no mode overrides.
@@ -421,7 +447,7 @@ func (ev *eval) matchDecision(d Decision, builtin bool) bool {
 		if d == Ask && (r.Source == SourceBuiltin) != builtin {
 			continue
 		}
-		if ev.supersededByTrust(r) {
+		if ev.supersededByMode(r) {
 			continue
 		}
 		if what, ok := ev.ruleHits(r); ok {

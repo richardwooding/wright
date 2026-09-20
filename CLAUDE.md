@@ -206,6 +206,18 @@ client to HTTP MCP transports).
   still runs first: hard-deny, `.wrightignore`, deny rules, explicit ask
   rules, containment, outside-the-workspace, sensitive files, ignored files,
   and plan mode, which never consults allow rules at all.
+- **The builtin write asks are the mode table's default, written as rules.**
+  `write_file($WORKSPACE/**)`, `edit_file($WORKSPACE/**)` and
+  `multi_edit($WORKSPACE/**)` say what *default mode* does, but they are
+  matched one step *above* `modeTable`, so any mode whose own answer differs
+  is pre-empted by them and never runs. That is not theoretical: auto-edit
+  mode asked for every edit for the whole life of the project, while the
+  README said it allowed them, and `TestEvaluateTable`'s auto-edit rows
+  passed because they omitted the builtin layer. `eval.modeAnswersWrites`
+  is the list of modes that supersede those three rules (auto-edit always,
+  default mode when the workspace is trusted); anything that changes
+  `modeWrite` has to add a row **with `layers: {builtin}`**, because a row
+  without it is testing a program that does not exist.
 - **Builtin rules and `config/defaults.json` must match.** `policy/builtin.go`
   and the embedded JSON are the same list; `TestBuiltinMatchesConfigDefaults`
   fails if they drift.
