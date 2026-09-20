@@ -65,6 +65,11 @@ func TestImportDAG(t *testing.T) {
 		// tool is would make the thing being debugged a dependency of the
 		// debugger.
 		{"diag", []string{"tui", "engine", "tools", "app", "policy"}},
+		// ghauth resolves a credential on the host and knows nothing else.
+		// It execs gh; it must never learn about sandboxes, policies or
+		// tools, because the one thing it does is the thing with the
+		// narrowest blast radius in the tree.
+		{"ghauth", []string{"tui", "engine", "tools", "app", "policy", "sandbox", "git"}},
 	}
 	for _, rule := range forbidden {
 		from := pkg(rule.from)
