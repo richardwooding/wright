@@ -1,6 +1,9 @@
 package shellclass
 
-import "strings"
+import (
+	"slices"
+	"strings"
+)
 
 // The GitHub CLI reaches a service, not the file system, so every gh command
 // is at least Network — which already sorts above MutatingWorkspace, making
@@ -177,10 +180,5 @@ func ghNounVerb(args []word) (noun, verb string) {
 }
 
 func matchesVerb(table map[string][]string, noun, verb string) bool {
-	for _, v := range table[noun] {
-		if v == verb {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(table[noun], verb)
 }
