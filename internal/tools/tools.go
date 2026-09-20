@@ -83,6 +83,10 @@ type Deps struct {
 	// Cwd is the shell's working directory, shared across bash calls. nil
 	// starts a fresh one at the workspace root.
 	Cwd *CwdState
+	// GitHub is the session's GitHub credential, given only to calls that
+	// run with the network. nil starts empty, which is a session with no
+	// credential at all — the default.
+	GitHub *GitHubAuth
 	// Todos is the shared task list. nil leaves todo_write unregistered.
 	Todos *TodoList
 	// Jobs holds the session's background commands. nil leaves the job tool
@@ -235,6 +239,9 @@ func (t *tool) Sequential() bool { return t.sequential }
 func New(deps Deps) agentkit.Toolset {
 	if deps.Cwd == nil {
 		deps.Cwd = NewCwd(deps.WS.Root())
+	}
+	if deps.GitHub == nil {
+		deps.GitHub = NewGitHubAuth()
 	}
 	if deps.RunID == nil {
 		deps.RunID = func(ctx context.Context) string {

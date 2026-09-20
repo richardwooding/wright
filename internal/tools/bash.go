@@ -205,6 +205,10 @@ func (d *Deps) bashSpec(ctx context.Context, a bashArgs, script string) sandbox.
 		spec.Network = spec.Network || g.Network
 		spec.ReadWrite = withGranted(spec.ReadWrite, g.Writable)
 	}
+	// The GitHub credential, for a call that runs with the network and only
+	// then. spec.Network is the one place all three sources of network have
+	// been folded together, which is why the decision is made here.
+	spec.Env = withEnv(spec.Env, d.gitHubEnvFor(spec.Network))
 	return spec
 }
 

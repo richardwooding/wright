@@ -406,3 +406,151 @@ func TestBashIsNotALoginShell(t *testing.T) {
 		t.Errorf("the shell sourced a profile:\n%s", got)
 	}
 }
+
+// hasEnv reports whether a spec's environment carries name=value.
+func hasEnv(spec sandbox.Spec, name string) (string, bool) {
+	for _, e := range spec.Env {
+		if k, v, ok := strings.Cut(e, "="); ok && k == name {
+			return v, true
+		}
+	}
+	return "", false
+}
+
+// TestGitHubEnvReachesOnlyNetworkedCalls is the control this whole feature
+// rests on. A command with no network cannot use a credential, so it is not
+// given one — which is what keeps the token out of the environment of an
+// auto-allowed read, the kind of call that runs with no prompt at all and
+// where a prompt-injected `base64 <<<"$GH_TOKEN"` would defeat the redactor.
+func TestGitHubEnvReachesOnlyNetworkedCalls(t *testing.T) {
+	const token = "gho_0123456789abcdef0123456789abcdef0123"
+	const helper = `!'/usr/bin/gh' auth git-credential`
+	ghEnv := map[string]string{"GH_TOKEN": token, "GIT_CONFIG_VALUE_3": helper}
+
+	tests := []struct {
+		name    string
+		enabled bool
+		// how this call comes to have (or not have) the network
+		baseNetwork  bool // --allow-network / sandbox.allowNetwork
+		grantNetwork bool // the engine's per-call grant
+		argNetwork   bool // the model's own network argument
+		want         bool
+	}{
+		{name: "off, no network", want: false},
+		{name: "off, networked by grant", grantNetwork: true, want: false},
+		{name: "on, no network", enabled: true, want: false},
+		{name: "on, networked by grant", enabled: true, grantNetwork: true, want: true},
+		{name: "on, networked by the session", enabled: true, baseNetwork: true, want: true},
+		{name: "on, networked by the argument", enabled: true, argNetwork: true, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := &recordingBackend{}
+			f := newFixture(t, func(d *tools.Deps) {
+				d.Sandbox = rec
+				d.SandboxSpec.Network = tt.baseNetwork
+				if tt.enabled {
+					d.GitHub = tools.NewGitHubAuth()
+					d.GitHub.Enable(ghEnv, "gh auth token")
+				}
+			})
+			ctx := context.Background()
+			if tt.grantNetwork {
+				ctx = sandbox.WithGrant(ctx, sandbox.Grant{Network: true})
+			}
+			args := `{"command":"gh pr list"}`
+			if tt.argNetwork {
+				args = `{"command":"gh pr list","network":true}`
+			}
+			if _, err := f.call(ctx, tools.NameBash, args); err != nil {
+				t.Fatal(err)
+			}
+			spec := rec.last(t)
+			got, ok := hasEnv(spec, "GH_TOKEN")
+			if ok != tt.want {
+				t.Fatalf("GH_TOKEN present = %v, want %v (network=%v)", ok, tt.want, spec.Network)
+			}
+			if !tt.want {
+				return
+			}
+			if got != token {
+				t.Errorf("GH_TOKEN = %q, want the resolved token", got)
+			}
+			// The token is useless to `git push` without the helper that
+			// reads it; they travel together or not at all.
+			if v, ok := hasEnv(spec, "GIT_CONFIG_VALUE_3"); !ok || v != helper {
+				t.Errorf("credential helper = %q (present=%v), want %q", v, ok, helper)
+			}
+		})
+	}
+}
+
+// The base spec is shared by every bash call *and* by the MCP stdio servers,
+// so appending to its environment in place would hand the next command — and
+// every MCP server — the last one's credential.
+func TestGitHubEnvDoesNotLeakIntoTheBaseSpec(t *testing.T) {
+	rec := &recordingBackend{}
+	var base []string
+	f := newFixture(t, func(d *tools.Deps) {
+		d.Sandbox = rec
+		d.GitHub = tools.NewGitHubAuth()
+		d.GitHub.Enable(map[string]string{
+			"GH_TOKEN": "gho_secret_value_here_0123456789",
+			// The real shape: the base environment already carries this key
+			// blanked, so the contribution *replaces* an entry rather than
+			// only appending. That is what makes the aliasing observable —
+			// a replacement shifts the shared backing array.
+			"GIT_CONFIG_VALUE_3": `!'/usr/bin/gh' auth git-credential`,
+		}, "GH_TOKEN")
+		d.SandboxSpec.Env = append(slices.Clone(d.SandboxSpec.Env), "GIT_CONFIG_VALUE_3=", "PATH=/usr/bin")
+		base = slices.Clone(d.SandboxSpec.Env)
+	})
+	ctx := sandbox.WithGrant(context.Background(), sandbox.Grant{Network: true})
+	if _, err := f.call(ctx, tools.NameBash, `{"command":"gh pr list"}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := hasEnv(rec.last(t), "GH_TOKEN"); !ok {
+		t.Fatal("the networked call did not get the token")
+	}
+	if !slices.Equal(f.deps.SandboxSpec.Env, base) {
+		t.Errorf("the base spec's env was mutated:\n got %v\nwant %v", f.deps.SandboxSpec.Env, base)
+	}
+	// The next call has no network, so no token — proving the first call did
+	// not leave it behind.
+	if _, err := f.call(context.Background(), tools.NameBash, `{"command":"echo plain"}`); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := hasEnv(rec.last(t), "GH_TOKEN"); ok {
+		t.Errorf("a later call inherited the credential: %q", v)
+	}
+}
+
+// /github off must take effect on the next call.
+func TestGitHubAuthCanBeTurnedOffMidSession(t *testing.T) {
+	rec := &recordingBackend{}
+	gh := tools.NewGitHubAuth()
+	f := newFixture(t, func(d *tools.Deps) { d.Sandbox = rec; d.GitHub = gh })
+	ctx := sandbox.WithGrant(context.Background(), sandbox.Grant{Network: true})
+
+	gh.Enable(map[string]string{"GH_TOKEN": "gho_0123456789abcdef0123456789abcdef"}, "gh auth token")
+	if !gh.On() || gh.Source() != "gh auth token" {
+		t.Fatalf("On=%v Source=%q", gh.On(), gh.Source())
+	}
+	if _, err := f.call(ctx, tools.NameBash, `{"command":"gh pr list"}`); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := hasEnv(rec.last(t), "GH_TOKEN"); !ok {
+		t.Fatal("enabled but the call has no token")
+	}
+
+	gh.Disable()
+	if gh.On() {
+		t.Error("On() after Disable")
+	}
+	if _, err := f.call(ctx, tools.NameBash, `{"command":"gh pr list"}`); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := hasEnv(rec.last(t), "GH_TOKEN"); ok {
+		t.Errorf("still carrying a credential after Disable: %q", v)
+	}
+}
