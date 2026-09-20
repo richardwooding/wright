@@ -64,6 +64,9 @@ prompt could only ever accept one rule.
 - Audit `decision` lines record `grants` (a list) instead of `grant`; an
   export of a session recorded by an earlier wright still shows what was
   saved.
+- Matching the program a wrapper peels down to widens what an existing rule
+  covers: `bash(rm *)` now also covers `timeout 5 rm …`. The hard-deny floor,
+  the containment checks and the secret/protected paths all still run first.
 
 ## [0.3.3] - 2026-09-20
 
