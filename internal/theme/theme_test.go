@@ -2,7 +2,10 @@ package theme_test
 
 import (
 	"image/color"
+	"strings"
 	"testing"
+
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/richardwooding/wright/internal/theme"
 )
@@ -54,9 +57,15 @@ func TestStylesRender(t *testing.T) {
 		"good":  th.Good.Render("ok"),
 		"card":  th.Card.Render("body"),
 		"bar":   th.StatusBar.Render("status"),
+		"rule":  th.Rule.Render("───"),
 	} {
 		if s == "" {
 			t.Errorf("%s rendered empty", name)
 		}
+	}
+	// The rule is laid out one cell per rune, so it must not add columns of
+	// its own the way a bordered or padded style would.
+	if got := ansi.StringWidth(th.Rule.Render(strings.Repeat("─", 10))); got != 10 {
+		t.Errorf("Rule renders %d cells for 10 runes", got)
 	}
 }

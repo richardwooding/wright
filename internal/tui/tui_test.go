@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -170,6 +171,18 @@ func key(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl}
 	case "ctrl+t":
 		return tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
+	case "ctrl+j":
+		return tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
+	case "alt+m":
+		return tea.KeyPressMsg{Code: 'm', Mod: tea.ModAlt}
+	case "pgup":
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
+	case "shift+up":
+		return tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift}
+	case "shift+down":
+		return tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift}
 	}
 	r := []rune(s)
 	return tea.KeyPressMsg{Code: r[0], Text: s}
@@ -592,6 +605,160 @@ func TestViewMetadata(t *testing.T) {
 	m = update(m, key("ctrl+t"))
 	if m.View().Cursor != nil {
 		t.Error("cursor shown under an overlay")
+	}
+}
+
+// ruleRows is the indices of the full-width divider rows in a rendered view.
+func ruleRows(lines []string, width int) []int {
+	rule := strings.Repeat("─", width)
+	var out []int
+	for i, line := range lines {
+		if line == rule {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
+func TestRulesSurroundTheComposer(t *testing.T) {
+	for _, width := range []int{40, 80, 200} {
+		m := newModel(t, &fakeController{}, width, 24)
+		lines := strings.Split(content(m), "\n")
+		rows := ruleRows(lines, width)
+		if len(rows) != 2 {
+			t.Fatalf("width %d: %d rule rows, want one above and one below the composer", width, len(rows))
+		}
+		box := strings.Join(lines[rows[0]+1:rows[1]], "\n")
+		if !strings.Contains(box, "Ask wright…") {
+			t.Errorf("width %d: composer is not between the rules:\n%s", width, box)
+		}
+		if rows[1] != len(lines)-2 {
+			t.Errorf("width %d: lower rule at %d, want it just above the status bar (%d rows)", width, rows[1], len(lines))
+		}
+		// The cursor must land in the composer, not on the rule above it.
+		if c := m.View().Cursor; c == nil || c.Y <= rows[0] || c.Y >= rows[1] {
+			t.Errorf("width %d: cursor %v outside the rules at %v", width, c, rows)
+		}
+	}
+}
+
+// TestViewFitsTerminalHeight pins the row budget: transcript + queued strip
+// + two rules + composer + status bar is exactly the terminal's height. The
+// heights start at 8 because viewportHeight clamps the transcript to one row
+// below that and the chrome then overflows by design.
+func TestViewFitsTerminalHeight(t *testing.T) {
+	stages := []struct {
+		name string
+		prep func(tui.Model) tui.Model
+	}{
+		{"idle", func(m tui.Model) tui.Model { return m }},
+		{"transcript", runEvents},
+		{"queued strip", func(m tui.Model) tui.Model {
+			m = event(m, engine.Event{Kind: engine.KindRunStarted})
+			return event(m, engine.Event{Kind: engine.KindQueued, Queued: 2, Text: "and then this"})
+		}},
+		{"overlay", func(m tui.Model) tui.Model { return update(m, key("ctrl+t")) }},
+		{"overlay over the strip", func(m tui.Model) tui.Model {
+			m = event(m, engine.Event{Kind: engine.KindRunStarted})
+			m = event(m, engine.Event{Kind: engine.KindQueued, Queued: 1, Text: "later"})
+			return update(m, key("ctrl+t"))
+		}},
+		{"multi-line composer", func(m tui.Model) tui.Model {
+			m = typeText(m, "one")
+			m = update(m, key("ctrl+j"))
+			return typeText(m, "two")
+		}},
+	}
+	for _, height := range []int{8, 12, 24, 50} {
+		for _, st := range stages {
+			t.Run(st.name+"/h"+strconv.Itoa(height), func(t *testing.T) {
+				m := st.prep(newModel(t, &fakeController{}, 80, height))
+				if rows := strings.Count(m.View().Content, "\n") + 1; rows != height {
+					t.Fatalf("%d rows in a %d-row terminal:\n%s", rows, height, content(m))
+				}
+			})
+		}
+	}
+}
+
+func TestWindowTitleSaysWhenWorking(t *testing.T) {
+	// Before the first WindowSizeMsg the view is a placeholder, but the
+	// window still deserves a name.
+	if title := tui.New(&fakeController{}, tui.Options{WorkspaceRoot: "/ws/wright"}).View().WindowTitle; title != "wright — wright" {
+		t.Errorf("title before the first resize = %q", title)
+	}
+	m := newModel(t, &fakeController{}, 80, 24)
+	if title := m.View().WindowTitle; title != "wright — wright" {
+		t.Errorf("idle title = %q", title)
+	}
+	m = event(m, engine.Event{Kind: engine.KindRunStarted})
+	if title := m.View().WindowTitle; title != "● wright — wright" {
+		t.Errorf("running title = %q, want the working mark", title)
+	}
+	m = event(m, engine.Event{Kind: engine.KindRunFinished, Finish: &engine.Finish{Steps: 1}})
+	if title := m.View().WindowTitle; title != "wright — wright" {
+		t.Errorf("title after the run = %q", title)
+	}
+}
+
+func TestMouseOffByDefaultAndToggles(t *testing.T) {
+	m := newModel(t, &fakeController{}, 80, 24)
+	if mode := m.View().MouseMode; mode != tea.MouseModeNone {
+		t.Fatalf("mouse mode %v at start: tracking the mouse disables the terminal's own selection", mode)
+	}
+	m = update(m, key("alt+m"))
+	if mode := m.View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("alt+m left the mouse mode at %v", mode)
+	}
+	if v := content(m); !strings.Contains(v, "mouse on") {
+		t.Errorf("no notice for the toggle:\n%s", v)
+	}
+	m = update(m, key("alt+m"))
+	if mode := m.View().MouseMode; mode != tea.MouseModeNone {
+		t.Fatalf("alt+m did not turn the mouse back off: %v", mode)
+	}
+	m = typeText(m, "/mouse")
+	m = update(m, key("enter"))
+	if mode := m.View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("/mouse left the mouse mode at %v", mode)
+	}
+}
+
+// TestShiftArrowsScrollByLine covers the keyboard replacement for the wheel:
+// the mouse is off by default, and pgup/pgdn only move whole pages.
+func TestShiftArrowsScrollByLine(t *testing.T) {
+	const width = 60
+	m := newModel(t, &fakeController{}, width, 12)
+	for i := range 40 {
+		m = event(m, engine.Event{Kind: engine.KindNotice, Text: "notice " + strconv.Itoa(i)})
+	}
+	// Everything above the upper rule is the transcript; scrolling a line
+	// shifts every row of it.
+	transcript := func(m tui.Model) string {
+		lines := strings.Split(content(m), "\n")
+		rows := ruleRows(lines, width)
+		if len(rows) == 0 {
+			t.Fatal("no rule row to find the transcript by")
+		}
+		return strings.Join(lines[:rows[0]], "\n")
+	}
+	bottom := transcript(m)
+	m = update(m, key("shift+up"))
+	up := transcript(m)
+	if up == bottom {
+		t.Fatalf("shift+up did not scroll:\n%s", bottom)
+	}
+	m = update(m, key("shift+up"))
+	if transcript(m) == up {
+		t.Fatal("the second shift+up did not scroll")
+	}
+	m = update(m, key("shift+down"))
+	if got := transcript(m); got != up {
+		t.Fatalf("shift+down did not go one line back:\n%s\nwant:\n%s", got, up)
+	}
+	m = update(m, key("shift+down"))
+	if got := transcript(m); got != bottom {
+		t.Fatalf("not back at the tail:\n%s\nwant:\n%s", got, bottom)
 	}
 }
 

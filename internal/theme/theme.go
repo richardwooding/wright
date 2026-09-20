@@ -44,6 +44,7 @@ type Theme struct {
 	Good       lipgloss.Style
 	Card       lipgloss.Style // bordered block for tool calls
 	CardBorder lipgloss.Style // border-only variant for nested cards
+	Rule       lipgloss.Style // full-width horizontal divider
 	DiffAdd    lipgloss.Style
 	DiffDel    lipgloss.Style
 	DiffHunk   lipgloss.Style // "@@ … @@" hunk headers
@@ -85,6 +86,7 @@ func New(isDark bool) Theme {
 		Good:       lipgloss.NewStyle().Foreground(p.Good),
 		Card:       lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(p.DimAccent).Padding(0, 1),
 		CardBorder: lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(p.DimAccent),
+		Rule:       lipgloss.NewStyle().Foreground(p.DimAccent),
 		DiffAdd:    lipgloss.NewStyle().Foreground(p.Good),
 		DiffDel:    lipgloss.NewStyle().Foreground(p.Hot),
 		DiffHunk:   lipgloss.NewStyle().Foreground(p.Accent),

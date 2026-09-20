@@ -44,6 +44,7 @@ func init() {
 		{"mcp", "", "MCP servers", hook("mcp")},
 		{"skills", "", "loaded skills", hook("skills")},
 		{"todos", "", "show the task list", (*Model).cmdTodos},
+		{"mouse", "", "toggle wheel scrolling (off keeps terminal selection)", (*Model).cmdMouse},
 		{"audit", "", "audit log summary", hook("audit")},
 		{"redaction", "on|off", "toggle secret redaction", hook("redaction")},
 		{"reasoning", "", "show or hide model reasoning", (*Model).cmdReasoning},
@@ -75,21 +76,20 @@ func commandHelp() []overlay.Entry {
 	return out
 }
 
-// keyHelp is the /help key table.
+// keyHelp is the /help key table. Related keys share a row: the overlay is
+// as tall as the transcript, so the table has to earn its rows.
 var keyHelp = []overlay.Entry{
 	{Name: "enter", Desc: "send (queued while a run is active)"},
 	{Name: "shift+enter / alt+enter / ctrl+j", Desc: "newline"},
 	{Name: "esc", Desc: "cancel the run · close an overlay (deny)"},
-	{Name: "ctrl+c ctrl+c", Desc: "quit (twice within 1.5 s)"},
-	{Name: "ctrl+d", Desc: "quit when the box is empty"},
+	{Name: "ctrl+c ctrl+c / ctrl+d", Desc: "quit (twice within 1.5 s) · quit on an empty box"},
 	{Name: "ctrl+o", Desc: "expand / collapse all tool cards"},
 	{Name: "ctrl+t", Desc: "todos"},
 	{Name: "shift+tab", Desc: "cycle mode default → auto-edit → plan"},
-	{Name: "pgup / pgdn / wheel", Desc: "scroll the transcript"},
-	{Name: "ctrl+u", Desc: "clear the box"},
-	{Name: "ctrl+l", Desc: "redraw"},
-	{Name: "@", Desc: "file completion"},
-	{Name: "/", Desc: "command completion"},
+	{Name: "pgup / pgdn · shift+↑ / shift+↓", Desc: "scroll the transcript a page · a line"},
+	{Name: "alt+m or /mouse", Desc: "wheel scroll; off by default so the terminal can select text"},
+	{Name: "ctrl+u / ctrl+l", Desc: "clear the box · redraw"},
+	{Name: "@ / /", Desc: "file · command completion"},
 }
 
 // runCommand parses "/name args…" and dispatches it.
@@ -329,6 +329,12 @@ func (m *Model) cmdUndo([]string) tea.Cmd {
 		return nil
 	}
 	m.notice(fmt.Sprintf("undo: reverted %d file(s): %s — shell side effects are not reverted", len(files), strings.Join(files, ", ")), transcript.LevelWarn)
+	return nil
+}
+
+// cmdMouse is the same toggle as alt+m, for terminals where alt is awkward.
+func (m *Model) cmdMouse([]string) tea.Cmd {
+	m.toggleMouse()
 	return nil
 }
 

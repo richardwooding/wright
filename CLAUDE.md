@@ -492,6 +492,31 @@ client to HTTP MCP transports).
   edited arguments with `json.Valid`, and `esc` is deny. Bypass is reachable
   only through the typed-word confirm and still goes through
   `Controller.SetMode`, which the policy engine refuses without the flag.
+- **The row budget is fixed and exact.** `View` renders
+  transcript + optional queued strip + rule + composer + rule + status bar, and
+  the total must equal the terminal height: `viewportHeight` is
+  `m.height - 3 - comp.Height() - stripH` (the 3 is the status bar and the two
+  rules around the composer), and the composer's cursor is offset by
+  `vpH + stripH + 1` for the rule above it. Change the chrome and all three
+  numbers move together; `TestViewFitsTerminalHeight` pins them at several
+  heights, with and without the strip and an overlay. The transcript clamps to
+  one row below ~8 rows, so the chrome overflows a terminal that short by
+  design. An overlay is `clampRows`-ed to the transcript's height because it
+  has a minimum size (border + title) and `lipgloss.Place` does not truncate.
+  The rules are `strings.Repeat("─", m.width)` in `theme.Rule`, never a
+  lipgloss bordered box, which would add side columns.
+- **The mouse is off by default.** `v.MouseMode` is left at
+  `tea.MouseModeNone` unless the user toggles it (`alt+m` or `/mouse`), because
+  cell-motion tracking takes click-and-drag away from the terminal and kills
+  text selection and copy — for the sake of one feature, wheel-scrolling the
+  transcript. `shift+up`/`shift+down` are the keyboard replacement (`ctrl+u` is
+  the composer's, and `pgup`/`pgdn` page). `MouseMode` is per-frame and the
+  renderer emits the reset sequences, so the toggle needs nothing else.
+  `m.vp.MouseWheelEnabled` is orthogonal: it only matters once a
+  `MouseWheelMsg` can arrive at all.
+- **The window title carries run state.** `● wright — <dir>` while `m.running`,
+  plain when idle, and set on the pre-size placeholder frame too. `--plain`
+  never starts Bubble Tea and sets no title.
 - **charm v2 gotchas.** Import paths are `charm.land/...`; `lipgloss.Style.Width`
   is the whole block including border and padding; `textarea` handles
   `tea.PasteMsg` itself; `tea.KeyPressMsg.String()` spells keys as

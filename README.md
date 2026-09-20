@@ -557,13 +557,15 @@ rewritten. `/redaction off` turns it off for the session.
 | `ctrl+o` | expand / collapse all tool cards |
 | `ctrl+t` | todos |
 | `shift+tab` | cycle mode default → auto-edit → plan |
-| `pgup` / `pgdn` / wheel | scroll the transcript |
+| `pgup` / `pgdn` | scroll the transcript a page |
+| `shift+up` / `shift+down` | scroll the transcript a line |
+| `alt+m` (or `/mouse`) | wheel scrolling — off by default, so your terminal can select and copy text |
 | `ctrl+u` | clear the box · `ctrl+l` redraw |
 | `@` / `/` | file completion · command completion |
 
 `/help` `/clear` `/compact` `/cost` `/diff` `/mode` `/model` `/sessions`
 `/resume` `/export` `/undo` `/init` `/mcp` `/skills` `/todos` `/audit`
-`/redaction` `/reasoning` `/trust` `/plain` `/quit`
+`/redaction` `/reasoning` `/trust` `/mouse` `/plain` `/quit`
 
 The status bar carries the whole state of the run, and the summary is printed
 after the alt screen is gone:
