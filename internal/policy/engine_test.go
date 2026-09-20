@@ -92,6 +92,13 @@ func (f *fixture) write(rel string) policy.Request {
 	return policy.Request{Tool: "edit_file", Writes: []string{f.abs(rel)}}
 }
 
+// writeWith is write for a named write tool: multi_edit is in writeTools but
+// has no builtin ask rule, so it reaches the mode table by a different route
+// from edit_file and has to be pinned separately.
+func (f *fixture) writeWith(tool, rel string) policy.Request {
+	return policy.Request{Tool: tool, Writes: []string{f.abs(rel)}}
+}
+
 func fetch(raw string) policy.Request {
 	u, _ := url.Parse(raw)
 	return policy.Request{Tool: "web_fetch", URL: u}
@@ -138,6 +145,7 @@ func TestEvaluateTable(t *testing.T) {
 		offers   bool   // expect at least one offer
 		network  bool
 		noOffers bool
+		trusted  bool // the user accepted this workspace at startup
 	}
 	builtin := policy.Builtin()
 	userAllow := rules(t, policy.Allow, policy.SourceUser, "bash(npm test *)", "read_file(~/notes/**)", "web_fetch(*.example.com)", "bash(go mod download *) +net", "edit_file($WORKSPACE/internal/**)")
@@ -258,12 +266,48 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "mcp plan mutating denies", mode: policy.ModePlan, req: policy.Request{Tool: "mcp:s:t"}, want: policy.Deny},
 		{name: "mcp bypass allows", mode: policy.ModeBypass, req: policy.Request{Tool: "mcp:s:t"}, want: policy.Allow},
 		{name: "mcp allow rule", mode: policy.ModeDefault, layers: [][]policy.Rule{rules(t, policy.Allow, policy.SourceUser, "mcp:s:t*")}, req: policy.Request{Tool: "mcp:s:tool"}, want: policy.Allow},
+		// --- workspace trust: the baseline, and every floor above it
+		//
+		// The builtin layer is present in all of these on purpose: the
+		// builtin ask rules for write_file/edit_file are what the baseline
+		// has to reach past, and without them the table would pass with
+		// only half the mechanism in place.
+		{name: "trusted edit inside asks nothing", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write("main.go"), want: policy.Allow, reason: "workspace-trust", trusted: true},
+		{name: "trusted write_file inside asks nothing", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.writeWith("write_file", "new.go"), want: policy.Allow, trusted: true},
+		{name: "trusted multi_edit inside asks nothing", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.writeWith("multi_edit", "main.go"), want: policy.Allow, trusted: true},
+		{name: "untrusted edit inside still asks", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write("main.go"), want: policy.Ask, offers: true},
+		{name: "untrusted multi_edit inside still asks", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.writeWith("multi_edit", "main.go"), want: policy.Ask, offers: true},
+		{name: "trusted still asks for a sensitive file", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write("prod.tfvars"), want: policy.Ask, reason: "sensitive", trusted: true},
+		{name: "trusted still asks for an ignored file", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write("build/out"), want: policy.Ask, reason: "ignored", trusted: true},
+		{name: "trusted still asks outside the workspace", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write("../elsewhere/f.txt"), want: policy.Ask, reason: "outside", trusted: true},
+		{name: "trusted still asks for a multi_edit outside", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.writeWith("multi_edit", "../elsewhere/f.txt"), want: policy.Ask, reason: "outside", trusted: true},
+		{name: "trusted still hard-denies .git", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write(".git/hooks/pre-commit"), want: policy.Deny, hard: true, trusted: true},
+		{name: "trusted still hard-denies .wright", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write(".wright/settings.json"), want: policy.Deny, hard: true, trusted: true},
+		{name: "trusted still hard-denies a secret file", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write(".env"), want: policy.Deny, hard: true, reason: "protected", trusted: true},
+		{name: "trusted still hard-denies a protected path", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write("~/.ssh/config"), want: policy.Deny, hard: true, reason: "protected", trusted: true},
+		{name: "trusted still denies a hidden path", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write("secrets/token"), want: policy.Deny, reason: "hidden", trusted: true},
+		{name: "trusted still obeys a deny rule", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Deny, policy.SourceProject, "edit_file($WORKSPACE/internal/**)")}, req: f.write("internal/x.go"), want: policy.Deny, reason: "deny rule", trusted: true},
+		{name: "trusted still obeys an explicit ask rule", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Ask, policy.SourceUser, "edit_file(**)")}, req: f.write("main.go"), want: policy.Ask, reason: "ask rule", trusted: true},
+		{name: "trusted plan mode still denies edits", mode: policy.ModePlan, layers: [][]policy.Rule{builtin}, req: f.write("main.go"), want: policy.Deny, reason: "plan mode", trusted: true},
+		// Trust is about writing files, not about running programs: every
+		// shell command is still approved one at a time.
+		{name: "trusted bash still asks", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.bash("make build"), want: policy.Ask, trusted: true},
+		{name: "trusted bash write inside still asks", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.bash("echo x > main.go"), want: policy.Ask, trusted: true},
+		// A write tool call that declares no path is not an edit inside the
+		// workspace; the baseline must not cover what it cannot see.
+		{name: "trusted write with no declared path still asks", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: policy.Request{Tool: "edit_file"}, want: policy.Ask, trusted: true},
+		// Trust is not bypass: reads and fetches are unchanged by it.
+		{name: "trusted web_fetch still asks", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: fetch("https://example.com"), want: policy.Ask, trusted: true},
+		{name: "trusted read outside still asks", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.read("/tmp/elsewhere.txt"), want: policy.Ask, reason: "outside", trusted: true},
 		{name: "explore allowed", mode: policy.ModePlan, req: policy.Request{Tool: "explore"}, want: policy.Allow},
 		{name: "unknown tool asks", mode: policy.ModeDefault, req: policy.Request{Tool: "teleport"}, want: policy.Ask},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			e := policy.New(f.ws, tt.mode, tt.layers...)
+			if tt.trusted {
+				e.TrustWorkspace()
+			}
 			v := e.Evaluate(tt.req)
 			if v.Decision != tt.want {
 				t.Errorf("Decision = %v, want %v\n  reason: %s\n  explain: %s", v.Decision, tt.want, v.Reason, strings.Join(v.Explain, "\n           "))
@@ -417,6 +461,24 @@ func TestChildEngine(t *testing.T) {
 	}
 	if err := strict.SetMode(policy.ModePlan); err != nil {
 		t.Errorf("child equal to parent: %v", err)
+	}
+	// Workspace trust is inherited: a sub-agent writes into the directory
+	// the user accepted, under the same floors. It is not a grant, so
+	// ErrChildGrant does not apply to it.
+	trusting := policy.New(f.ws, policy.ModeDefault, policy.Builtin())
+	trusting.TrustWorkspace()
+	if !trusting.WorkspaceTrusted() {
+		t.Error("TrustWorkspace did not take")
+	}
+	sub := trusting.Child(1)
+	if !sub.WorkspaceTrusted() {
+		t.Error("a child engine should inherit workspace trust")
+	}
+	if v := sub.Evaluate(f.write("main.go")); v.Decision != policy.Allow {
+		t.Errorf("child edit inside a trusted workspace = %v (%s)", v.Decision, v.Reason)
+	}
+	if v := parent.Child(1).Evaluate(f.write("main.go")); v.Decision == policy.Allow {
+		t.Error("an untrusted parent must not hand a child the baseline")
 	}
 	// Hard denials propagate to the parent.
 	child.Evaluate(f.bash("sudo ls"))
