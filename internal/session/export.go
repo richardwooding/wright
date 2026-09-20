@@ -209,8 +209,12 @@ func decisionFacts(d audit.Decision) []string {
 	if d.Reason != "" {
 		out = append(out, "reason: "+d.Reason)
 	}
-	if d.Grant != "" {
-		out = append(out, "saved rule: `"+d.Grant+"`")
+	if rules := d.SavedRules(); len(rules) > 0 {
+		label := "saved rule: "
+		if len(rules) > 1 {
+			label = "saved rules: "
+		}
+		out = append(out, label+"`"+strings.Join(rules, "`, `")+"`")
 	}
 	if d.Outcome == "allow" {
 		granted := "no network"

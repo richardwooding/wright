@@ -125,9 +125,13 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 			e.auditDecision(c, verdict, "user", &d, CallGrant{})
 			return agentkit.Deny(verdict.Reason), nil
 		}
-		if d.Grant != nil {
-			if err := e.policy.Grant(*d.Grant); err != nil {
-				e.emit(Event{Kind: KindNotice, Text: "could not record grant: " + err.Error()})
+		d.Grants = dedupeOffers(d.Grants)
+		for _, g := range d.Grants {
+			if err := e.policy.Grant(g); err != nil {
+				// One failing rule must not silently take the others with
+				// it: the user marked each one deliberately, so each is
+				// reported on its own and the rest are still recorded.
+				e.emit(Event{Kind: KindNotice, Text: "could not record grant " + g.Rule.String() + ": " + err.Error()})
 			}
 		}
 		// Approving grants what the command needs. Offering "allow" and
@@ -138,6 +142,28 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 		e.auditDecision(c, verdict, "user", &d, grant)
 		return e.allowedWithGrant(c, verdict, d.Args, grant), nil
 	}
+}
+
+// dedupeOffers collapses offers that name the same rule, keeping the widest
+// scope. The offers are one rule x several scopes, so a user marking both
+// scopes of one rule means the wider of the two — and ScopeProjectLocal adds
+// the rule to the session as well as persisting it, so it subsumes
+// ScopeSession rather than merely outranking it.
+func dedupeOffers(offers []policy.GrantOffer) []policy.GrantOffer {
+	out := make([]policy.GrantOffer, 0, len(offers))
+	at := map[string]int{}
+	for _, o := range offers {
+		text := o.Rule.String()
+		if i, ok := at[text]; ok {
+			if o.Scope > out[i].Scope {
+				out[i] = o
+			}
+			continue
+		}
+		at[text] = len(out)
+		out = append(out, o)
+	}
+	return out
 }
 
 // callGrant is what allowing this call will give it beyond the defaults. It
@@ -319,8 +345,10 @@ func (e *Engine) auditDecision(c agentkit.Call, v policy.Verdict, by string, d *
 		rec.Rule = v.Rule.String()
 		rec.Source = string(v.Rule.Source)
 	}
-	if d != nil && d.Grant != nil {
-		rec.Grant = d.Grant.Rule.String() + " (" + d.Grant.Scope.String() + ")"
+	if d != nil {
+		for _, g := range d.Grants {
+			rec.Grants = append(rec.Grants, g.Rule.String()+" ("+g.Scope.String()+")")
+		}
 	}
 	if outcome == strings.ToLower(policy.Allow.String()) {
 		// v.Network is the value Engine.allowed pins into the call's

@@ -155,12 +155,16 @@ type Preview struct {
 
 // Decision is the UI's answer to an Approval or a headless default.
 type Decision struct {
-	Allow   bool
-	Grant   *policy.GrantOffer // accepted offer, when the user chose "allow for …"
-	Args    json.RawMessage    // edited arguments, nil when unchanged
-	Network bool               // extra network grant; allowing already grants what the classifier says the call needs
-	Reason  string             // shown to the model when denied
-	By      string             // "user", "policy", "headless"
+	Allow bool
+	// Grants are the offers the user accepted. A script routinely needs more
+	// than one rule — `cd X && fpc … && ./bin/t --all` wants one for each —
+	// and one prompt can accept all of them, so this is a list rather than
+	// the single offer it used to be.
+	Grants  []policy.GrantOffer
+	Args    json.RawMessage // edited arguments, nil when unchanged
+	Network bool            // extra network grant; allowing already grants what the classifier says the call needs
+	Reason  string          // shown to the model when denied
+	By      string          // "user", "policy", "headless"
 }
 
 // QuestionEvent is an ask_user call waiting for Engine.Reply with an Answer.

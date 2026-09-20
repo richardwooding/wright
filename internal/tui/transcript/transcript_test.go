@@ -28,7 +28,7 @@ func sample(md *markdown.Renderer) *transcript.Model {
 		Diff: diff, Status: transcript.StatusOK, Duration: 340 * time.Millisecond,
 	})
 	m.Append(&transcript.ToolCard{ID: "c2", Name: "bash", Args: json.RawMessage(`{"command":"go test ./..."}`), Status: transcript.StatusDenied, Depth: 1})
-	m.Append(&transcript.Approval{Tool: "bash", Summary: "go test", Allowed: true, By: "user", Rule: "bash(go test *)", Scope: "session"})
+	m.Append(&transcript.Approval{Tool: "bash", Summary: "go test", Allowed: true, By: "user", Rules: []string{"bash(go test *) (session)"}})
 	m.Append(&transcript.Notice{Text: "compacted 40k → 12k tokens", Level: transcript.LevelInfo})
 	m.Append(&transcript.Notice{Text: "sandbox off", Level: transcript.LevelError})
 	m.Append(&transcript.Error{Text: "provider unreachable"})

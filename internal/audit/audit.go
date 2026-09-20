@@ -94,9 +94,17 @@ type Decision struct {
 	Mode        string `json:"mode,omitempty"`
 	By          string `json:"by,omitempty"` // policy | user | headless
 	OffersShown int    `json:"offers_shown,omitempty"`
-	Grant       string `json:"grant,omitempty"`
 	HardDeny    bool   `json:"hard_deny,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+
+	// Grants are the rules the user chose to remember, each as
+	// "<rule> (<scope>)". One prompt can accept several.
+	Grants []string `json:"grants,omitempty"`
+	// Grant is the same thing before one prompt could accept more than one
+	// rule. Nothing writes it; it is kept so a log recorded by an older
+	// wright still reads back, and SavedRules is the only thing that should
+	// look at either field.
+	Grant string `json:"grant,omitempty"`
 
 	// GrantedNetwork and GrantedWritable are what allowing this one call
 	// handed it, as opposed to Grant, which names a rule that was saved.
@@ -107,6 +115,18 @@ type Decision struct {
 	// before an approval could grant anything.
 	GrantedNetwork  bool     `json:"granted_network,omitempty"`
 	GrantedWritable []string `json:"granted_writable,omitempty"`
+}
+
+// SavedRules are the rules this decision recorded, reading a log written
+// before one prompt could accept more than one.
+func (d Decision) SavedRules() []string {
+	if len(d.Grants) > 0 {
+		return d.Grants
+	}
+	if d.Grant != "" {
+		return []string{d.Grant}
+	}
+	return nil
 }
 
 // Result summarises a tool result.

@@ -420,3 +420,107 @@ func TestUnrecognisedProgramIsCautionNotDestructive(t *testing.T) {
 		})
 	}
 }
+
+// TestOneAnswerCanSaveSeveralRules pins the multi-grant path end to end. A
+// script needs a rule per command, so a prompt that could only accept one
+// meant being asked again on the very next call.
+func TestOneAnswerCanSaveSeveralRules(t *testing.T) {
+	offers := func(t *testing.T) []policy.GrantOffer {
+		t.Helper()
+		var out []policy.GrantOffer
+		for _, spec := range []struct {
+			text  string
+			scope policy.Scope
+		}{
+			{"edit_file(a.go)", policy.ScopeSession},
+			{"edit_file(b.go)", policy.ScopeSession},
+			{"edit_file(b.go)", policy.ScopeProjectLocal},
+		} {
+			r, err := policy.ParseRule(spec.text, policy.SourceSession)
+			if err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, policy.GrantOffer{Rule: r, Scope: spec.scope})
+		}
+		return out
+	}
+
+	// The policy engine is built here rather than left to the defaults so
+	// the test can read back which rules the answer actually applied.
+	run := func(t *testing.T, pick func([]policy.GrantOffer) []policy.GrantOffer) (*policy.Engine, []audit.Decision, []engine.Event) {
+		t.Helper()
+		client := &enginetest.Scripted{Responses: []*core.Response{
+			enginetest.CallResp("c1", "edit_file", `{"path":"a.go"}`),
+			enginetest.TextResp("done"),
+		}}
+		var pol *policy.Engine
+		f, path := auditFixture(t, client, func(o *engine.Options) {
+			pol = policy.New(o.WS, o.Mode, policy.Builtin())
+			o.Policy = pol
+		})
+		if err := f.eng.Submit("edit a.go"); err != nil {
+			t.Fatal(err)
+		}
+		evs := f.collect(t, func(ev engine.Event) {
+			if ev.Kind == engine.KindApprovalRequest {
+				f.eng.Reply(ev.Approval.ID, engine.Decision{Allow: true, Grants: pick(offers(t))})
+			}
+		})
+		return pol, auditedDecisions(t, path), evs
+	}
+
+	t.Run("both are applied and both are recorded", func(t *testing.T) {
+		pol, decs, _ := run(t, func(o []policy.GrantOffer) []policy.GrantOffer { return o[:2] })
+		var texts []string
+		for _, r := range pol.Grants() {
+			texts = append(texts, r.String())
+		}
+		for _, want := range []string{"edit_file(a.go)", "edit_file(b.go)"} {
+			if !slices.Contains(texts, want) {
+				t.Errorf("rule %s not applied to the policy engine (have %v)", want, texts)
+			}
+		}
+		if len(decs) != 1 {
+			t.Fatalf("decisions = %d, want 1", len(decs))
+		}
+		if got := decs[0].SavedRules(); len(got) != 2 {
+			t.Errorf("audited rules = %v, want both", got)
+		}
+	})
+
+	// Offers are one rule x several scopes, so marking both scopes of one
+	// rule is an ordinary thing to do and must not save it twice. The wider
+	// scope wins: ScopeProjectLocal adds the rule to the session as well as
+	// persisting it.
+	t.Run("the same rule twice is saved once, at the wider scope", func(t *testing.T) {
+		_, decs, _ := run(t, func(o []policy.GrantOffer) []policy.GrantOffer { return o[1:] })
+		got := decs[0].SavedRules()
+		if len(got) != 1 || !strings.Contains(got[0], "project") {
+			t.Errorf("audited rules = %v, want one at the project scope", got)
+		}
+	})
+
+	// One rule that cannot be recorded — here a project-scope grant with no
+	// settings file to persist into — must not take the others with it.
+	t.Run("a failure is reported without losing the rest", func(t *testing.T) {
+		pol, _, evs := run(t, func(o []policy.GrantOffer) []policy.GrantOffer {
+			return []policy.GrantOffer{o[2], o[0]}
+		})
+		var texts []string
+		for _, r := range pol.Grants() {
+			texts = append(texts, r.String())
+		}
+		if !slices.Contains(texts, "edit_file(a.go)") {
+			t.Errorf("the rule that could be recorded was lost: %v", texts)
+		}
+		var notice string
+		for _, ev := range evs {
+			if ev.Kind == engine.KindNotice && strings.Contains(ev.Text, "could not record grant") {
+				notice = ev.Text
+			}
+		}
+		if !strings.Contains(notice, "edit_file(b.go)") {
+			t.Errorf("notice = %q, want one naming the rule that failed", notice)
+		}
+	})
+}

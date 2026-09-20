@@ -76,6 +76,31 @@ func wrap(text string, width int) []string {
 type list struct {
 	items []listItem
 	focus int
+	// marks, when non-nil, makes the list multi-select: it is one flag per
+	// item and every row is drawn with a [x]/[ ] box. Left nil, the list is
+	// the single-pick list every other overlay uses and renders as before.
+	marks []bool
+}
+
+// multi turns the list into a multi-select one, sized to its items.
+func (l *list) multi() { l.marks = make([]bool, len(l.items)) }
+
+// toggle flips the mark on the focused row.
+func (l *list) toggle() {
+	if l.marks != nil && l.focus < len(l.marks) {
+		l.marks[l.focus] = !l.marks[l.focus]
+	}
+}
+
+// markedItems are the indices marked, in list order.
+func (l *list) markedItems() []int {
+	var out []int
+	for i, m := range l.marks {
+		if m {
+			out = append(out, i)
+		}
+	}
+	return out
 }
 
 // listItem is one row: an optional single-key shortcut and a label.
@@ -112,6 +137,8 @@ func (l *list) render(th theme.Theme, width int) []string {
 		} else {
 			b.WriteString("  ")
 		}
+		box := l.box(i)
+		b.WriteString(box)
 		if it.key != "" {
 			b.WriteString("[" + it.key + "] ")
 		}
@@ -120,7 +147,7 @@ func (l *list) render(th theme.Theme, width int) []string {
 		if i == l.focus {
 			row = th.Selected.Render(row)
 		} else if it.key != "" {
-			row = "  " + th.Key.Render("["+it.key+"]") + " " + ansi.Truncate(it.label, max(width-len(it.key)-5, 1), "…")
+			row = "  " + box + th.Key.Render("["+it.key+"]") + " " + ansi.Truncate(it.label, max(width-len(it.key)-len(box)-5, 1), "…")
 		}
 		out = append(out, row)
 		if it.desc != "" {
@@ -128,6 +155,19 @@ func (l *list) render(th theme.Theme, width int) []string {
 		}
 	}
 	return out
+}
+
+// box is the mark for a row: empty unless the list is multi-select. It is a
+// word-shaped glyph pair rather than colour, so the state is readable in a
+// terminal without it.
+func (l *list) box(i int) string {
+	if l.marks == nil {
+		return ""
+	}
+	if i < len(l.marks) && l.marks[i] {
+		return "[x] "
+	}
+	return "[ ] "
 }
 
 // scrollWindow returns lines[offset:offset+size] clamped, plus an indicator

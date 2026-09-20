@@ -76,9 +76,10 @@ type Approval struct {
 	Summary string
 	Allowed bool
 	By      string
-	Rule    string
-	Scope   string
-	Reason  string
+	// Rules are the rules the user chose to remember, each already spelled
+	// "<rule> (<scope>)"; one prompt can accept several.
+	Rules  []string
+	Reason string
 }
 
 // Notice is an informational line: compaction, redaction, mode changes.
@@ -236,8 +237,12 @@ func (a *Approval) render(ctx renderContext) []string {
 	if a.By != "" {
 		line += th.Subtle.Render(" by " + a.By)
 	}
-	if a.Rule != "" {
-		line += th.Subtle.Render(fmt.Sprintf(" · rule %s (%s)", a.Rule, a.Scope))
+	if len(a.Rules) > 0 {
+		word := " · rule "
+		if len(a.Rules) > 1 {
+			word = " · rules "
+		}
+		line += th.Subtle.Render(word + strings.Join(a.Rules, ", "))
 	}
 	if a.Reason != "" {
 		line += th.Subtle.Render(": " + a.Reason)

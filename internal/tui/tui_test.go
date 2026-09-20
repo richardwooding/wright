@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -35,6 +36,8 @@ type fakeController struct {
 	compact int
 	undo    int
 	events  chan engine.Event // when set, Submit and Reply script a run
+	// onSubmit replaces script for a test that needs a different run.
+	onSubmit func()
 }
 
 type reply struct {
@@ -51,7 +54,10 @@ func (f *fakeController) Submit(text string, _ ...core.Part) error {
 	f.mu.Lock()
 	f.submits = append(f.submits, text)
 	f.mu.Unlock()
-	if f.events != nil {
+	switch {
+	case f.onSubmit != nil:
+		f.onSubmit()
+	case f.events != nil:
 		f.script(text)
 	}
 	return nil
@@ -120,6 +126,25 @@ func (f *fakeController) script(text string) {
 	f.events <- engine.Event{Kind: engine.KindApprovalRequest, Call: call("c1", "bash", ""), Approval: &engine.Approval{
 		ID: "ap1", Tool: "bash", Args: json.RawMessage(`{"command":"go test ./..."}`),
 		Preview: engine.Preview{Title: "go test ./...", Body: "go test ./..."}, Severity: engine.SeverityInfo,
+	}}
+}
+
+// scriptWithOffers is script, plus the rules the policy engine would offer.
+func (f *fakeController) scriptWithOffers(t *testing.T, texts ...string) {
+	t.Helper()
+	var offers []policy.GrantOffer
+	for _, text := range texts {
+		r, err := policy.ParseRule(text, policy.SourceSession)
+		if err != nil {
+			t.Fatal(err)
+		}
+		offers = append(offers, policy.GrantOffer{Rule: r, Scope: policy.ScopeSession, Label: "allow " + text})
+	}
+	f.events <- engine.Event{Kind: engine.KindRunStarted}
+	f.events <- engine.Event{Kind: engine.KindApprovalRequest, Call: call("c1", "bash", ""), Approval: &engine.Approval{
+		ID: "ap1", Tool: "bash", Args: json.RawMessage(`{"command":"fpc x.pas && ./bin/t"}`),
+		Preview:  engine.Preview{Title: "fpc x.pas && ./bin/t", Body: "fpc x.pas && ./bin/t"},
+		Severity: engine.SeverityInfo, Offers: offers,
 	}}
 }
 
@@ -930,5 +955,55 @@ func TestPsSaysWhatIsRunning(t *testing.T) {
 	m = update(m, key("enter"))
 	if v := content(m); !strings.Contains(v, "waiting for the model") {
 		t.Errorf("/ps after the call returned:\n%s", v)
+	}
+}
+
+// TestPlainModeAcceptsSeveralRules is plain mode's half of the multi-select
+// grants page: a script needs a rule per command, and answering one prompt
+// per rule means being asked again on the very next call.
+func TestPlainModeAcceptsSeveralRules(t *testing.T) {
+	tests := []struct {
+		name   string
+		answer string
+		want   []string // rule texts, nil when the answer must deny
+	}{
+		{name: "one number", answer: "2", want: []string{"bash(fpc *)"}},
+		{name: "several numbers", answer: "2,3", want: []string{"bash(fpc *)", "bash(./bin/t *)"}},
+		{name: "spaces are tolerated", answer: "3, 2", want: []string{"bash(./bin/t *)", "bash(fpc *)"}},
+		// A typo must never allow, and applying the half that parsed would
+		// save a rule the user did not mean.
+		{name: "a bad number in the list denies", answer: "2,9"},
+		{name: "nonsense denies", answer: "2,x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			events := make(chan engine.Event, 32)
+			ctl := &fakeController{events: events}
+			out := &promptWriter{marker: "n) deny", seen: make(chan struct{})}
+			in := io.MultiReader(strings.NewReader("hello\n"), afterReader{ch: out.seen, r: strings.NewReader(tt.answer + "\n")})
+			ctl.onSubmit = func() { ctl.scriptWithOffers(t, "bash(fpc *)", "bash(./bin/t *)") }
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if _, err := tui.Run(ctx, ctl, tui.Options{Plain: true, Events: events, In: in, Out: out}); err != nil {
+				t.Fatal(err)
+			}
+			if len(ctl.replies) != 1 {
+				t.Fatalf("replies = %+v", ctl.replies)
+			}
+			d := ctl.replies[0].d
+			if tt.want == nil {
+				if d.Allow || len(d.Grants) != 0 {
+					t.Fatalf("%q allowed: %+v", tt.answer, d)
+				}
+				return
+			}
+			var got []string
+			for _, g := range d.Grants {
+				got = append(got, g.Rule.String())
+			}
+			if !slices.Equal(got, tt.want) {
+				t.Errorf("grants = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

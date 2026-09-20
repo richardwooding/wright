@@ -107,7 +107,7 @@ func TestApprovalAllowOnce(t *testing.T) {
 		t.Error("network option offered for an edit")
 	}
 	_, done := press(o, "y")
-	if !done || got == nil || !got.Allow || got.By != "user" || got.Grant != nil {
+	if !done || got == nil || !got.Allow || got.By != "user" || len(got.Grants) != 0 {
 		t.Fatalf("done=%v decision=%+v", done, got)
 	}
 }
@@ -176,7 +176,7 @@ func TestApprovalGrantList(t *testing.T) {
 	}
 	o, _ = press(o, "a")
 	_, done = press(o, "2")
-	if !done || got == nil || !got.Allow || got.Grant == nil || got.Grant.Scope != policy.ScopeProjectLocal {
+	if !done || got == nil || !got.Allow || len(got.Grants) != 1 || got.Grants[0].Scope != policy.ScopeProjectLocal {
 		t.Fatalf("grant not sent: done=%v %+v", done, got)
 	}
 }
@@ -457,4 +457,75 @@ func TestApprovalNamesAnUnrecognisedProgram(t *testing.T) {
 	if !strings.Contains(v, "⚠ caution") {
 		t.Errorf("compiling a file is not destructive:\n%s", v)
 	}
+}
+
+// TestApprovalGrantMarking covers the multi-select half of the grants page. A
+// script needs a rule per command, so being able to accept only one per
+// prompt means being asked again on the very next call — the user's own
+// complaint about a session that asked for the same compiler forty times.
+func TestApprovalGrantMarking(t *testing.T) {
+	offers := []policy.GrantOffer{
+		offer(t, "bash(fpc *)", policy.ScopeSession),
+		offer(t, "bash(./bin/t *)", policy.ScopeSession),
+		offer(t, "bash(./bin/t *)", policy.ScopeProjectLocal),
+	}
+	open := func(t *testing.T) (overlay.Overlay, func() *engine.Decision) {
+		t.Helper()
+		var got *engine.Decision
+		var o overlay.Overlay = overlay.NewApproval(approval(t, engine.SeverityCaution, offers...), th, func(d engine.Decision) { got = &d })
+		o, _ = press(o, "a")
+		return o, func() *engine.Decision { return got }
+	}
+
+	t.Run("space marks and unmarks", func(t *testing.T) {
+		o, got := open(t)
+		if v := plain(o.View(80, 30)); !strings.Contains(v, "[ ] [1]") {
+			t.Fatalf("rows are not drawn unmarked:\n%s", v)
+		}
+		o, done := press(o, " ")
+		if done || got() != nil {
+			t.Fatal("space decided")
+		}
+		if v := plain(o.View(80, 30)); !strings.Contains(v, "[x] [1]") {
+			t.Errorf("space did not mark the focused row:\n%s", v)
+		}
+		o, _ = press(o, " ")
+		if v := plain(o.View(80, 30)); strings.Contains(v, "[x]") {
+			t.Errorf("space did not unmark:\n%s", v)
+		}
+	})
+
+	t.Run("enter applies every marked row", func(t *testing.T) {
+		o, got := open(t)
+		_, done := press(o, " ", "down", " ", "enter")
+		d := got()
+		if !done || d == nil || !d.Allow || len(d.Grants) != 2 {
+			t.Fatalf("done=%v decision=%+v", done, d)
+		}
+		for i, want := range []string{"bash(fpc *)", "bash(./bin/t *)"} {
+			if d.Grants[i].Rule.String() != want {
+				t.Errorf("grant %d = %s, want %s", i, d.Grants[i].Rule.String(), want)
+			}
+		}
+	})
+
+	t.Run("enter with nothing marked applies the focused row", func(t *testing.T) {
+		o, got := open(t)
+		_, done := press(o, "down", "enter")
+		d := got()
+		if !done || d == nil || len(d.Grants) != 1 || d.Grants[0].Rule.String() != "bash(./bin/t *)" {
+			t.Fatalf("done=%v decision=%+v", done, d)
+		}
+	})
+
+	// The fast path: one keystroke still answers, marks or no marks. Anything
+	// slower would make the common single-rule case worse than before.
+	t.Run("a digit still applies that row alone", func(t *testing.T) {
+		o, got := open(t)
+		_, done := press(o, " ", "1")
+		d := got()
+		if !done || d == nil || len(d.Grants) != 1 || d.Grants[0].Rule.String() != "bash(fpc *)" {
+			t.Fatalf("done=%v decision=%+v", done, d)
+		}
+	})
 }

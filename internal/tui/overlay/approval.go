@@ -12,6 +12,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/richardwooding/wright/internal/engine"
+	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/theme"
 	"github.com/richardwooding/wright/internal/tui/diffview"
 )
@@ -56,7 +57,7 @@ func NewApproval(a engine.Approval, th theme.Theme, decide func(engine.Decision)
 	p := &Approval{a: a, th: th, decide: decide}
 	p.opts.items = append(p.opts.items, listItem{key: "y", label: allowLabel(a.Grants)})
 	if len(a.Offers) > 0 {
-		p.opts.items = append(p.opts.items, listItem{key: "a", label: "allow… (choose a rule to remember)"})
+		p.opts.items = append(p.opts.items, listItem{key: "a", label: "allow… (choose rules to remember)"})
 	}
 	p.opts.items = append(p.opts.items,
 		listItem{key: "e", label: "edit arguments"},
@@ -73,6 +74,7 @@ func NewApproval(a engine.Approval, th theme.Theme, decide func(engine.Decision)
 			desc:  fmt.Sprintf("rule %s · scope %s", o.Rule.String(), o.Scope),
 		})
 	}
+	p.grants.multi()
 	p.preview = p.previewLines()
 	return p
 }
@@ -215,7 +217,10 @@ func (p *Approval) send(d engine.Decision) bool {
 	return true
 }
 
-// updateGrants handles the "allow…" page: pick an exact rule or go back.
+// updateGrants handles the "allow…" page: mark the rules to remember, or go
+// back. A script routinely needs more than one — `cd X && fpc … && ./bin/t`
+// wants a rule for each — and answering one prompt per rule means being asked
+// again on the very next call.
 func (p *Approval) updateGrants(key tea.KeyPressMsg) bool {
 	switch s := key.String(); s {
 	case keyEsc:
@@ -224,9 +229,19 @@ func (p *Approval) updateGrants(key tea.KeyPressMsg) bool {
 		p.grants.move(-1)
 	case keyDown, "j":
 		p.grants.move(1)
+	case "space":
+		p.grants.toggle()
 	case keyEnter:
+		// Nothing marked means the focused row, so enter alone still works
+		// the way it did when a prompt could only accept one rule.
+		if marked := p.grants.markedItems(); len(marked) > 0 {
+			return p.grant(marked...)
+		}
 		return p.grant(p.grants.focus)
 	default:
+		// A digit still picks that one row and answers immediately: it is
+		// the fast path, and waiting for a second key would make the common
+		// single-rule case slower than before.
 		if i := p.grants.byKey(s); i >= 0 {
 			return p.grant(i)
 		}
@@ -234,12 +249,18 @@ func (p *Approval) updateGrants(key tea.KeyPressMsg) bool {
 	return false
 }
 
-func (p *Approval) grant(i int) bool {
-	if i < 0 || i >= len(p.a.Offers) {
+// grant sends an allow that remembers the offers at these indices.
+func (p *Approval) grant(idx ...int) bool {
+	var offers []policy.GrantOffer
+	for _, i := range idx {
+		if i >= 0 && i < len(p.a.Offers) {
+			offers = append(offers, p.a.Offers[i])
+		}
+	}
+	if len(offers) == 0 {
 		return false
 	}
-	offer := p.a.Offers[i]
-	return p.send(engine.Decision{Allow: true, Grant: &offer, By: byUser})
+	return p.send(engine.Decision{Allow: true, Grants: offers, By: byUser})
 }
 
 // openEditor fills a textarea with the pretty-printed arguments.
@@ -380,9 +401,9 @@ func (p *Approval) coloured(w int) []string {
 }
 
 func (p *Approval) viewGrants(width, height, w int) string {
-	body := []string{p.th.Subtle.Render("Remember a rule so this is not asked again. Each shows the exact rule text and where it is stored."), ""}
+	body := []string{p.th.Subtle.Render("Remember rules so this is not asked again. Each shows the exact rule text and where it is stored."), ""}
 	body = append(body, p.grants.render(p.th, w)...)
-	body = append(body, "", p.th.Subtle.Render("enter/number choose · esc back"))
+	body = append(body, "", p.th.Subtle.Render("space mark · enter apply marked (or the focused row) · number apply one · esc back"))
 	return frame(p.th, p.Title()+" · allow…", body, width, height)
 }
 

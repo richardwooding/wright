@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/richardwooding/wright/internal/engine"
+	"github.com/richardwooding/wright/internal/policy"
 )
 
 // byUser marks decisions typed by the person at the terminal.
@@ -145,9 +146,12 @@ func (r *plainRunner) answerApproval(text string) {
 	case "1", "y":
 		d = engine.Decision{Allow: true, By: byUser}
 	default:
-		if n, err := strconv.Atoi(text); err == nil && n >= 2 && n-2 < len(a.Offers) {
-			offer := a.Offers[n-2]
-			d = engine.Decision{Allow: true, Grant: &offer, By: byUser}
+		// Several numbers are several rules from one answer, the plain-mode
+		// counterpart of marking rows in the TUI. One bad number denies the
+		// whole answer: a typo must never allow, and silently applying the
+		// half that parsed would save a rule the user did not mean.
+		if offers, ok := pickOffers(a.Offers, text); ok {
+			d = engine.Decision{Allow: true, Grants: offers, By: byUser}
 		}
 	}
 	r.ctl.Reply(a.ID, d)
@@ -224,11 +228,33 @@ func (r *plainRunner) askApproval(ev engine.Event) {
 		r.line(fmt.Sprintf("  %d) allow and remember: %s  [%s]", i+2, o.Rule.String(), o.Scope))
 	}
 	r.line("  n) deny (default)")
+	if len(a.Offers) > 1 {
+		r.line("  (several numbers, comma-separated, remember several rules)")
+	}
 	fmt.Fprint(r.out, "> ")
 	r.midLine = true
 	if r.eof {
 		r.onEOF() // stdin already closed: nobody can answer
 	}
+}
+
+// pickOffers maps a typed answer — one number, or several separated by
+// commas — to the offers it names. It reports false unless every field is a
+// valid offer number, so a typo denies rather than partly allowing.
+func pickOffers(offers []policy.GrantOffer, text string) ([]policy.GrantOffer, bool) {
+	fields := strings.Split(text, ",")
+	out := make([]policy.GrantOffer, 0, len(fields))
+	for _, f := range fields {
+		n, err := strconv.Atoi(strings.TrimSpace(f))
+		if err != nil || n < 2 || n-2 >= len(offers) {
+			return nil, false
+		}
+		out = append(out, offers[n-2])
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, true
 }
 
 // grantLines say what allowing hands over. Allowing a command the classifier

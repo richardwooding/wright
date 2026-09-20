@@ -257,9 +257,8 @@ func (m *Model) applyApprovalDecided(ev engine.Event) {
 			}
 		}
 	}
-	if d.Grant != nil {
-		block.Rule = d.Grant.Rule.String()
-		block.Scope = d.Grant.Scope.String()
+	for _, g := range d.Grants {
+		block.Rules = append(block.Rules, g.Rule.String()+" ("+g.Scope.String()+")")
 	}
 	m.tr.Append(block)
 }
