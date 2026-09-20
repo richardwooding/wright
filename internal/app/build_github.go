@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"maps"
 	"path/filepath"
+	"slices"
 	"strings"
 
+	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/ghauth"
 	"github.com/richardwooding/wright/internal/git"
 	"github.com/richardwooding/wright/internal/tools"
+	"github.com/richardwooding/wright/internal/trust"
 )
 
 // githubAuth resolves the GitHub credential, when this session asked for one.
@@ -24,7 +27,7 @@ import (
 func (b *builder) githubAuth() error {
 	// The holder exists either way: /github on fills it mid-session.
 	b.gitHub = tools.NewGitHubAuth()
-	if !b.o.GitHubAuth && !b.settings.GitHub.Auth {
+	if !b.gitHubWanted() {
 		return nil
 	}
 	res, err := b.resolveGitHub()
@@ -64,6 +67,31 @@ func githubFailure(err error) string {
 	return "the token could not be resolved"
 }
 
+// gitHubWanted reports whether this session asked for a credential: the
+// flag, the user's "every project" switch, or this workspace being one of
+// the projects they named.
+//
+// The project list is matched on the *normalised* path, the same way trust
+// matches a project root — accepting under one spelling and checking under
+// another is how project trust silently stopped working on macOS, and this
+// is the same trap with the same shape.
+func (b *builder) gitHubWanted() bool {
+	if b.o.GitHubAuth || b.settings.GitHub.Auth {
+		return true
+	}
+	return b.ws != nil && slices.Contains(normalizedRoots(b.settings.GitHub.AuthProjects), trust.NormalizeRoot(b.ws.Root()))
+}
+
+// normalizedRoots normalises a configured list once, so a hand-edited entry
+// with a trailing slash or a symlink still matches.
+func normalizedRoots(paths []string) []string {
+	out := make([]string, 0, len(paths))
+	for _, p := range paths {
+		out = append(out, trust.NormalizeRoot(p))
+	}
+	return out
+}
+
 // resolveGitHub is the injection seam: tests replace it so no test needs a gh
 // binary, and so the "off does nothing" property can be asserted by a
 // resolver that records whether it was called at all.
@@ -100,17 +128,37 @@ func (b *Built) gitHubCommand(args []string) (string, error) {
 		}
 		b.gitHub.Disable()
 		b.setGitHubAuth(false)
-		return "GitHub authentication is off. Commands can still reach the network if they are allowed to; they just carry no credential.", nil
+		return "GitHub authentication is off for the rest of this session. Commands can still reach the network if they are allowed to; they just carry no credential." +
+			"\n" + b.gitHubRemembered(), nil
 	case strings.EqualFold(args[0], "on"):
-		return b.enableGitHub()
+		return b.enableGitHub(args[1:])
 	default:
 		return "", fmt.Errorf("usage: /github [on|off]")
 	}
 }
 
-func (b *Built) enableGitHub() (string, error) {
+// Scopes for /github on. They are spelled as the user types them.
+const (
+	scopeSession = "session"
+	scopeProject = "project"
+	scopeAlways  = "always"
+)
+
+func (b *Built) enableGitHub(args []string) (string, error) {
+	scope := scopeSession
+	if len(args) > 0 {
+		scope = strings.ToLower(args[0])
+	}
+	if scope != scopeSession && scope != scopeProject && scope != scopeAlways {
+		return "", fmt.Errorf("usage: /github on [session|project|always]")
+	}
 	if b.gitHub.On() {
-		return b.gitHubStatus(), nil
+		// Already on for this session; the ask may still be to remember it.
+		note, err := b.rememberGitHub(scope)
+		if err != nil {
+			return "", err
+		}
+		return b.gitHubStatus() + note, nil
 	}
 	res, err := b.resolveGitHub()
 	if err != nil {
@@ -122,6 +170,10 @@ func (b *Built) enableGitHub() (string, error) {
 	}
 	b.gitHub.Enable(env, res.Source)
 	b.setGitHubAuth(true)
+	remembered, err := b.rememberGitHub(scope)
+	if err != nil {
+		return "", err
+	}
 	// The token is not added to the redactor here: it is built once, at
 	// startup, and a Redactor's pattern list is fixed after New. Say so
 	// rather than implying a protection that is not there.
@@ -131,9 +183,33 @@ func (b *Built) enableGitHub() (string, error) {
 			" It is still masked if it matches a known token shape. To have it registered, put " + userConfigSnippet +
 			" in your user config, or start wright with --github-auth."
 	}
-	return "GitHub authentication is ON for this session (token source: " + res.Source + ")." +
+	return "GitHub authentication is ON (token source: " + res.Source + ")." +
 		"\nAny command that runs with network access can now act as you on GitHub." +
-		"\nTo make it the default, put " + userConfigSnippet + " in your user config." + note, nil
+		remembered + note, nil
+}
+
+// rememberGitHub writes the choice, when the user asked for one that
+// outlives the session. Both persistent scopes go in the *user's* config:
+// a project's own settings file is committed, so putting it there would be
+// asking everyone who clones the repository to hand over their credential —
+// and effectiveSettings ignores the block from a project layer anyway.
+func (b *Built) rememberGitHub(scope string) (string, error) {
+	switch scope {
+	case scopeAlways:
+		if err := b.Layered.SaveUser(func(s *config.Settings) { s.GitHub.Auth = true }); err != nil {
+			return "", err
+		}
+		return "\nRemembered for every project, in " + b.Layered.Paths.UserConfigFile() + ".", nil
+	case scopeProject:
+		root := trust.NormalizeRoot(b.WS.Root())
+		if err := b.Layered.SaveUser(func(s *config.Settings) {
+			s.GitHub.AuthProjects = addOnce(s.GitHub.AuthProjects, root)
+		}); err != nil {
+			return "", err
+		}
+		return "\nRemembered for " + root + ", in your user config (not the project's, which is shared).", nil
+	}
+	return "\nThis session only. `/github on project` or `/github on always` remembers it.", nil
 }
 
 // userConfigSnippet is the settings the user would paste to make the choice
@@ -143,11 +219,27 @@ const userConfigSnippet = `"github": {"auth": true}`
 func (b *Built) gitHubStatus() string {
 	if !b.gitHub.On() {
 		return "GitHub authentication is off: `gh` commands and `git push` over HTTPS cannot authenticate." +
-			"\nTurn it on for this session with `/github on`, or always with " + userConfigSnippet + " in your user config."
+			"\n`/github on` turns it on for this session; `/github on project` or `/github on always` remembers it."
 	}
 	return "GitHub authentication is ON (token source: " + b.gitHub.Source() + ")." +
 		"\nAny command that runs with network access carries a token that can act as you on GitHub." +
+		"\n" + b.gitHubRemembered() +
 		"\nTurn it off for the rest of this session with `/github off`."
+}
+
+// gitHubRemembered says what will turn it on again next session, because
+// otherwise `/github off` looks like it did nothing when a saved setting
+// brings it straight back.
+func (b *Built) gitHubRemembered() string {
+	switch {
+	case b.Settings.GitHub.Auth:
+		return "Remembered for every project in your user config."
+	case b.WS != nil && slices.Contains(normalizedRoots(b.Settings.GitHub.AuthProjects), trust.NormalizeRoot(b.WS.Root())):
+		return "Remembered for this project in your user config."
+	case b.opts.GitHubAuth:
+		return "This session was started with --github-auth."
+	}
+	return "Not remembered: it ends with this session."
 }
 
 // tokenRedacted reports whether the redactor already masks this token, so

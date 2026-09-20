@@ -1134,7 +1134,7 @@ func TestGitHubCommandAsksBeforeHandingOverACredential(t *testing.T) {
 			// word is typed. The overlay wraps to the terminal, so compare
 			// against the text with its line breaks flattened.
 			flat := flatten(view)
-			for _, want := range []string{"act as you", "network access", "this session only"} {
+			for _, want := range []string{"act as you", "network access", "/github off"} {
 				if !strings.Contains(flat, want) {
 					t.Errorf("the prompt does not mention %q:\n%s", want, view)
 				}
@@ -1147,12 +1147,34 @@ func TestGitHubCommandAsksBeforeHandingOverACredential(t *testing.T) {
 			if len(called) != 0 {
 				t.Errorf("a wrong word turned it on: %v", called)
 			}
+			// The typed word is not the end of it: the scope picker comes
+			// next, and only choosing there runs the command.
 			right := typeText(m, "yes")
-			if _, c := updateCmd(right, key("enter")); c != nil {
-				c()
+			right, c := updateCmd(right, key("enter"))
+			if c != nil {
+				if msg := c(); msg != nil {
+					right = update(right, msg)
+				}
 			}
-			if len(called) != 1 || !strings.HasPrefix(called[0], "github on") {
-				t.Errorf("the confirmed command was %v", called)
+			if len(called) != 0 {
+				t.Fatalf("the command ran before a scope was chosen: %v", called)
+			}
+			view = content(right)
+			for _, want := range []string{"this session", "this project", "every project"} {
+				if !strings.Contains(view, want) {
+					t.Errorf("the scope picker does not offer %q:\n%s", want, view)
+				}
+			}
+			right, c = updateCmd(right, key("enter")) // take the focused row
+			if c != nil {
+				if msg := c(); msg != nil {
+					if _, c2 := updateCmd(right, msg); c2 != nil {
+						c2()
+					}
+				}
+			}
+			if len(called) != 1 || !strings.HasPrefix(called[0], "github on ") {
+				t.Errorf("the confirmed command was %v, want one carrying a scope", called)
 			}
 		})
 	}

@@ -2,11 +2,13 @@ package app
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/ghauth"
+	"github.com/richardwooding/wright/internal/workspace"
 )
 
 const fakeToken = "gho_0123456789abcdef0123456789abcdef0123"
@@ -130,5 +132,62 @@ func TestAResolverErrorDoesNotLeakItsOutput(t *testing.T) {
 		if strings.Contains(w, fakeToken) {
 			t.Errorf("a warning carries the token from an error: %q", w)
 		}
+	}
+}
+
+// TestAuthProjectsEnablesOneWorkspace is the "this project" scope. It lives
+// in the user's own config rather than the project's, because a project file
+// is committed: putting it there would ask everyone who clones the
+// repository to hand over their own credential.
+func TestAuthProjectsEnablesOneWorkspace(t *testing.T) {
+	here := t.TempDir()
+	elsewhere := t.TempDir()
+	real, err := filepath.EvalSymlinks(here)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name     string
+		root     string
+		projects []string
+		want     bool
+	}{
+		{name: "the named workspace", root: here, projects: []string{real}, want: true},
+		{name: "another workspace", root: elsewhere, projects: []string{real}, want: false},
+		{name: "none named", root: here, want: false},
+		// A hand-edited entry must still match: the path is normalised on
+		// both sides, the way trust normalises a project root.
+		{name: "a trailing slash", root: here, projects: []string{real + "/"}, want: true},
+		{name: "an unresolved spelling", root: here, projects: []string{here}, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws, err := workspace.Open(tt.root, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			b := &builder{ws: ws, settings: config.Settings{GitHub: config.GitHub{AuthProjects: tt.projects}}}
+			if got := b.gitHubWanted(); got != tt.want {
+				t.Errorf("gitHubWanted = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// The flag and the every-project switch still work on their own.
+func TestGitHubWantedFromFlagOrAlways(t *testing.T) {
+	ws, err := workspace.Open(t.TempDir(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !(&builder{ws: ws, o: RunOptions{GitHubAuth: true}}).gitHubWanted() {
+		t.Error("the flag did not enable it")
+	}
+	if !(&builder{ws: ws, settings: config.Settings{GitHub: config.GitHub{Auth: true}}}).gitHubWanted() {
+		t.Error("the every-project switch did not enable it")
+	}
+	if (&builder{ws: ws}).gitHubWanted() {
+		t.Error("enabled with nothing asking for it")
 	}
 }

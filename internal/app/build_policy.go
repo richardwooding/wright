@@ -186,6 +186,11 @@ func parsePermissions(p config.Permissions, src policy.Source) ([]policy.Rule, e
 // config.Merge dedupes *across* layers; this is the within-one-file case.
 func appendRule(p *config.Permissions, r policy.Rule) {
 	text := r.String()
+	// Every write rewrites the whole file, so this is also the moment to
+	// clear up duplicates that are already in it — one real settings file
+	// accumulated four copies of the same rule before addOnce existed, and
+	// nothing would ever have removed them.
+	p.Allow, p.Ask, p.Deny = dedupe(p.Allow), dedupe(p.Ask), dedupe(p.Deny)
 	switch r.Decision {
 	case policy.Allow:
 		p.Allow = addOnce(p.Allow, text)
@@ -194,6 +199,25 @@ func appendRule(p *config.Permissions, r policy.Rule) {
 	case policy.Deny:
 		p.Deny = addOnce(p.Deny, text)
 	}
+}
+
+// dedupe keeps the first occurrence of each rule, preserving order: the list
+// is read by people, and reordering it would make a diff say more than
+// happened.
+func dedupe(list []string) []string {
+	if len(list) < 2 {
+		return list
+	}
+	seen := make(map[string]bool, len(list))
+	out := list[:0:0]
+	for _, s := range list {
+		if seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // addOnce appends text unless the list already has it.

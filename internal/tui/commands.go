@@ -214,13 +214,35 @@ func (m *Model) cmdGitHub(args []string) tea.Cmd {
 	if len(args) == 0 || !strings.EqualFold(args[0], "on") {
 		return hook("github")(m, args)
 	}
-	run := hook("github")
+	// An explicit scope skips the picker: `/github on always` is a decision
+	// the user has already made.
+	if len(args) > 1 {
+		return m.confirmGitHub(args)
+	}
+	return m.confirmGitHub(nil)
+}
+
+// confirmGitHub asks for the typed word, then — unless the scope was given
+// on the command line — for how long it should last.
+func (m *Model) confirmGitHub(args []string) tea.Cmd {
 	m.showOverlay(overlay.NewConfirm("authenticate to GitHub as you",
 		"Every shell command that runs with network access will carry a GitHub token that can act as you: "+
-			"read and write your repositories, open pull requests, create gists. It lasts for this session only, "+
-			"and `/github off` ends it.",
-		"yes", m.th, func() tea.Cmd { return run(m, args) }))
+			"read and write your repositories, open pull requests, create gists. `/github off` ends it.",
+		"yes", m.th, func() tea.Cmd {
+			if len(args) > 1 {
+				return pick(pickGitHub, args[1])
+			}
+			return pick(pickGitHub, "")
+		}))
 	return nil
+}
+
+// githubScopes are the rows of the scope picker, widest last so the reach of
+// each is read in order.
+var githubScopes = []overlay.Item{
+	{Label: "this session", Desc: "ends when wright exits; nothing is written", Value: "session"},
+	{Label: "this project", Desc: "remembered in your user config, for this workspace only", Value: "project"},
+	{Label: "every project", Desc: "remembered in your user config, everywhere", Value: "always"},
 }
 
 // cmdModel opens the picker or switches directly.
@@ -399,6 +421,8 @@ const (
 	pickResume
 	pickExport
 	pickBypass
+	pickGitHub
+	pickGitHubScope
 )
 
 // pickedMsg carries an overlay's result back into Update: overlays cannot
@@ -425,6 +449,17 @@ func (m Model) onPicked(msg pickedMsg) (tea.Model, tea.Cmd) {
 		cmd = m.export(msg.value)
 	case pickBypass:
 		m.setMode(policy.ModeBypass)
+	case pickGitHub:
+		// The word was typed. Either the scope came with the command, or
+		// ask for it now.
+		if msg.value != "" {
+			cmd = hook("github")(&m, []string{"on", msg.value})
+			break
+		}
+		m.showOverlay(overlay.NewPicker("how long should this last?", githubScopes, m.th,
+			func(it overlay.Item) tea.Cmd { return pick(pickGitHubScope, it.Value) }))
+	case pickGitHubScope:
+		cmd = hook("github")(&m, []string{"on", msg.value})
 	}
 	m.refresh()
 	return m, cmd

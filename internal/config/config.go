@@ -115,9 +115,19 @@ type Git struct {
 // service and a credential.
 type GitHub struct {
 	// Auth lets commands that run with network access authenticate to
-	// GitHub as the user. Honoured from the user's own config only — see
-	// app.effectiveSettings.
+	// GitHub as the user, in every workspace. Honoured from the user's own
+	// config only — see app.effectiveSettings.
 	Auth bool `json:"auth,omitempty"`
+	// AuthProjects are the workspaces where it is on, for a user who wants
+	// it in some repositories and not others. Absolute, symlink-resolved
+	// paths, matched the way trust matches a project root.
+	//
+	// It lives here, in the user's own file, rather than in a project's
+	// settings for two reasons: a project file is committed, so it would be
+	// asking everyone who clones the repository to hand over *their*
+	// credential; and app.effectiveSettings takes this whole block from the
+	// user's config precisely so a repository cannot turn it on.
+	AuthProjects []string `json:"authProjects,omitempty"`
 }
 
 // Instructions lists project instruction files and the CLAUDE.md fallback
@@ -306,6 +316,7 @@ func Merge(dst *Settings, src Settings) {
 	}
 	setIf(&dst.Git.Trailer, src.Git.Trailer)
 	dst.GitHub.Auth = dst.GitHub.Auth || src.GitHub.Auth
+	dst.GitHub.AuthProjects = appendDedupe(dst.GitHub.AuthProjects, src.GitHub.AuthProjects)
 	dst.Git.ProtectedBranches = appendDedupe(dst.Git.ProtectedBranches, src.Git.ProtectedBranches)
 	if src.Redaction != nil {
 		dst.Redaction = src.Redaction

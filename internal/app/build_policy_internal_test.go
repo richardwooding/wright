@@ -3,6 +3,7 @@ package app
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -97,5 +98,29 @@ func TestAUserScopedGrantIsWrittenToTheUserConfig(t *testing.T) {
 	// And nothing was written into the workspace.
 	if _, err := os.Stat(filepath.Join(ws, ".wright", "settings.local.json")); !os.IsNotExist(err) {
 		t.Errorf("a user-scoped grant touched the project (%v)", err)
+	}
+}
+
+// A file written before addOnce existed can already hold duplicates, and
+// nothing would ever have removed them. Every grant rewrites the whole file,
+// so that is the moment to clear them up.
+func TestSavingARuleCleansDuplicatesAlreadyInTheFile(t *testing.T) {
+	p := &config.Permissions{
+		Allow: []string{"bash(fpc *)", "bash(mkdir *)", "bash(fpc *)", "bash(cat *)", "bash(fpc *)"},
+		Ask:   []string{"bash(git push *)", "bash(git push *)"},
+	}
+	r, err := policy.ParseRule("bash(gh pr *) +net", policy.SourceProjectLocal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Decision = policy.Allow
+	appendRule(p, r)
+
+	want := []string{"bash(fpc *)", "bash(mkdir *)", "bash(cat *)", "bash(gh pr *) +net"}
+	if !slices.Equal(p.Allow, want) {
+		t.Errorf("allow = %v, want %v (order preserved, duplicates gone)", p.Allow, want)
+	}
+	if !slices.Equal(p.Ask, []string{"bash(git push *)"}) {
+		t.Errorf("ask = %v", p.Ask)
 	}
 }

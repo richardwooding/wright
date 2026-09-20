@@ -319,6 +319,11 @@ func (s *Store) Servers() []string {
 // accepted project untrusted for ever. A path that cannot be resolved (it no
 // longer exists) is kept as it was, cleaned, so a stale record can still be
 // found and forgotten.
+// NormalizeRoot is normalizeRoot for callers outside this package. Anything
+// that keys a decision by workspace has to agree with trust on what a path
+// *is*, or a directory reached by a different spelling silently misses.
+func NormalizeRoot(root string) string { return normalizeRoot(root) }
+
 func normalizeRoot(root string) string {
 	abs, err := filepath.Abs(root)
 	if err != nil {
