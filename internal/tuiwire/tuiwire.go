@@ -33,6 +33,7 @@ func Interactive(ctx context.Context, e *engine.Engine, deps app.InteractiveDeps
 		Plain:         deps.Plain,
 		InitialPrompt: deps.InitialPrompt,
 		Warnings:      deps.Warnings,
+		DebugAddr:     deps.DebugAddr,
 	}
 	if deps.Store != nil {
 		o.Sessions = sessions{store: deps.Store}

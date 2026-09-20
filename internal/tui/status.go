@@ -31,6 +31,9 @@ func (m Model) statusBar() string {
 		segs = append(segs, fmt.Sprintf("ctx %d%%", int(s.ContextPct()*100+0.5)))
 	}
 	segs = append(segs, formatTokens(s.Usage.TotalTokens)+" tok", formatCost(s.Cost, s.CostKnown), m.sandboxSegment())
+	if d := m.debugSegment(); d != "" {
+		segs = append(segs, d)
+	}
 	if g := m.git.String(); g != "" {
 		segs = append(segs, g)
 	}
@@ -52,6 +55,18 @@ func (m Model) modeSegment() string {
 		return m.th.HotBold.Render(theme.GlyphStop + " bypass")
 	}
 	return m.status.Mode.String()
+}
+
+// debugSegment names the diagnostics endpoint while one is listening. It
+// sits beside the sandbox because it belongs to the same question — what
+// this process is exposing — and it carries the address rather than a word,
+// because the address is the thing the user needs and /debug is one more
+// step than someone watching a session go wrong should have to take.
+func (m Model) debugSegment() string {
+	if m.opts.DebugAddr == "" {
+		return ""
+	}
+	return m.th.Warm.Render("debug " + m.opts.DebugAddr)
 }
 
 func (m Model) sandboxSegment() string {

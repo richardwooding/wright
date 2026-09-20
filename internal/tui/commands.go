@@ -47,6 +47,7 @@ func init() {
 		{"skills", "", "loaded skills", hook("skills")},
 		{"ps", "", "what is running right now", (*Model).cmdPs},
 		{"jobs", "", "background commands this session started", hook("jobs")},
+		{"debug", "[dump]", "diagnostics endpoint, and write a dump of this session", hook("debug")},
 		{"agents", "", "the sub-agents this session can call", hook("agents")},
 		{"todos", "", "show the task list", (*Model).cmdTodos},
 		{"mouse", "", "toggle wheel scrolling (off keeps terminal selection)", (*Model).cmdMouse},

@@ -1007,3 +1007,23 @@ func TestPlainModeAcceptsSeveralRules(t *testing.T) {
 		})
 	}
 }
+
+// TestStatusBarNamesTheDebugEndpoint pins the discoverability half of the
+// diagnostics endpoint. A user who started one while chasing a hang should
+// not have to remember the address, or remember that /debug exists, to find
+// it — and a process that is listening should say so on every frame.
+func TestStatusBarNamesTheDebugEndpoint(t *testing.T) {
+	ctl := &fakeController{}
+	m := tui.New(ctl, tui.Options{WorkspaceRoot: "/ws/wright", DebugAddr: "127.0.0.1:6060"})
+	m = update(m, tea.WindowSizeMsg{Width: 200, Height: 30})
+	if got := content(m); !strings.Contains(got, "debug 127.0.0.1:6060") {
+		t.Errorf("the status bar does not name the endpoint:\n%s", got)
+	}
+
+	// With no endpoint there is nothing to say, and the bar is too narrow to
+	// spend a segment on a state that is off.
+	off := newModel(t, &fakeController{}, 200, 30)
+	if got := content(off); strings.Contains(got, "debug ") {
+		t.Errorf("a debug segment appears with no endpoint running:\n%s", got)
+	}
+}

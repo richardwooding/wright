@@ -78,6 +78,11 @@ type Options struct {
 	Plain         bool
 	InitialPrompt string
 	Warnings      []string // sandbox warnings shown as notices at start
+	// DebugAddr is the diagnostics endpoint, empty when none is running. It
+	// is shown in the status bar: a listening endpoint is a state the user
+	// must be able to see, and an address they have to remember is one they
+	// will not find when the session is the thing going wrong.
+	DebugAddr string
 	// In and Out are the --plain streams; nil means stdin and stdout.
 	In  io.Reader
 	Out io.Writer
