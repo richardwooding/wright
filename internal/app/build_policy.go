@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/richardwooding/wright/internal/agents"
 	"github.com/richardwooding/wright/internal/config"
@@ -173,14 +174,27 @@ func parsePermissions(p config.Permissions, src policy.Source) ([]policy.Rule, e
 	return out, nil
 }
 
-// appendRule records a persisted grant in the matching list.
+// appendRule records a persisted grant in the matching list, once. Accepting
+// the same offer again is an ordinary thing to do — the rule may not have
+// matched the next call for some other reason — and appending unconditionally
+// put three copies of `bash(fpc *)` in one user's settings.local.json.
+// config.Merge dedupes *across* layers; this is the within-one-file case.
 func appendRule(p *config.Permissions, r policy.Rule) {
+	text := r.String()
 	switch r.Decision {
 	case policy.Allow:
-		p.Allow = append(p.Allow, r.String())
+		p.Allow = addOnce(p.Allow, text)
 	case policy.Ask:
-		p.Ask = append(p.Ask, r.String())
+		p.Ask = addOnce(p.Ask, text)
 	case policy.Deny:
-		p.Deny = append(p.Deny, r.String())
+		p.Deny = addOnce(p.Deny, text)
 	}
+}
+
+// addOnce appends text unless the list already has it.
+func addOnce(list []string, text string) []string {
+	if slices.Contains(list, text) {
+		return list
+	}
+	return append(list, text)
 }
