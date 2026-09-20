@@ -6,6 +6,89 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-09-20
+
+git and the GitHub CLI, made to work. Both were *allowed and then broken*
+inside the sandbox — the failure this project has a name for — and the
+evidence came from a live session: `gh auth status` reported "You are not
+logged into any GitHub hosts" **after** the user approved it and paid for a
+network grant.
+
+### Added
+
+- **`--github-auth`, `/github on`, or `"github": {"auth": true}`** lets shell
+  commands that run with network access authenticate to GitHub as you. wright
+  takes a token from `GH_TOKEN`/`GITHUB_TOKEN`, or asks `gh auth token` **on
+  the host**, and gives it — together with git's credential helper, pointed at
+  gh by absolute path — to those calls and no others. `git push` over HTTPS
+  and every `gh` command work; both were impossible before.
+
+  It is **off by default**, and every way in is the user's own: the flag has
+  no environment variable (an `.envrc` a repository ships must not be able to
+  turn it on), the settings key is honoured from your user config only and
+  ignored from project settings *even when trusted*, and `/github on` asks for
+  a typed confirmation that spells out what every networked command will then
+  carry.
+
+  The control is that **a command with no network never receives the
+  credential** — not redaction, which a `base64` defeats. An auto-allowed read
+  runs with no prompt at all, and it has no token in its environment. The
+  token is not in the base sandbox spec either, so the MCP stdio servers a
+  session starts never see it.
+- **A grant scope that covers every project.** A rule saved for one repository
+  had to be saved again in the next, and for git and gh that is most of the
+  friction. The approval prompt now offers a third scope, written to your user
+  config. It is last, never focused, and its label names the file.
+- `/debug` and the diagnostics dump report whether the session is
+  authenticated and where the token came from — the source's name, never the
+  value. The approval prompt gains a line on the calls that carry it, and the
+  audit log records `granted_github`.
+
+### Fixed
+
+- **`gh` was classified by substring**, which was wrong in both directions:
+  `gh pr create --delete-branch` escaped being read as a deletion only because
+  the option happened to be dropped, and deletions were recorded as needing no
+  network — so an approval of one granted none. It is now a noun/verb table
+  like git's, with `gh api` classified by its method.
+- **Four kinds of `gh` command join the hard-deny floor**: deleting a
+  repository, `gh api -X DELETE`, anything touching stored credentials (auth,
+  secret, ssh-key, gpg-key) and anything that installs or names code to run
+  (`alias set`, `extension install`). This closes a real hole: the only
+  `Destructive` guard in the policy layer is in *offering* a rule, never in
+  matching one, so a broad `bash(gh *) +net` — which one session saved,
+  because its first `gh` command was `gh --version` — used to auto-allow all
+  of them.
+- **A value-taking option could carry a command past the floor.**
+  `gh --repo o/r repo delete` parsed as the noun "o/r" and matched nothing.
+  The parser now skips those options and their values, and the floor is
+  checked separately over adjacent words, so an option this table has not been
+  taught about can shift the parse without ever losing a hard deny.
+- **The offered rule names the command group.** The classifier knows gh's
+  shape, so one approval of `gh pr view` covers `gh pr list` and nothing
+  wider, instead of the broadest rule the grammar allows.
+- Config keys that matter once a credential can exist are neutralised:
+  `core.askpass`, `http.proxy` and `core.gitproxy` (a cloned repository's own
+  proxy would otherwise be a way to receive an authenticated request), and
+  `GIT_TERMINAL_PROMPT=0` so a command needing a credential fails instead of
+  blocking on a prompt nobody can answer.
+- A diagnostics endpoint could panic the process: the serve goroutine read the
+  server field that `Close` had already cleared.
+
+### Security
+
+- This hands a live GitHub credential to a model-driven process. That is what
+  it is for, and the reasons it is opt-in, per call, trust-independent and
+  visible. The limit, stated plainly rather than implied: any command that
+  gets the token **and** the network can do anything the token can, including
+  send it somewhere. Redaction is a backstop — it keeps the token out of the
+  transcript, the audit log and your screen — not a boundary.
+- **SSH remotes still cannot authenticate**, and this does not change that.
+  Forwarding an agent socket would hand the sandbox every key you hold, with
+  no way to scope it.
+- Under bwrap the environment is passed on the command line, so while a call
+  runs its token is visible in `/proc` to processes running as you.
+
 ## [0.4.0] - 2026-09-20
 
 Debugging a live session. Asked for after a session that stopped dead with no

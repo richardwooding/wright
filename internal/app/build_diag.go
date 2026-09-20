@@ -106,6 +106,12 @@ func (b *builder) stateSection() diag.Section {
 	if s.SandboxNet {
 		net = "network"
 	}
+	github := "off"
+	if b.gitHub.On() {
+		// The source's *name*, never the token. "why can this session push"
+		// is exactly the kind of question a dump exists to answer.
+		github = "on (token from " + b.gitHub.Source() + "), carried by networked calls only"
+	}
 	return diag.Section{Title: "engine", Lines: []string{
 		fmt.Sprintf("model:   %s (%s)", s.Model, s.Provider),
 		fmt.Sprintf("mode:    %s%s", s.Mode, boolSuffix(s.Bypass, " · BYPASS")),
@@ -113,6 +119,7 @@ func (b *builder) stateSection() diag.Section {
 		fmt.Sprintf("running: %t · queued messages: %d", s.Running, s.Queued),
 		fmt.Sprintf("context: %d of %d tokens", s.ContextUsed, s.ContextWindow),
 		fmt.Sprintf("usage:   %d tokens", s.Usage.TotalTokens),
+		"github:  " + github,
 	}}
 }
 

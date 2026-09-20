@@ -120,6 +120,7 @@ internal/
   cost/       Meter (usage per model → USD via catalog), FormatUSD/FormatTokens; unknown models price as "—"
   prompt/     System(in) → (stable, dynamic); LoadInstructions (AGENTS.md walk, CLAUDE.md fallback); WrapUntrusted, ScanInjection
   diag/       self-inspection: SIGUSR1 dump + opt-in loopback pprof endpoint; leaf (takes []Section)
+  ghauth/     resolves a GitHub token on the host (env, else `gh auth token`); leaf, execs only
   git/        exec git: Status (2 s timeout), Diff, IsTracked
   theme/      lipgloss v2 palette (gloam tokens as LightDark pairs) + styles
 docs/         gloam Pages site (gloam.css/gloam.js vendored; sync-gloam.sh + gloam-sync.yml keep them current)
@@ -571,6 +572,58 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   panicking tool unwinds through it. The key is a sequence number, not the
   call ID: llmkit synthesises `call_1`, `call_2` … per response, so one
   turn's entry would delete another's.
+- **The GitHub credential is per call, and the network is the gate.** A
+  command with no network cannot use a credential, so `bashSpec` gives it
+  none — that, not redaction, is the control: a `base64 <<<"$GH_TOKEN"`
+  defeats every pattern, and an auto-allowed `SafeRead` call runs with no
+  prompt at all. `spec.Network` is the one place the three sources of network
+  (`--allow-network`, the engine-rewritten argument, the per-call grant) have
+  been folded together, which is why the decision belongs there and nowhere
+  else. It is **not** in the base spec's `Env` for a second reason:
+  `Deps.SandboxSpec` is handed to `mcpclient`, so every stdio MCP server
+  would get it. `withEnv` must clone before appending, exactly as
+  `withGranted` must — replacing an entry shifts the shared array.
+  `tools.GitHubAuth` is a holder, like `CwdState`, because `/github on|off`
+  changes it while tools run in parallel.
+- **wright may run `gh auth token`; the agent may never.** That asymmetry is
+  the whole security story of `internal/ghauth`: it runs as the user, before
+  any model call, and `gh auth token|login|refresh|setup-git` stays on the
+  hard-deny floor for the agent. `ghauth` is a leaf (pinned by the DAG test),
+  validates what `gh` printed before believing it is a token (a usage banner
+  must never become an environment variable), and keeps stderr away from
+  stdout. Its `Source` is a *name*, so it can go in a warning, `/debug` and
+  the audit log while the token cannot — and warnings are built **before the
+  redactor exists**, which is why a resolution failure is reported in
+  wright's own words rather than by interpolating the error.
+- **`github.auth` is user-only, not merely trust-gated.** `effectiveSettings`
+  takes it from the user's config even for a trusted project, because trust
+  is answered once for a whole file and the workspace-trust prompt promises
+  "It does not allow: network access". The flag has no `env:` tag for the
+  same reason `--debug-addr` has none.
+- **`credential.helper` is the one key un-blanked, and only by wright.**
+  `git.CredentialHelperKeys` finds credential.helper's index in
+  `neutralised` rather than hardcoding it, replaces the *value* only (so
+  `GIT_CONFIG_COUNT` never moves), and names `gh` by **absolute quoted
+  path** — through `PATH` a script could put its own `gh` first and be handed
+  the token on stdin. A `gh` under `$HOME` does not exist inside the sandbox,
+  so the resolution phase runs before `sandboxing` and adds its directory to
+  `ReadOnly`. `http.proxy`/`core.gitproxy` joined `neutralised` when this
+  landed: they were harmless while nothing could authenticate, and are a way
+  to receive an authenticated request once something can.
+- **`gh` is classified by noun and verb, and the floor is checked
+  separately.** `ghFloor` scans adjacent positional words rather than the
+  parsed noun/verb, so an option `ghValueFlags` has not been taught about can
+  shift the parse without ever losing a hard deny — `gh --repo o/r repo
+  delete` parsed as the noun "o/r" before that existed. An unknown noun falls
+  to `Network`, which sorts *above* `MutatingWorkspace`, so drift costs a
+  prompt rather than a silent allow. Remember that an allow rule matching a
+  `Destructive` command is not prevented anywhere: `engine.go`'s only
+  Destructive guard is in *offering* a rule. The floor is the protection.
+- **`Command.RuleWords` is how a handler says what a saved rule should
+  name.** `offerWords` reads argv[1] literally, so a flag-shaped second word
+  gives the broadest rule the grammar allows. `ScopeUser` is ordered by
+  *breadth* (dedupeOffers keeps the widest), which is not the layer
+  precedence — there the user layer still sits below the project ones.
 - **A background job outlives its call, so it must not outlive the session.**
   `bash` with `background` returns at once, and the job keeps whatever its
   approval granted it — the network, an install's writable prefixes — for as

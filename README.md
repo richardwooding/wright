@@ -655,7 +655,7 @@ rewritten. `/redaction off` turns it off for the session.
 
 `/help` `/clear` `/compact` `/cost` `/diff` `/mode` `/model` `/sessions`
 `/resume` `/export` `/undo` `/init` `/mcp` `/skills` `/agents` `/ps` `/jobs` `/todos` `/audit`
-`/redaction` `/reasoning` `/trust` `/debug` `/mouse` `/plain` `/quit`
+`/redaction` `/reasoning` `/trust` `/debug` `/github` `/mouse` `/plain` `/quit`
 
 The status bar carries the whole state of the run, and the summary is printed
 after the alt screen is gone:
@@ -697,6 +697,58 @@ $ wright models
 Cost and context come from the catalog. A model the catalog does not know
 still works — it is priced as `—` rather than guessed at, and the context
 meter falls back to a 128k assumption.
+
+## git and GitHub
+
+Commits carry the right identity already: wright resolves `user.name` and
+`user.email` **on the host, in your workspace**, so a conditional include
+(`includeIf`) is honoured, and passes them as `GIT_AUTHOR_*`/`GIT_COMMITTER_*`.
+Your global git config itself stays invisible inside the sandbox, and six
+configuration keys that name a program to run — `diff.external`,
+`core.fsmonitor`, `core.sshCommand`, `credential.helper`, `core.askpass` and
+the editors — are blanked, because a repository carries its own `.git/config`
+and cloning a hostile one would otherwise make an ordinary, auto-allowed
+`git status` execute something.
+
+That is also why `git push` and `gh` could not authenticate: there was no
+credential path into the sandbox, by design.
+
+```sh
+wright --github-auth          # for this session
+/github on                    # or from inside a running session
+```
+```jsonc
+// ~/.config/wright/config.json — for every project
+{ "github": { "auth": true } }
+```
+
+With it on, wright takes a token from `GH_TOKEN`/`GITHUB_TOKEN`, or asks
+`gh auth token` on the host, and gives it — with git's credential helper
+pointed at `gh` by absolute path — to **commands that run with network
+access, and only those**. A command with no network cannot use a credential,
+so it is not given one; that is the control, and it is why an auto-allowed
+read, which never prompts, has no token in its environment. The MCP servers a
+session starts do not get it either.
+
+It is off by default. The flag has no environment variable, so a `.envrc` a
+repository ships cannot turn it on; the settings key is read from *your*
+config only, ignored from project settings even when you have trusted them;
+and `/github on` asks you to type a word first. `/github` says what the state
+is, and `/github off` ends it.
+
+**What this does not protect you from.** Any command that gets the token and
+the network can do anything the token can, including send it somewhere.
+Redaction keeps it out of your screen, the transcript and the audit log — it
+is a backstop, not a boundary. The floor is what stops the worst of it:
+deleting a repository, `gh api -X DELETE`, anything touching stored
+credentials, and `gh alias set`/`gh extension install` are refused in every
+mode, including bypass, whatever rules you have saved.
+
+**SSH remotes cannot authenticate inside the sandbox**, and `--github-auth`
+does not change that. `SSH_AUTH_SOCK` is stripped and `~/.ssh` is hidden;
+forwarding an agent socket would let the sandbox sign with every key you
+hold, including keys that have nothing to do with this repository. Use an
+HTTPS remote, or run the push yourself.
 
 ## Debugging a live session
 
@@ -762,7 +814,7 @@ bodies.
 
 ## Status
 
-wright is pre-1.0. v0.4.0 is the current release. Working end to end
+wright is pre-1.0. v0.5.0 is the current release. Working end to end
 today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,
