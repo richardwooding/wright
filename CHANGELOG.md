@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-20
+
+Trust, and what a grant is allowed to hide. wright now asks whether you trust
+a directory before it reads anything in it, and in exchange stops asking about
+every ordinary edit inside it. The same question runs through the rest of the
+release: an exported transcript finally shows the approval decisions, the
+audit log records what an approval actually handed over, a saved rule can
+carry an install's write grant, an MCP server can be accepted from a prompt,
+and the system prompt no longer describes tools that were never registered.
+
 ### Added
 
 - Exported transcripts (`wright sessions export`, `/export`) now show the
