@@ -6,6 +6,32 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A program wright has no description of could never be allowed — you were
+  asked on every single call, for ever.** A script mentioning any command
+  outside the classifier's table was treated as *opaque*, the same as
+  `eval "$CMD"`, and opaque scripts match no allow rule by design. So no
+  "always allow" was offered (it could not have been honoured), and writing
+  `bash(fpc *)` into settings by hand did nothing either. A user compiling
+  Pascal approved the same command five times in one session with no way to
+  stop it.
+
+  Being unreadable and being unfamiliar are now different things. A script the
+  analyser cannot see through — a dynamic command name, `eval`, `sh -c "$X"`,
+  a call to a function the script defines — is unchanged: no rule may ever
+  match it. A program that is merely absent from the table is fully legible,
+  so it still asks by default and is still assumed to change the workspace,
+  but a rule naming it covers it. That makes "always allow" work for `fpc`,
+  and for cargo, zig, tsc, dotnet, mvn and everything else nobody has
+  modelled.
+- Such a command was also reported as **destructive**, with *deny*
+  pre-selected — the treatment meant for `rm -rf`. Compiling a file now reads
+  as the mutating command it is, and the prompt names the program it does not
+  recognise instead of claiming the script is unreadable.
+- A malformed function declaration (`()0`) crashed the shell analyser. Found
+  by the fuzzer while checking the above.
+
 ## [0.3.2] - 2026-09-20
 
 Resuming a session now continues it: same permission mode, recorded when you

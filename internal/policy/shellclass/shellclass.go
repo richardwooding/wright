@@ -58,6 +58,10 @@ type Command struct {
 	Reason string
 	// Dynamic is true when any argument depends on runtime expansion.
 	Dynamic bool
+	// Unrecognised is true when the program is not in the command table.
+	// Unlike Dynamic this does not make the script opaque: the argv is
+	// known, so a rule naming the program can cover the command.
+	Unrecognised bool
 	// Writes and Reads are the absolute paths the command declares it will
 	// write (redirects, tee, cp destinations…) or read.
 	Writes []string
@@ -80,8 +84,19 @@ type Analysis struct {
 	// Class is the maximum command class (and any pattern-level floor).
 	Class Class
 	// Unknown is true when the script contains constructs whose effect cannot
-	// be determined statically. Unknown scripts never match allow rules.
+	// be determined statically — a dynamic command name, eval, a shell
+	// reading its script from elsewhere. Unknown scripts never match allow
+	// rules: that is what makes an allow rule safe to write.
+	//
+	// It is deliberately *not* set for a program that is merely absent from
+	// the command table; see Unrecognised. A new reason to give up on
+	// analysis belongs here, not there.
 	Unknown bool
+	// Unrecognised names the programs the table has no spec for, in order of
+	// first appearance. Such a command is fully legible — the user can read
+	// its argv — so it can be covered by a rule naming it, while still being
+	// classed MutatingWorkspace and so never auto-allowed.
+	Unrecognised []string
 	// HardDeny, when non-empty, names a pattern that no mode may run.
 	HardDeny string
 	// Reasons collects the notable findings for the approval prompt.

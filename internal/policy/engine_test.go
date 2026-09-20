@@ -240,7 +240,17 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "bash privilege hard-denied", mode: policy.ModeBypass, req: f.bash("mkfs.ext4 /dev/sda"), want: policy.Deny, hard: true},
 		{name: "user allow beats builtin ask for git push", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(git push origin feature) +net")}, req: f.bash("git push origin feature"), want: policy.Allow, network: true},
 		{name: "project ask beats user allow", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, userAllow, rules(t, policy.Ask, policy.SourceProject, "bash(npm *)")}, req: f.bash("npm test"), want: policy.Ask},
-		{name: "bash unknown default asks no offers", mode: policy.ModeDefault, req: f.bash("frobnicate --all"), want: policy.Ask, noOffers: true},
+		// An opaque script — the analyser cannot see what runs — is asked
+		// about and offered nothing, because no rule could honour the offer.
+		{name: "bash opaque default asks no offers", mode: policy.ModeDefault, req: f.bash(`eval "$CMD"`), want: policy.Ask, noOffers: true},
+		// An unrecognised *program* is fully legible, so it still asks but
+		// the user can be offered a rule that names it. Before the split,
+		// this row asserted noOffers, which is why a user compiling with an
+		// unmodelled compiler was asked on every single call for ever.
+		{name: "bash unrecognised default asks with offers", mode: policy.ModeDefault, req: f.bash("frobnicate --all"), want: policy.Ask, offers: true},
+		{name: "bash unrecognised is never auto-allowed", mode: policy.ModeAutoEdit, req: f.bash("frobnicate --all"), want: policy.Ask},
+		{name: "a rule naming an unrecognised program covers it", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(frobnicate *)")}, req: f.bash("frobnicate --all"), want: policy.Allow},
+		{name: "no rule can cover an opaque script", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(eval *)", "bash")}, req: f.bash(`eval "$CMD"`), want: policy.Ask},
 		{name: "bash unknown bypass allows", mode: policy.ModeBypass, req: f.bash("frobnicate --all"), want: policy.Allow},
 		{name: "bash read outside asks", mode: policy.ModeDefault, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
 		{name: "bash read protected denies", mode: policy.ModeDefault, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},

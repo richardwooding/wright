@@ -15,9 +15,14 @@ type result struct {
 	network  bool
 	installs bool
 	unknown  bool
-	hardDeny string
-	writes   []string
-	reads    []string
+	// unrecognised marks a command whose argv is fully known but whose
+	// program is not in the table. That is a weaker fact than unknown and
+	// must not be confused with it: the script is perfectly legible, so a
+	// rule naming the program can cover it.
+	unrecognised bool
+	hardDeny     string
+	writes       []string
+	reads        []string
 }
 
 // raise lifts the class to at least c.
@@ -48,6 +53,7 @@ func (a *analyzer) classifyWords(words []word) Command {
 	if r.unknown {
 		c.Dynamic = true
 	}
+	c.Unrecognised = r.unrecognised
 	if r.hardDeny != "" {
 		a.hardDeny(r.hardDeny, r.class)
 	}
@@ -78,7 +84,12 @@ func (a *analyzer) classify(words []word) result {
 	if h, ok := table[name]; ok {
 		return h(a, name, words[1:])
 	}
-	return result{class: MutatingWorkspace, unknown: true, reason: "unknown command " + name}
+	// Not opaque: the argv is fully expanded and readable, we simply have no
+	// spec for this program. Everything is still assumed about its effects
+	// (MutatingWorkspace, so it is never auto-allowed), but a rule naming it
+	// can cover it — otherwise no program outside this table could ever be
+	// allowed, by an offer or by hand.
+	return result{class: MutatingWorkspace, unrecognised: true, reason: "unknown command " + name}
 }
 
 // commandName resolves argv[0]. Paths inside the workspace are workspace

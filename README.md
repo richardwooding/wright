@@ -202,6 +202,14 @@ spec    := pathglob                    doublestar; relative = workspace-relative
 }
 ```
 
+A script is allowed by rules only when **every** command in it matches an allow
+rule, except commands that would need no rule on their own (a safe read
+declaring no paths, such as the `cd` and `grep` around a build command). A
+program wright has no description of still asks, but a rule naming it —
+`bash(fpc *)` — covers it, so "always allow" works for tools outside the
+builtin set. A script the analyser cannot read at all (`eval`, `sh -c "$VAR"`,
+a dynamic command name) matches no allow rule, ever, and is offered none.
+
 `+net` and `+install` are bash-only suffixes. `+net` allows the command *and*
 grants the sandbox network for it. `+install` grants the network **and** makes
 the package-manager prefixes (`$HOMEBREW_PREFIX`, and the others

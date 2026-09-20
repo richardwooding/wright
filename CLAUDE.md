@@ -147,6 +147,20 @@ client to HTTP MCP transports).
   analyser cannot see through sets `Unknown`, and `policy` refuses to match
   allow rules against Unknown scripts — that is the property that makes allow
   rules safe to write.
+- **"Opaque" and "unrecognised" are different, and conflating them is a trap.**
+  `Analysis.Unknown` means the analyser could not work out what runs — a
+  dynamic command name, `eval`, `sh -c "$X"`, a `PATH` override, a call to a
+  function the script defines. No allow rule may ever match those.
+  `Analysis.Unrecognised` names programs whose argv is fully readable and that
+  are simply absent from the table; those still classify as
+  `MutatingWorkspace` (so they are never auto-allowed) but a rule naming one
+  *can* cover it. They were the same flag until v0.3.3, which meant **any
+  program outside the table was un-allowable for ever** — a user compiling
+  Pascal approved the same `fpc` command on every call, was offered no rule
+  because `suggestBash` bails on `Unknown`, and could not have written one by
+  hand either because `coverBash` bails too. A new reason to give up on
+  analysis belongs in `Unknown`; only `classify.go`'s "unknown command" case
+  is `Unrecognised`.
 - **An option or an assignment can be a command.** Every name in a table's
   safe-read set (`gitSafeRead`, the readers) is auto-allowed with *no*
   prompt, so any option of it that names a program to run (`git bisect run`,

@@ -17,6 +17,9 @@ type analyzer struct {
 	// floor is a class lower bound raised by pattern-level findings (curl|sh)
 	// that do not belong to a single command.
 	floor Class
+	// funcs are the function names this script defines; a call to one is
+	// opaque rather than an unrecognised program.
+	funcs []string
 }
 
 // word is an expanded shell word with its dynamic flag.
@@ -78,6 +81,15 @@ func (a *analyzer) add(c Command) {
 	if c.Dynamic {
 		a.out.Unknown = true
 	}
+	if c.Unrecognised && len(c.Argv) > 0 && slices.Contains(a.funcs, c.Argv[0]) {
+		// A call to a function defined in this same script: opaque, as it
+		// was before the unrecognised/opaque split.
+		c.Unrecognised = false
+		a.out.Unknown = true
+	}
+	if c.Unrecognised && len(c.Argv) > 0 && !slices.Contains(a.out.Unrecognised, c.Argv[0]) {
+		a.out.Unrecognised = append(a.out.Unrecognised, c.Argv[0])
+	}
 	a.reason(c.Reason)
 	a.out.Commands = append(a.out.Commands, c)
 }
@@ -129,6 +141,17 @@ func (a *analyzer) walkCompound(node syntax.Command) {
 			a.walkStmts(item.Stmts)
 		}
 	case *syntax.FuncDecl:
+		// Remember the name before walking the body, so a later call to it
+		// is not mistaken for an unrecognised *program*. A function name is
+		// chosen by whoever wrote the script, so a rule naming one would
+		// vouch for nothing; the body's own commands are analysed here and
+		// have to be covered on their own terms.
+		// Name is nil for a malformed declaration: "()0" parses as a
+		// FuncDecl with no name, which the fuzzer found the moment this
+		// started reading it.
+		if cmd.Name != nil {
+			a.funcs = append(a.funcs, cmd.Name.Value)
+		}
 		a.walkStmt(cmd.Body)
 	case *syntax.TimeClause:
 		a.walkStmt(cmd.Stmt)

@@ -214,7 +214,7 @@ var table = []row{
 	{cmd: "PATH=/tmp:$PATH ls", class: shellclass.SafeRead, unknown: true},
 	{cmd: "IFS=: read a", class: shellclass.SafeRead, unknown: true},
 	{cmd: "export PATH=/evil", class: shellclass.SafeRead, unknown: true},
-	{cmd: "somebinary --flag", class: shellclass.MutatingWorkspace, unknown: true},
+	{cmd: "somebinary --flag", class: shellclass.MutatingWorkspace},
 	{cmd: "sh -c 'sh -c \"sh -c \\\"ls\\\"\"'", class: shellclass.MutatingWorkspace, unknown: true},
 	{cmd: "alias ls=rm; ls x", class: shellclass.MutatingWorkspace, unknown: true},
 	{cmd: "cat > $FILE", class: shellclass.SafeRead, unknown: true},
@@ -736,6 +736,61 @@ func TestBraceIsOnlyAKeywordInCommandPosition(t *testing.T) {
 			// handed arguments nobody modelled is not something to auto-allow.
 			if !tt.hardDeny && a.Class <= shellclass.SafeRead && !a.Unknown {
 				t.Errorf("class = %v, want more than a safe read (%s)", a.Class, a.Summary())
+			}
+		})
+	}
+}
+
+// TestOpaqueVersusUnrecognised pins the distinction the whole allow-rule
+// mechanism rests on.
+//
+// Unknown means the analyser could not work out what runs, and no allow rule
+// may ever match it. Unrecognised means the argv is fully readable and only
+// the program is absent from the table — the script is legible, so a rule
+// naming that program can cover it. Conflating the two made every program
+// outside the table permanently un-allowable: a user compiling Pascal was
+// asked to approve the same fpc command on every single call, with no
+// "always allow" option, because fpc is not in the table.
+func TestOpaqueVersusUnrecognised(t *testing.T) {
+	tests := []struct {
+		name         string
+		cmd          string
+		opaque       bool
+		unrecognised []string
+	}{
+		// The analyser cannot see what these run.
+		{name: "eval", cmd: `eval "$CMD"`, opaque: true},
+		{name: "dynamic command name", cmd: `$TOOL --flag`, opaque: true},
+		{name: "shell with a dynamic script", cmd: `sh -c "$CMD"`, opaque: true},
+		{name: "piped into a shell", cmd: "echo x | sh", opaque: true},
+		{name: "env override", cmd: "GOFLAGS=-toolexec=./x go build ./...", opaque: true},
+		{name: "unparsable", cmd: "for do done (", opaque: true},
+		// A function's name is chosen by whoever wrote the script, so it
+		// vouches for nothing; its body is analysed on its own terms.
+		// Opaque because of the call to f; the fpc in its body is still a
+		// real unrecognised program and is named as one, which changes
+		// nothing while the script as a whole stays uncoverable.
+		{name: "local function", cmd: "f() { fpc x.pas; }; f", opaque: true, unrecognised: []string{"fpc"}},
+
+		// These are perfectly readable; only the program is unmodelled.
+		{name: "a compiler", cmd: "fpc -Mobjfpc src/X.pas", unrecognised: []string{"fpc"}},
+		{name: "any unmodelled program", cmd: "frobnicate --all", unrecognised: []string{"frobnicate"}},
+		{name: "in a pipeline with known commands", cmd: "cd d && fpc x.pas 2>&1 | grep -i warning", unrecognised: []string{"fpc"}},
+		{name: "named once however often it appears", cmd: "fpc a.pas; fpc b.pas", unrecognised: []string{"fpc"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shellclass.Analyze(tt.cmd, fakeWS{})
+			if got.Unknown != tt.opaque {
+				t.Errorf("Unknown = %v, want %v (%s)", got.Unknown, tt.opaque, got.Summary())
+			}
+			if !slices.Equal(got.Unrecognised, tt.unrecognised) {
+				t.Errorf("Unrecognised = %v, want %v", got.Unrecognised, tt.unrecognised)
+			}
+			// Either way it is never a safe read: a program nobody modelled
+			// is not something to run without asking.
+			if len(tt.unrecognised) > 0 && got.Class <= shellclass.SafeRead {
+				t.Errorf("class = %v, want more than a safe read (%s)", got.Class, got.Summary())
 			}
 		})
 	}

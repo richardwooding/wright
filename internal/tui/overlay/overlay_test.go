@@ -418,3 +418,43 @@ func TestSmallOverlaysFitWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestApprovalNamesAnUnrecognisedProgram pins what the prompt says about a
+// program the classifier has no description of. The script is perfectly
+// readable — saying it "contains constructs the analyser cannot see through"
+// would be wrong, and reporting it as destructive was worse. It should say
+// which program is unknown, and offer a rule for it.
+func TestApprovalNamesAnUnrecognisedProgram(t *testing.T) {
+	a := engine.Approval{
+		ID:   "ap-1",
+		Tool: "bash",
+		Request: policy.Request{
+			Tool: "bash",
+			Shell: &shellclass.Analysis{
+				Raw:          "fpc -Mobjfpc src/X.pas",
+				Class:        shellclass.MutatingWorkspace,
+				Reasons:      []string{"unknown command fpc"},
+				Unrecognised: []string{"fpc"},
+			},
+		},
+		Verdict:  policy.Verdict{Decision: policy.Ask, Reason: "mutating command"},
+		Preview:  engine.Preview{Title: "compile"},
+		Offers:   []policy.GrantOffer{offer(t, "bash(fpc *)", policy.ScopeSession)},
+		Severity: engine.SeverityCaution,
+	}
+	p := overlay.NewApproval(a, th, func(engine.Decision) {})
+	v := plain(p.View(80, 24))
+
+	if !strings.Contains(v, "wright has no description of fpc") {
+		t.Errorf("the prompt does not say which program is unknown:\n%s", v)
+	}
+	if strings.Contains(v, "cannot see through") {
+		t.Errorf("the prompt calls a readable script opaque:\n%s", v)
+	}
+	if !strings.Contains(v, "[a] allow") {
+		t.Errorf("no way to remember a rule:\n%s", v)
+	}
+	if !strings.Contains(v, "⚠ caution") {
+		t.Errorf("compiling a file is not destructive:\n%s", v)
+	}
+}

@@ -381,3 +381,42 @@ func TestModeChangeIsRecordedImmediately(t *testing.T) {
 		t.Errorf("recorded mode = %q, want %q", m.Mode, policy.ModePlan)
 	}
 }
+
+// TestUnrecognisedProgramIsCautionNotDestructive pins how the prompt frames a
+// program the classifier has no description of. It used to be reported as
+// destructive — the treatment reserved for `rm -rf` — with deny pre-focused,
+// because a script mentioning any unmodelled program was marked opaque.
+// Compiling a source file is a mutating command and should read as one.
+func TestUnrecognisedProgramIsCautionNotDestructive(t *testing.T) {
+	tests := []struct {
+		name   string
+		script string
+		want   engine.Severity
+	}{
+		{name: "an unrecognised compiler", script: "fpc -Mobjfpc src/X.pas", want: engine.SeverityCaution},
+		{name: "a genuinely opaque script", script: `eval "$CMD"`, want: engine.SeverityDestructive},
+		{name: "an actually destructive command", script: "rm -rf build", want: engine.SeverityDestructive},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f, _ := bashFixture(t, tt.script)
+			if err := f.eng.Submit("go"); err != nil {
+				t.Fatal(err)
+			}
+			var got engine.Severity
+			var seen bool
+			f.collect(t, func(ev engine.Event) {
+				if ev.Kind == engine.KindApprovalRequest {
+					got, seen = ev.Approval.Severity, true
+					f.eng.Reply(ev.Approval.ID, engine.Decision{Allow: false, Reason: "no"})
+				}
+			})
+			if !seen {
+				t.Fatal("no approval was raised")
+			}
+			if got != tt.want {
+				t.Errorf("severity = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

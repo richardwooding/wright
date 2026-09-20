@@ -333,6 +333,16 @@ func (p *Approval) facts(w int) []string {
 		if req.Shell.Unknown {
 			out = append(out, p.th.Warm.Render(theme.GlyphWarn+" contains constructs the analyser cannot see through"))
 		}
+		if n := req.Shell.Unrecognised; len(n) > 0 {
+			// The script is perfectly readable; wright simply has no
+			// description of these programs, so it cannot say what they
+			// touch. Saying that plainly is the difference between "I
+			// cannot read this" and "I can read it, I just do not know
+			// this tool" — and it tells the user what remembering a rule
+			// for it would actually mean.
+			out = append(out, wrap(theme.GlyphWarn+" wright has no description of "+strings.Join(n, ", ")+
+				", so it cannot tell what they read or write; the sandbox still confines them", w)...)
+		}
 	}
 	out = append(out, p.grantFacts(w)...)
 	if p.a.Verdict.Reason != "" {
