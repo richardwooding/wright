@@ -780,3 +780,86 @@ func TestPlanModeOffersNothing(t *testing.T) {
 		}
 	}
 }
+
+// TestSavedRuleCoversARealBuildCommand is the acceptance test for the report
+// behind this change: a user compiling Pascal approved the same command on
+// every call, with no "always allow" offered, because fpc is not in the
+// classifier's table.
+//
+// It pins the whole path end to end: the script asks and offers a rule naming
+// the program, the offered rule is one a person would recognise, and once it
+// is in the allow layer the same shape runs without a prompt — including the
+// `cd` and `grep` the model wraps around it, which need no rule of their own.
+func TestSavedRuleCoversARealBuildCommand(t *testing.T) {
+	f := newFixture(t)
+	script := func(src, grepFlag string) policy.Request {
+		return f.bash("cd " + f.ws.Root() + " && fpc -Mobjfpc -Sh -FUbuild -Fusrc " + src + " 2>&1 | grep " + grepFlag + " warning")
+	}
+
+	t.Run("asks, and offers a rule naming the program", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin())
+		v := e.Evaluate(script("src/A.pas", "-i"))
+		if v.Decision != policy.Ask {
+			t.Fatalf("decision = %v, want Ask", v.Decision)
+		}
+		var texts []string
+		for _, o := range v.Offers {
+			texts = append(texts, o.Rule.String())
+		}
+		if !slices.Contains(texts, "bash(fpc *)") {
+			t.Errorf("offers = %v, want one naming the program as bash(fpc *)", texts)
+		}
+	})
+
+	t.Run("the saved rule covers the same shape again", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin(),
+			rules(t, policy.Allow, policy.SourceSession, "bash(fpc *)"))
+		// A different source file and different grep flags: the model does
+		// not repeat itself exactly, and a rule that only matched verbatim
+		// would send the user straight back to approving every call.
+		for _, req := range []policy.Request{script("src/A.pas", "-i"), script("src/B.pas", "-Ei")} {
+			if v := e.Evaluate(req); v.Decision != policy.Allow {
+				t.Errorf("decision = %v, want Allow (%s) explain=%v", v.Decision, v.Reason, v.Explain)
+			}
+		}
+	})
+
+	t.Run("without the rule it still asks", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin())
+		if v := e.Evaluate(script("src/A.pas", "-i")); v.Decision != policy.Ask {
+			t.Errorf("decision = %v, want Ask without a rule", v.Decision)
+		}
+	})
+
+	t.Run("the rule does not extend past the program it names", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin(),
+			rules(t, policy.Allow, policy.SourceSession, "bash(fpc *)"))
+		for _, tc := range []struct{ name, cmd string }{
+			{"another program", "frobnicate --all"},
+			{"an opaque script", `fpc x.pas && eval "$CMD"`},
+			{"the hard-deny floor", "fpc x.pas; rm -rf ~"},
+		} {
+			if v := e.Evaluate(f.bash(tc.cmd)); v.Decision == policy.Allow {
+				t.Errorf("%s: allowed by a rule for fpc (%s)", tc.name, v.Reason)
+			}
+		}
+	})
+
+	// TestSavedRuleCoversARealBuildCommand's limit, stated rather than
+	// implied: an unrecognised program's arguments mean nothing to the
+	// analyser, so it declares no paths and the containment checks have
+	// nothing to check. A rule naming it therefore covers it whatever
+	// arguments it is given — only the sandbox confines where it writes.
+	// That is the price of being able to allow a program at all, and it is
+	// the same bargain the builtin bash(go build *) already makes. It is
+	// pinned here so the day someone teaches the table about fpc, this
+	// expectation flips deliberately rather than silently.
+	t.Run("an unrecognised program's arguments are not understood", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin(),
+			rules(t, policy.Allow, policy.SourceSession, "bash(fpc *)"))
+		v := e.Evaluate(f.bash("fpc -o /etc/x src/A.pas"))
+		if v.Decision != policy.Allow {
+			t.Errorf("decision = %v; the analyser cannot read -o, so this is expected to be covered", v.Decision)
+		}
+	})
+}

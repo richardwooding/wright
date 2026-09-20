@@ -161,6 +161,16 @@ client to HTTP MCP transports).
   hand either because `coverBash` bails too. A new reason to give up on
   analysis belongs in `Unknown`; only `classify.go`'s "unknown command" case
   is `Unrecognised`.
+- **A command that needs no rule is skipped when covering a script.**
+  `coverBash` requires *every* command in a script to match an allow rule, and
+  the model writes `cd dir && tool … | grep …`, so a saved rule for `tool` was
+  defeated by the `cd`. `inertCommand` skips a safe read that declares no
+  path, needs no network and is neither dynamic nor unrecognised: on its own
+  it would run with no prompt at all, so skipping it grants nothing new. The
+  test for this is the `cd`/`grep` half of
+  `TestSavedRuleCoversARealBuildCommand`. Note what makes it precise: `echo hi`
+  declares nothing, `echo hi > file` declares the write and still needs a rule
+  — which is why this is not a list of harmless command names.
 - **An option or an assignment can be a command.** Every name in a table's
   safe-read set (`gitSafeRead`, the readers) is auto-allowed with *no*
   prompt, so any option of it that names a program to run (`git bisect run`,

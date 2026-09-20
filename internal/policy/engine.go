@@ -608,6 +608,9 @@ func (ev *eval) coverBash(allow []*Rule) (bool, *Rule, string) {
 // covered.
 func (ev *eval) coverCommands(allow []*Rule) (last *Rule, why string) {
 	for _, c := range ev.req.Shell.Commands {
+		if inertCommand(c) {
+			continue
+		}
 		matched := false
 		for _, r := range allow {
 			if (r.IsBare() || r.IsBash()) && r.MatchesCommand(c.Argv) {
@@ -625,6 +628,24 @@ func (ev *eval) coverCommands(allow []*Rule) (last *Rule, why string) {
 		}
 	}
 	return last, ""
+}
+
+// inertCommand reports whether a command needs no allow rule of its own.
+//
+// A safe read that declares no path, needs no network and is neither dynamic
+// nor an unrecognised program would be allowed on its own merits, with no
+// prompt at all (modeBash's safe-read branch). Demanding a rule for it anyway
+// is what kept a saved rule for the one command that *does* something from
+// ever taking effect: coverage needs every command matched, and the model
+// writes "cd dir && tool … | grep …", so a rule for the tool was defeated by
+// the cd. Skipping these grants nothing that was not already granted.
+//
+// A redirect is what makes this precise rather than a list of command names:
+// `echo hi` declares nothing, while `echo hi > file` declares the write and
+// so still needs a rule.
+func inertCommand(c shellclass.Command) bool {
+	return c.Class == shellclass.SafeRead && len(c.Reads) == 0 && len(c.Writes) == 0 &&
+		!c.Network && !c.Dynamic && !c.Unrecognised
 }
 
 func (ev *eval) coverPaths(allow []*Rule) (bool, *Rule, string) {
@@ -936,7 +957,13 @@ func suggestBash(req Request) []Rule {
 		if len(c.Argv) == 0 || strings.HasPrefix(c.Argv[0], "(") {
 			continue
 		}
-		words := c.Argv[:min(2, len(c.Argv))]
+		// Offering a rule for a command that needs none is noise that
+		// obscures the one rule that matters: the user should see
+		// "bash(fpc *)", not that plus a rule for the cd in front of it.
+		if inertCommand(c) {
+			continue
+		}
+		words := offerWords(c.Argv)
 		text := "bash(" + strings.Join(words, " ") + " *)"
 		if c.Network || sh.NeedsNetwork {
 			text += " +net"
@@ -955,6 +982,21 @@ func suggestBash(req Request) []Rule {
 		}
 	}
 	return rules
+}
+
+// offerWords is the argv prefix an offered rule pins: the program, plus a
+// second word only when it is a subcommand.
+//
+// Matching is positional and exact, so pinning a *flag* is false precision —
+// "bash(fpc -Mobjfpc *)" stops matching the moment the model reorders its
+// flags, and the user who accepted it is asked again and concludes the
+// feature does not work. "bash(git push *)" is worth two words; "bash(fpc *)"
+// is the honest rule for a program whose flags vary.
+func offerWords(argv []string) []string {
+	if len(argv) > 1 && !strings.HasPrefix(argv[1], "-") {
+		return argv[:2]
+	}
+	return argv[:1]
 }
 
 func (e *Engine) suggestPaths(req Request) []Rule {

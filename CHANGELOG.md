@@ -29,6 +29,15 @@ All notable changes to this project are documented here. The format follows
   pre-selected — the treatment meant for `rm -rf`. Compiling a file now reads
   as the mutating command it is, and the prompt names the program it does not
   recognise instead of claiming the script is unreadable.
+- A saved rule was defeated by the glue around it. Coverage needs every
+  command in a script matched, so `cd dir && tool … | grep …` kept asking even
+  with a rule for `tool`. A command that would run with no prompt on its own —
+  a safe read declaring no paths — no longer needs a rule of its own, and is
+  no longer offered one.
+- An offered rule pinned the first *flag* it saw (`bash(fpc -Mobjfpc *)`),
+  which stopped matching the moment the model reordered its flags, so the
+  rule you accepted quietly stopped working. Offers now pin a second word only
+  when it is a subcommand: `bash(git push *)`, but `bash(fpc *)`.
 - A malformed function declaration (`()0`) crashed the shell analyser. Found
   by the fuzzer while checking the above.
 
