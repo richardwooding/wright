@@ -963,7 +963,7 @@ func suggestBash(req Request) []Rule {
 		if inertCommand(c) {
 			continue
 		}
-		words := offerWords(effectiveArgv(c))
+		words := ruleWordsFor(c)
 		text := "bash(" + strings.Join(words, " ") + " *)"
 		if c.Network || sh.NeedsNetwork {
 			text += " +net"
@@ -1004,6 +1004,21 @@ func matchesCommand(r *Rule, c shellclass.Command) bool {
 		return true
 	}
 	return len(c.Program) > 0 && r.MatchesCommand(c.Program)
+}
+
+// ruleWordsFor is the argv prefix an offered rule pins. A handler that knows
+// its program's shape says so (shellclass.Command.RuleWords); everything else
+// is read from the words as written.
+//
+// The difference is not cosmetic. `gh --version` has a flag-shaped second
+// word, so reading the words gives `bash(gh *)` — the broadest rule the
+// grammar allows, and one real session saved exactly that because the first
+// gh command it ran happened to be `gh --version`.
+func ruleWordsFor(c shellclass.Command) []string {
+	if len(c.RuleWords) > 0 {
+		return c.RuleWords
+	}
+	return offerWords(effectiveArgv(c))
 }
 
 // offerWords is the argv prefix an offered rule pins: the program, plus a

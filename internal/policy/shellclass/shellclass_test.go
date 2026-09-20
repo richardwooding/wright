@@ -919,6 +919,15 @@ func TestGhIsClassifiedByVerb(t *testing.T) {
 		{name: "api DELETE is on the floor", cmd: "gh api -X DELETE repos/o/r", class: shellclass.Destructive, hardDeny: true, network: true},
 		{name: "api --method DELETE too", cmd: "gh api --method DELETE repos/o/r", class: shellclass.Destructive, hardDeny: true, network: true},
 
+		// A flag that eats the next word must not shift the command group,
+		// and — whatever the flags do — a dangerous pair must still be
+		// refused. The first of these parsed as the noun "o/r" and missed
+		// the floor entirely.
+		{name: "delete behind a value-taking flag", cmd: "gh --repo o/r repo delete --yes", class: shellclass.Destructive, hardDeny: true, network: true},
+		{name: "credentials behind a value-taking flag", cmd: "gh --hostname h auth token", class: shellclass.Privilege, hardDeny: true, network: true},
+		{name: "delete behind a flag this table does not know", cmd: "gh --frobnicate x repo delete", class: shellclass.Destructive, hardDeny: true, network: true},
+		{name: "--flag=value does not eat a word", cmd: "gh --repo=o/r pr list", class: shellclass.Network, network: true},
+
 		// Drift costs a prompt, never a silent allow.
 		{name: "an unknown noun", cmd: "gh frobnicate --all", class: shellclass.Network, network: true},
 		{name: "no subcommand at all", cmd: "gh --version", class: shellclass.Network, network: true},

@@ -21,6 +21,11 @@ type result struct {
 	// argv is the effective command after any wrapper has been peeled, when
 	// that differs from the words as written.
 	argv []string
+	// ruleWords is the argv prefix a saved rule should name, for a program
+	// whose handler knows its own shape. Without it the policy layer can
+	// only guess from the words, and a flag-shaped second word makes it
+	// guess the broadest rule the grammar allows.
+	ruleWords []string
 	// unrecognised marks a command whose argv is fully known but whose
 	// program is not in the table. That is a weaker fact than unknown and
 	// must not be confused with it: the script is perfectly legible, so a
@@ -89,6 +94,7 @@ func (a *analyzer) classifyWords(words []word) Command {
 	if len(r.argv) > 0 && !slices.Equal(r.argv, argv) {
 		c.Program = r.argv
 	}
+	c.RuleWords = r.ruleWords
 	if r.hardDeny != "" {
 		a.hardDeny(r.hardDeny, r.class)
 	}

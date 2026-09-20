@@ -65,6 +65,10 @@ type Command struct {
 	// ("timeout 120 ./bin/t --all" → ["./bin/t","--all"]), empty when it is
 	// the same as Argv. A rule should name what runs, not the wrapper.
 	Program []string
+	// RuleWords is the argv prefix a saved rule should name, when the
+	// program's handler knows its own shape ("gh pr", "git push"). Empty
+	// leaves the policy layer to read the words as written.
+	RuleWords []string
 	// Unrecognised is true when the program is not in the command table.
 	// Unlike Dynamic this does not make the script opaque: the argv is
 	// known, so a rule naming the program can cover the command.

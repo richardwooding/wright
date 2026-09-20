@@ -61,22 +61,41 @@ var ghCredentialVerbs = map[string][]string{
 	"extension": {"install", "exec", "create", "remove", "upgrade"},
 }
 
+// ghValueFlags are gh options that consume the following word. They matter
+// because the word they consume is a positional as far as nonFlags is
+// concerned, and reading it as the command group is how
+// `gh --repo o/r repo delete` came to parse as the noun "o/r" — which is to
+// say, came to miss the floor entirely.
+var ghValueFlags = map[string]bool{
+	"-R": true, "--repo": true, "--hostname": true, "-X": true, "--method": true,
+	"-F": true, "--field": true, "-f": true, "--raw-field": true,
+	"-H": true, "--header": true, "-q": true, "--jq": true, "-t": true, "--template": true,
+}
+
 // handleGh classifies the GitHub CLI by noun and verb.
 func handleGh(a *analyzer, name string, args []word) result {
 	noun, verb := ghNounVerb(args)
+	// Belt and braces for the floor only: whatever the flags did to the
+	// parse above, a dangerous pair anywhere in the positionals is still
+	// refused. A mis-read must never be able to *lose* a hard deny.
+	if r, ok := ghFloor(name, args); ok {
+		return r
+	}
+	r := a.ghResult(name, args, noun, verb)
+	// A rule worth saving names the command group: one approval of
+	// `gh pr view` should cover `gh pr list` too, and nothing broader. With
+	// no noun there is nothing better to say than the program.
+	if noun != "" {
+		r.ruleWords = []string{name, noun}
+	}
+	return r
+}
+
+func (a *analyzer) ghResult(name string, args []word, noun, verb string) result {
 	switch {
 	case noun == "":
 		// No subcommand at all: `gh --version`, `gh --help`.
 		return network(name)
-	case matchesVerb(ghCredentialVerbs, noun, verb):
-		return privilegeDenyNet(name + " " + noun + " " + verb + " touches stored credentials")
-	case noun == "repo" && verb == "delete":
-		// Deleting a repository is not recoverable from here and is not
-		// something an allow rule should ever reach, so it goes on the
-		// floor beside `git push --force` to a protected branch.
-		return hardDenyNet(name + " repo delete destroys a repository")
-	case noun == "codespace" && verb == "ssh":
-		return privilegeDenyNet(name + " codespace ssh opens a remote shell")
 	case noun == "api":
 		return ghAPI(a, name, args)
 	case matchesVerb(ghDestructiveVerbs, noun, verb):
@@ -109,16 +128,50 @@ func ghAPI(a *analyzer, name string, args []word) result {
 	}
 }
 
-// ghNounVerb is the first and second positional words, which for gh are the
-// command group and its action. Flags are skipped, so `gh --repo x pr list`
-// reads as `pr list`.
-func ghNounVerb(args []word) (noun, verb string) {
+// ghFloor refuses the commands that are refused in every mode. It reads
+// *adjacent positional pairs* rather than the parsed noun and verb, so an
+// option this package has not been taught about cannot shift the words and
+// carry a deletion or a credential past the floor.
+func ghFloor(name string, args []word) (result, bool) {
 	nf := texts(nonFlags(args))
-	if len(nf) > 0 {
-		noun = nf[0]
+	for i := 0; i+1 < len(nf); i++ {
+		noun, verb := nf[i], nf[i+1]
+		switch {
+		case matchesVerb(ghCredentialVerbs, noun, verb):
+			return privilegeDenyNet(name + " " + noun + " " + verb + " touches stored credentials"), true
+		case noun == "repo" && verb == "delete":
+			// Deleting a repository is not recoverable from here and is not
+			// something an allow rule should ever reach, so it goes on the
+			// floor beside `git push --force` to a protected branch.
+			return hardDenyNet(name + " repo delete destroys a repository"), true
+		case noun == "codespace" && verb == "ssh":
+			return privilegeDenyNet(name + " codespace ssh opens a remote shell"), true
+		}
 	}
-	if len(nf) > 1 {
-		verb = nf[1]
+	return result{}, false
+}
+
+// ghNounVerb is the command group and its action: the first two positional
+// words, skipping options and the values they consume, so
+// `gh --repo o/r issue list` reads as `issue list`.
+func ghNounVerb(args []word) (noun, verb string) {
+	var pos []string
+	for i := 0; i < len(args); i++ {
+		w := args[i].text
+		if !strings.HasPrefix(w, "-") {
+			pos = append(pos, w)
+			continue
+		}
+		// --flag=value carries its own value; --flag value eats the next.
+		if !strings.Contains(w, "=") && ghValueFlags[w] {
+			i++
+		}
+	}
+	if len(pos) > 0 {
+		noun = pos[0]
+	}
+	if len(pos) > 1 {
+		verb = pos[1]
 	}
 	return noun, verb
 }

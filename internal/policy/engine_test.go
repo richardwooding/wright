@@ -983,3 +983,49 @@ func TestABroadGhRuleCannotReachTheFloor(t *testing.T) {
 		}
 	})
 }
+
+// TestGhOffersNameTheCommandGroup pins what a saved rule is *for*. One
+// approval of `gh pr view` should cover `gh pr list`, and nothing broader:
+// the classifier knows gh's shape, so the policy layer does not have to
+// guess it from a word that may be a flag.
+func TestGhOffersNameTheCommandGroup(t *testing.T) {
+	f := newFixture(t)
+	offerFor := func(t *testing.T, cmd string) []string {
+		t.Helper()
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin())
+		v := e.Evaluate(f.bash(cmd))
+		var texts []string
+		for _, o := range v.Offers {
+			if !slices.Contains(texts, o.Rule.String()) {
+				texts = append(texts, o.Rule.String())
+			}
+		}
+		return texts
+	}
+
+	tests := []struct {
+		name, cmd, want string
+	}{
+		{name: "a read", cmd: "gh pr view 3", want: "bash(gh pr *) +net"},
+		{name: "another verb in the same group", cmd: "gh pr list", want: "bash(gh pr *) +net"},
+		{name: "a global flag before the noun", cmd: "gh --repo o/r issue list", want: "bash(gh issue *) +net"},
+		{name: "a write", cmd: "gh pr create --title x", want: "bash(gh pr *) +net"},
+		// Nothing to name but the program. Acceptable only because the
+		// dangerous verbs are on the floor, where no rule reaches them.
+		{name: "no subcommand", cmd: "gh --version", want: "bash(gh *) +net"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := offerFor(t, tt.cmd)
+			if !slices.Contains(got, tt.want) {
+				t.Errorf("offers = %v, want one reading %s", got, tt.want)
+			}
+			// The rule must be for the group, not for one invocation.
+			for _, g := range got {
+				if strings.Contains(g, "--") {
+					t.Errorf("an offer pins a flag: %q", g)
+				}
+			}
+		})
+	}
+}
