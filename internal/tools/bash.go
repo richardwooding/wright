@@ -43,12 +43,13 @@ type bashArgs struct {
 	Timeout     int    `json:"timeout,omitempty" jsonschema:"seconds before the command is killed (default 120, max 600)"`
 	Description string `json:"description,omitempty" jsonschema:"one line saying what the command does, shown to the user"`
 	Network     bool   `json:"network,omitempty" jsonschema:"request network access for this command (asks the user)"`
+	Background  bool   `json:"background,omitempty" jsonschema:"start the command and return immediately; read its output with the job tool"`
 }
 
 func (d *Deps) bash() agentkit.Tool {
 	return &tool{
 		Tool: agentkit.Func(NameBash,
-			"Run a bash script in the sandbox. stdout and stderr are merged; the working directory persists across calls; no network unless network is set and granted.",
+			"Run a bash script in the sandbox. stdout and stderr are merged; the working directory persists across calls; no network unless network is set and granted. Set background for a long-running command (a dev server, a watcher): it returns a job id at once and the job tool reads its output.",
 			d.runBash),
 		describe:   d.describeBash,
 		sequential: true,
@@ -74,6 +75,11 @@ func (d *Deps) describeBash(args json.RawMessage) (policy.Request, Preview, erro
 		title = NameBash
 	}
 	body := "$ " + a.Command + "\n" + an.Summary()
+	if a.Background {
+		// The approval covers the job's whole life, not one call, so the
+		// prompt has to say that before the answer rather than after.
+		body += "\nruns in the background until it exits, you kill it, or the session ends"
+	}
 	return req, Preview{Title: title, Body: body}, nil
 }
 
@@ -134,26 +140,10 @@ func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error)
 	}
 	timeout = min(timeout, maxBashTimeout)
 	script, notes := d.prepareScript(a.Command)
-	spec := d.SandboxSpec
-	// "-c", not "-lc": a login shell sources /etc/profile, /etc/profile.d/*
-	// and (on the none backend, where $HOME is real) the user's
-	// ~/.bash_profile, any of which can change PATH, define functions or
-	// export variables that the sandbox's filtered environment deliberately
-	// left out. The environment here is explicit and already carries PATH.
-	spec.Argv = []string{"bash", "-c", script + "\nprintf '\\n" + cwdMarker + "%s\\n' \"$PWD\""}
-	spec.Dir = d.Cwd.Get()
-	// a.Network is trustworthy only because the engine rewrites it to the
-	// policy verdict before the call reaches here; spec.Network carries the
-	// --allow-network flag.
-	spec.Network = spec.Network || a.Network
-	// What the user approved for this one call: the network the classifier
-	// says the command needs, and — for an install — the tool prefixes it
-	// writes, which the approval prompt named. Only the engine sets a grant;
-	// the base spec is never widened.
-	if g, ok := sandbox.GrantFrom(ctx); ok {
-		spec.Network = spec.Network || g.Network
-		spec.ReadWrite = withGranted(spec.ReadWrite, g.Writable)
+	if a.Background {
+		return d.startBackground(ctx, a, script, notes)
 	}
+	spec := d.bashSpec(ctx, a, script+"\nprintf '\\n"+cwdMarker+"%s\\n' \"$PWD\"")
 	spec.Timeout = timeout
 
 	tctx, cancel := context.WithTimeout(ctx, timeout)
@@ -177,6 +167,91 @@ func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error)
 	}
 	notes = append(notes, sandboxHints(out, spec, backend)...)
 	return d.bashResult(ctx, out, cmd, runErr, dur, timedOut, timeout, notes), nil
+}
+
+// bashSpec builds the sandbox spec for one script.
+func (d *Deps) bashSpec(ctx context.Context, a bashArgs, script string) sandbox.Spec {
+	spec := d.SandboxSpec
+	// "-c", not "-lc": a login shell sources /etc/profile, /etc/profile.d/*
+	// and (on the none backend, where $HOME is real) the user's
+	// ~/.bash_profile, any of which can change PATH, define functions or
+	// export variables that the sandbox's filtered environment deliberately
+	// left out. The environment here is explicit and already carries PATH.
+	spec.Argv = []string{"bash", "-c", script}
+	spec.Dir = d.Cwd.Get()
+	// a.Network is trustworthy only because the engine rewrites it to the
+	// policy verdict before the call reaches here; spec.Network carries the
+	// --allow-network flag.
+	spec.Network = spec.Network || a.Network
+	// What the user approved for this one call: the network the classifier
+	// says the command needs, and — for an install — the tool prefixes it
+	// writes, which the approval prompt named. Only the engine sets a grant;
+	// the base spec is never widened.
+	if g, ok := sandbox.GrantFrom(ctx); ok {
+		spec.Network = spec.Network || g.Network
+		spec.ReadWrite = withGranted(spec.ReadWrite, g.Writable)
+	}
+	return spec
+}
+
+// startBackground starts a job and returns at once.
+//
+// The job's context is deliberately *not* the call's: agentkit cancels that
+// when the tool returns, which is immediately. It is derived with
+// WithoutCancel so the job survives the call, and kept cancellable so
+// Job.Kill and JobSet.Close can still stop it — a background job that
+// nothing can stop would be worse than no background jobs.
+//
+// There is no default timeout, because waiting indefinitely is the point of
+// a dev server or a watcher; an explicit timeout is still honoured, and the
+// session's end is the backstop.
+func (d *Deps) startBackground(ctx context.Context, a bashArgs, script string, notes []string) (agentkit.Output, error) {
+	if d.Jobs == nil {
+		return agentkit.Output{}, errors.New("background jobs are not available in this session")
+	}
+	// No cwd epilogue: a job that never exits has no final directory, and a
+	// background command must not move the foreground shell's anyway.
+	spec := d.bashSpec(ctx, a, script)
+	jctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
+	if a.Timeout > 0 {
+		spec.Timeout = time.Duration(a.Timeout) * time.Second
+		jctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), spec.Timeout)
+	}
+	cmd, err := d.Sandbox.Command(jctx, spec)
+	if err != nil {
+		cancel()
+		return agentkit.Output{}, err
+	}
+	j := &Job{Command: a.Command, Description: a.Description, Started: time.Now(), cancel: cancel}
+	if !d.Jobs.add(j) {
+		cancel()
+		return agentkit.Output{}, errors.New("this session is shutting down; no new background jobs")
+	}
+	setProcessGroup(cmd)
+	cmd.WaitDelay = waitDelay
+	cmd.Stdout = &j.out
+	cmd.Stderr = cmd.Stdout
+	if err := cmd.Start(); err != nil {
+		cancel()
+		j.finish(-1, err.Error())
+		return agentkit.Output{}, fmt.Errorf("failed to start: %w", err)
+	}
+	go func() {
+		defer cancel()
+		runErr := cmd.Wait()
+		failure := ""
+		if jctx.Err() != nil {
+			failure = "stopped: " + jctx.Err().Error()
+		}
+		j.finish(exitCode(cmd, runErr), failure)
+	}()
+	var b strings.Builder
+	fmt.Fprintf(&b, "Started %s in the background: %s", j.ID, singleLine(a.Command))
+	for _, n := range notes {
+		b.WriteString("\n[note: " + n + "]")
+	}
+	fmt.Fprintf(&b, "\n[read its output with the %s tool: {\"action\":\"output\",\"id\":%q}]", NameJob, j.ID)
+	return agentkit.Text(b.String()), nil
 }
 
 // withGranted returns base plus the granted directories, without touching

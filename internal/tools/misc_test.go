@@ -128,6 +128,7 @@ func TestNamesAndFilters(t *testing.T) {
 	list := &tools.TodoList{}
 	f := newFixture(t, func(d *tools.Deps) {
 		d.Todos = list
+		d.Jobs = tools.NewJobSet()
 		d.Asker = &fakeAsker{}
 		d.Search = &fakeSearch{}
 		d.Fetch = &http.Client{}
@@ -165,6 +166,7 @@ func TestNamesAndFilters(t *testing.T) {
 func TestDocsForMatchTheRegisteredSet(t *testing.T) {
 	full := newFixture(t, func(d *tools.Deps) {
 		d.Todos = &tools.TodoList{}
+		d.Jobs = tools.NewJobSet()
 		d.Asker = &fakeAsker{}
 		d.Search = &fakeSearch{}
 		d.Fetch = &http.Client{}
@@ -181,7 +183,7 @@ func TestDocsForMatchTheRegisteredSet(t *testing.T) {
 	bare := newFixture(t, func(d *tools.Deps) { d.Todos = &tools.TodoList{} })
 	for _, d := range tools.DocsFor(bare.ts) {
 		switch d.Name {
-		case tools.NameWebSearch, tools.NameWebFetch, tools.NameAskUser:
+		case tools.NameWebSearch, tools.NameWebFetch, tools.NameAskUser, tools.NameJob:
 			t.Errorf("%s is documented but was never registered", d.Name)
 		}
 	}

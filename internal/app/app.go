@@ -21,6 +21,7 @@ import (
 	"github.com/richardwooding/wright/internal/model"
 	"github.com/richardwooding/wright/internal/sandbox"
 	"github.com/richardwooding/wright/internal/session"
+	"github.com/richardwooding/wright/internal/tools"
 	"github.com/richardwooding/wright/internal/workspace"
 )
 
@@ -111,6 +112,10 @@ type Built struct {
 	Close  func() error
 
 	opts RunOptions
+	// jobs is the session's background commands, for /jobs. It is not
+	// exported: a UI shows them through Command, and nothing outside the
+	// session should be able to reach into a running process.
+	jobs *tools.JobSet
 }
 
 // InteractiveDeps is what a UI needs beyond the engine.

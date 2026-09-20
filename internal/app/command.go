@@ -9,12 +9,14 @@ import (
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/git"
 	"github.com/richardwooding/wright/internal/skillsdir"
+	"github.com/richardwooding/wright/internal/tools"
 	"github.com/richardwooding/wright/internal/trust"
 )
 
 // Command runs the slash commands that need app-level services rather than
-// the engine: /diff /audit /init /redaction /trust /mcp /skills. The name is
-// given without the slash. Unknown names are an error so the UI can say so.
+// the engine: /diff /audit /init /redaction /trust /mcp /skills /jobs. The
+// name is given without the slash. Unknown names are an error so the UI
+// can say so.
 func (b *Built) Command(ctx context.Context, name string, args []string) (string, error) {
 	switch strings.TrimPrefix(strings.ToLower(name), "/") {
 	case "diff":
@@ -41,9 +43,21 @@ func (b *Built) Command(ctx context.Context, name string, args []string) (string
 		return b.skillsStatus(), nil
 	case "agents":
 		return b.agentsStatus(), nil
+	case "jobs":
+		return b.jobsStatus(), nil
 	default:
 		return "", fmt.Errorf("unknown command /%s", name)
 	}
+}
+
+// jobsStatus is /jobs: the background commands this session started, running
+// or finished. They all die with the session, so this list is also the list
+// of processes the session is still responsible for.
+func (b *Built) jobsStatus() string {
+	if b.jobs == nil {
+		return "No background jobs."
+	}
+	return tools.FormatJobs(b.jobs.List())
 }
 
 // mcpStatus is /mcp: what this session connected, and what it did not.

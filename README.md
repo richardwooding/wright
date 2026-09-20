@@ -181,7 +181,7 @@ gitignored), and on the command line with `--allow` / `--deny` (repeatable).
 ```
 rule    := tool [ "(" spec ")" ] { "+net" | "+install" }
 tool    := read_file | write_file | edit_file | glob | grep | list_dir | bash
-         | multi_edit | web_fetch | web_search | todo_write | ask_user
+         | multi_edit | job | web_fetch | web_search | todo_write | ask_user
          | explore | <agent> | skill | skill_file
          | "mcp:" server [ ":" toolglob ] | "*"
 spec    := pathglob                    doublestar; relative = workspace-relative; "~/" and "$WORKSPACE/" expand
@@ -330,6 +330,28 @@ Neither can change anything: a script a skill ships runs only if the model
 calls `bash`, where the permission engine and the sandbox apply as usual.
 `wright skills` and `/skills` list what was found, and a malformed `SKILL.md`
 is reported without costing you the others.
+
+## Background jobs
+
+A `bash` call with `background` set starts the command and returns a job id at
+once, for anything you would otherwise wait on — a dev server, a watcher, a
+long build. The `job` tool lists them, reads a job's **new** output since it
+was last read (so polling does not re-send what the model already has), or
+kills one; `/jobs` shows the same list to you.
+
+The approval is the same approval: a background command is classified and
+prompted exactly like a foreground one, and the prompt says that the call runs
+in the background before you answer — because the grant it earns (the network,
+an install's writable prefixes) lasts as long as the job does, not just one
+call.
+
+**Jobs do not outlive the session.** Leaving one running would leave a process
+holding a grant you could no longer see or revoke, so every job is killed when
+wright exits. There is no default time limit — waiting indefinitely is the
+point — but an explicit `timeout` is honoured. A `SIGKILL` of wright itself
+still orphans them; nothing running inside a process can promise otherwise.
+Output is capped at 256 KiB per job, oldest first, and a drop is reported
+rather than hidden.
 
 ## Sub-agents
 
@@ -606,7 +628,7 @@ rewritten. `/redaction off` turns it off for the session.
 | `@` / `/` | file completion · command completion |
 
 `/help` `/clear` `/compact` `/cost` `/diff` `/mode` `/model` `/sessions`
-`/resume` `/export` `/undo` `/init` `/mcp` `/skills` `/todos` `/audit`
+`/resume` `/export` `/undo` `/init` `/mcp` `/skills` `/jobs` `/todos` `/audit`
 `/redaction` `/reasoning` `/trust` `/mouse` `/plain` `/quit`
 
 The status bar carries the whole state of the run, and the summary is printed
@@ -678,13 +700,14 @@ wright is pre-1.0. v0.1.3 is the current release. Working end to end
 today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,
-`edit_file`, `multi_edit`, `glob`, `grep`, `list_dir`, `bash`, `web_fetch`,
-`web_search`, `todo_write`, `ask_user`), skills discovery, MCP servers behind consent, the `explore`
+`edit_file`, `multi_edit`, `glob`, `grep`, `list_dir`, `bash` (foreground and
+background), `job`, `web_fetch`, `web_search`, `todo_write`, `ask_user`),
+skills discovery, MCP servers behind consent, the `explore`
 sub-agent and custom agents, sessions and resume, snapshots and `/undo`,
 redaction, the audit log, model detection and cost, trust-gated project
 settings, and the release plumbing.
 
-Landing next: background `bash` jobs. A macOS seatbelt profile
+Everything in the original plan has landed. A macOS seatbelt profile
 ships but macOS is treated conservatively until it has more mileage.
 **Not planned:** an LSP client — wright uses your repository's own tools
 instead.

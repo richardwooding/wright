@@ -529,3 +529,25 @@ func TestWebSearchProviderWiring(t *testing.T) {
 		}
 	})
 }
+
+// TestJobsCommand pins /jobs. A background job holds whatever its own
+// approval granted it, so the user needs a way to see what the session is
+// still responsible for — and an empty list has to say so rather than
+// printing nothing.
+func TestJobsCommand(t *testing.T) {
+	ws := isolate(t)
+	setScript(t, []step{{text: "hi"}})
+	b, err := app.Build(context.Background(), baseOpts(ws))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+
+	out, err := b.Command(context.Background(), "jobs", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "No background jobs") {
+		t.Errorf("/jobs = %q", out)
+	}
+}

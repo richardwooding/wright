@@ -467,6 +467,17 @@ client to HTTP MCP transports).
   call itself has no effect — everything it then does is evaluated again one
   level deeper. Giving an agent a tool in its `tools:` list is not permission
   to use it.
+- **A background job outlives its call, so it must not outlive the session.**
+  `bash` with `background` returns at once, and the job keeps whatever its
+  approval granted it — the network, an install's writable prefixes — for as
+  long as it runs. Its context is therefore `context.WithoutCancel` of the
+  call's (agentkit cancels that the moment the tool returns) but still
+  cancellable, and `JobSet.Close` — wired into `Built.Close` — kills every
+  one. A test that asserts a job is "not running" proves less than it looks:
+  `cmd.Wait` returns once the direct child is reaped and `WaitDelay` has
+  elapsed, so the process it spawned can still be alive. Ask the operating
+  system (`syscall.Kill(pid, 0)`), as `TestJobSetCloseKillsTheProcessTree`
+  does.
 - **Skills are text, not capability.** `skills.Use` adds the catalog to the
   prompt and registers `skill`/`skill_file`, which only return text and
   bundled files (hence their place in `policy.otherTools`). A script a skill

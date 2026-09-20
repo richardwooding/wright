@@ -22,6 +22,13 @@ All notable changes to this project are documented here. The format follows
   environment (`BRAVE_API_KEY`) and is never echoed in an error. A provider
   named by an untrusted project's settings is ignored, because a search
   discloses the query to a third party.
+- **Background `bash` jobs.** A `bash` call with `background` set returns a
+  job id at once; the new `job` tool lists jobs, reads a job's new output
+  since it was last read, or kills one, and `/jobs` shows the same list. The
+  approval is the same approval, and the prompt says the call runs in the
+  background before you answer, because the grant it earns lasts as long as
+  the job does. Jobs are killed when the session ends: one left running would
+  hold a grant nobody could see or revoke.
 - **The interactive MCP consent prompt.** An unaccepted server was reported
   in full and then declined, because there was no form to ask with. An
   interactive session now asks, after showing the server's command and every

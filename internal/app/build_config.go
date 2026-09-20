@@ -22,6 +22,7 @@ import (
 	"github.com/richardwooding/wright/internal/sandbox"
 	"github.com/richardwooding/wright/internal/session"
 	"github.com/richardwooding/wright/internal/snapshot"
+	"github.com/richardwooding/wright/internal/tools"
 	"github.com/richardwooding/wright/internal/trust"
 	"github.com/richardwooding/wright/internal/workspace"
 )
@@ -52,6 +53,7 @@ type builder struct {
 	agentDefs []agents.Definition
 	skills    *akskills.Set
 	mcp       *mcpclient.Set
+	jobs      *tools.JobSet
 
 	choice    model.Choice
 	store     *session.Store

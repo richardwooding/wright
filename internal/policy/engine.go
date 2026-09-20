@@ -206,8 +206,12 @@ var (
 	// otherTools have no side effects of their own: activating a skill or
 	// reading a file bundled with it only puts text in the transcript, and
 	// anything the skill then *does* goes through bash, edit_file and the
-	// rest, which are evaluated on their own.
-	otherTools = map[string]bool{"explore": true, "skill": true, "skill_file": true, "todo_write": true, "ask_user": true}
+	// rest, which are evaluated on their own. "job" is here for the same
+	// reason: it can only list, read or kill a background command this
+	// session started, and starting one was a bash call approved on its own
+	// terms — reading its output discloses nothing that call's own result
+	// would not have, and killing it takes a permission away.
+	otherTools = map[string]bool{"explore": true, "skill": true, "skill_file": true, "todo_write": true, "ask_user": true, "job": true}
 )
 
 func kindOf(tool string) reqKind {

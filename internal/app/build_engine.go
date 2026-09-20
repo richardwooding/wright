@@ -39,6 +39,7 @@ const maxRedirects = 10
 func (b *builder) toolsAndEngine() error {
 	late := &lateEngine{}
 	todos := &tools.TodoList{}
+	b.jobs = tools.NewJobSet()
 	deps := tools.Deps{
 		WS:          b.ws,
 		Sandbox:     b.backend,
@@ -49,6 +50,7 @@ func (b *builder) toolsAndEngine() error {
 		SpillDir:    b.spillDir(),
 		Cwd:         tools.NewCwd(b.cwd),
 		Todos:       todos,
+		Jobs:        b.jobs,
 		OnRedacted:  late.redacted,
 		Attribution: b.settings.AttributionEnabled(),
 		Trailer:     b.settings.Git.Trailer,
@@ -165,24 +167,34 @@ func (b *builder) cleanup() {
 	if b.mcp != nil {
 		_ = b.mcp.Close()
 	}
+	if b.jobs != nil {
+		_ = b.jobs.Close()
+	}
 	if b.eng == nil && b.auditLog != nil {
 		_ = b.auditLog.Close()
 	}
 }
 
 func (b *builder) built() *Built {
-	eng, mcp := b.eng, b.mcp
+	eng, mcp, jobs := b.eng, b.mcp, b.jobs
 	return &Built{
 		Engine: eng, Store: b.store, WS: b.ws, Layered: b.layered, Settings: b.settings,
 		Warnings: b.warnings, Sandbox: b.backend, Choice: b.choice, SessionID: b.sessionID,
 		Trusted: b.trusted, WorkspaceTrusted: b.workspaceTrusted,
-		Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o,
+		Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o, jobs: jobs,
 		// Closing the engine ends the run; closing the MCP set terminates
-		// the server processes it started.
+		// the server processes it started; closing the job set kills the
+		// background commands, which hold whatever their own approval
+		// granted them and so must not outlive the session that granted it.
 		Close: func() error {
 			err := eng.Close()
 			if cerr := mcp.Close(); err == nil {
 				err = cerr
+			}
+			if jobs != nil {
+				if cerr := jobs.Close(); err == nil {
+					err = cerr
+				}
 			}
 			return err
 		},
