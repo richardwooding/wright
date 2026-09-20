@@ -6,6 +6,48 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-20
+
+Debugging a live session. Asked for after a session that stopped dead with no
+error and nothing in the transcript: the only way to find out what it was
+waiting on was to read the audit log and poke at `/proc`.
+
+### Added
+
+- **`kill -s SIGUSR1 <pid>` writes a report** of what the session is doing —
+  model, mode, sandbox, the approvals waiting for an answer, the tool calls
+  that have not returned, background jobs, and every goroutine's stack — to a
+  file under the session's own directory. It needs no port, no event loop and
+  no working UI, which is exactly the case it exists for. `/debug dump` does
+  the same from inside the TUI.
+- **`--debug-addr 127.0.0.1:6060` serves the same report** at `/debug/state`,
+  with `net/http/pprof` beside it, for watching a live session from another
+  terminal. It is off by default, and it is a flag and nothing else: no
+  environment variable and no settings key, so a repository cannot open a port
+  on the machine of anyone who runs wright in it. Only a loopback IP is
+  accepted — `0.0.0.0`, a bare `:6060` and `localhost` are all refused — and
+  a bad or busy address fails the session at startup rather than in a
+  goroutine.
+- The endpoint's address is **in the status bar** while one is listening,
+  beside the sandbox, and a startup warning names it: a process serving its
+  own stacks and a CPU profiler to everything running as this user is not a
+  state to leave someone to discover. **`/debug`** has the rest — the pid to
+  signal, where the dumps go, and the last one written.
+- Dumps and the endpoint carry the same redaction as tool output, because a
+  report quotes the commands a session ran. Deleting a session deletes its
+  dumps.
+
+### Security
+
+- This is the first part of wright that listens on a socket. It never dials:
+  `TestNoUnexpectedNetwork`, which backs the "no telemetry, no phone-home"
+  claim, now allows `internal/diag` to import `net/http` with that reason
+  written down beside it. Note the asymmetry worth knowing about: `web_fetch`
+  is hard-denied from loopback addresses, and a sandboxed `bash` under
+  bwrap or landlock sits in its own network namespace and cannot reach the
+  port — but `--sandbox none` has no such barrier, so under it a command the
+  agent runs could read the endpoint like any other local process.
+
 ## [0.3.4] - 2026-09-20
 
 The other three ways the approval prompt defeated itself, from the same

@@ -119,6 +119,7 @@ internal/
   model/      Choice: flag > WRIGHT_MODEL > settings > credential detection > Ollama probe; Best/Fast/List from the catalog
   cost/       Meter (usage per model → USD via catalog), FormatUSD/FormatTokens; unknown models price as "—"
   prompt/     System(in) → (stable, dynamic); LoadInstructions (AGENTS.md walk, CLAUDE.md fallback); WrapUntrusted, ScanInjection
+  diag/       self-inspection: SIGUSR1 dump + opt-in loopback pprof endpoint; leaf (takes []Section)
   git/        exec git: Status (2 s timeout), Diff, IsTracked
   theme/      lipgloss v2 palette (gloam tokens as LightDark pairs) + styles
 docs/         gloam Pages site (gloam.css/gloam.js vendored; sync-gloam.sh + gloam-sync.yml keep them current)
@@ -136,7 +137,7 @@ they never import `tui`, `engine` or `app`, and reach the engine only through
 `TestNoUnexpectedNetwork` allowlists the internal packages that may import
 `net/http` (`model` for the Ollama loopback probe, `tools` for `web_fetch`, which
 is handed the ssrfguard client by `app`, and `mcpclient`, which hands that same
-client to HTTP MCP transports).
+client to HTTP MCP transports, and `diag`, which *listens* and never dials).
 
 ### Things that are non-obvious and easy to break
 
@@ -540,6 +541,36 @@ client to HTTP MCP transports).
   call itself has no effect — everything it then does is evaluated again one
   level deeper. Giving an agent a tool in its `tools:` list is not permission
   to use it.
+- **The dump is for the case where nothing else works.** A session that has
+  stopped dead — an approval nobody answered, a tool call that never returned
+  — puts nothing in the transcript, so `diag` writes a report on `SIGUSR1`:
+  no port, no event loop, no UI. `--debug-addr` serves the same report plus
+  pprof, and is deliberately a flag with **no `env:` tag and no settings
+  key** (like `--trust` and `--bypass-permissions`), so a repository cannot
+  open a port on whoever runs wright in it. `diag.CheckAddr` accepts only a
+  loopback **IP** — not `0.0.0.0`, not a bare `:6060`, not `localhost`,
+  whose meaning is whatever `/etc/hosts` says — and binding happens in
+  `Open`, synchronously, so a busy port fails the session's startup instead
+  of vanishing into a goroutine. pprof's handlers are registered on `diag`'s
+  own mux rather than by `net/http/pprof`'s init, which attaches them to
+  `http.DefaultServeMux`. `diag` knows nothing about engines or policies: it
+  renders the `[]Section` the app builds, because the thing being debugged
+  must not be a dependency of the debugger. The report is redacted with the
+  session's own redactor (it quotes commands) and dumps live under
+  `Store.DebugDir(id)`, which `Store.Delete` removes. The asymmetry to keep
+  documented: `web_fetch` is hard-denied from loopback and a sandboxed
+  `bash` under bwrap/landlock is in its own netns, but `--sandbox none` has
+  no such barrier.
+- **`Engine.Waiting`/`InFlight` are what the dump reports.** `pending` holds
+  a `waiter` (channel plus the prompt's own words) rather than a bare
+  channel, and `promptLabel` falls back to the preview *body*'s first line
+  because a title that defaults to the tool's name says nothing beside the
+  tool's name. In-flight calls are tracked in `auditMiddleware` — the one
+  layer that wraps the tool's actual execution at every depth — with
+  `defer e.startCall(c)()`, because `agentkit.Recover` sits outside it and a
+  panicking tool unwinds through it. The key is a sequence number, not the
+  call ID: llmkit synthesises `call_1`, `call_2` … per response, so one
+  turn's entry would delete another's.
 - **A background job outlives its call, so it must not outlive the session.**
   `bash` with `background` returns at once, and the job keeps whatever its
   approval granted it — the network, an install's writable prefixes — for as

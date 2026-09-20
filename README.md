@@ -655,7 +655,7 @@ rewritten. `/redaction off` turns it off for the session.
 
 `/help` `/clear` `/compact` `/cost` `/diff` `/mode` `/model` `/sessions`
 `/resume` `/export` `/undo` `/init` `/mcp` `/skills` `/agents` `/ps` `/jobs` `/todos` `/audit`
-`/redaction` `/reasoning` `/trust` `/mouse` `/plain` `/quit`
+`/redaction` `/reasoning` `/trust` `/debug` `/mouse` `/plain` `/quit`
 
 The status bar carries the whole state of the run, and the summary is printed
 after the alt screen is gone:
@@ -667,6 +667,8 @@ steps 1 · tool calls 0 · 39 tok · — · 0s · completed
 session 20260919-204145-33e6 — resume with wright --resume 20260919-204145-33e6
 60 in / 18 out tokens
 ```
+
+A `debug <address>` segment appears while a diagnostics endpoint is listening.
 
 `sandbox off` and `⛔ bypass` are hot red and bold — the two states you must
 not miss. Every status is glyph **and** word, never colour alone, and the
@@ -696,6 +698,40 @@ Cost and context come from the catalog. A model the catalog does not know
 still works — it is priced as `—` rather than guessed at, and the context
 meter falls back to a 128k assumption.
 
+## Debugging a live session
+
+A session that has stopped dead — an approval nobody answered, a command that
+never returned — puts nothing in the transcript, which is the one place you
+would look. Two ways in, both off the critical path:
+
+```sh
+kill -s SIGUSR1 <pid>          # writes a dump; needs no port and no working UI
+wright --debug-addr 127.0.0.1:6060
+curl -s http://127.0.0.1:6060/debug/state
+```
+
+The report names the model, mode and sandbox, the approvals waiting for an
+answer (with the command each one is asking about, and how long it has
+waited), the tool calls that have not returned, the background jobs, and every
+goroutine's stack. A dump goes to a file under the session's own directory, so
+deleting the session deletes its dumps; `/debug` inside the TUI prints the
+endpoint, the pid to signal and where the dumps go, and `/debug dump` writes
+one on the spot. Both carry the same redaction as tool output.
+
+The endpoint is **off unless you ask for it**, and `--debug-addr` is a flag
+and nothing else — no environment variable, no settings key — so a repository
+cannot open a port on the machine of anyone who runs wright in it. Only a
+loopback IP is accepted: `0.0.0.0`, a bare `:6060` and `localhost` are all
+refused, and an address that is busy or malformed fails startup rather than
+disappearing into a goroutine. `/debug/pprof/` is there too, for a profile or
+an execution trace.
+
+One asymmetry worth knowing: `web_fetch` is hard-denied from loopback
+addresses, and a sandboxed `bash` under bwrap or landlock sits in its own
+network namespace and cannot reach the port — but `--sandbox none` has no such
+barrier, so under it a command the agent runs could read the endpoint like any
+other local process.
+
 ## Privacy
 
 What leaves your machine:
@@ -712,6 +748,10 @@ What leaves your machine:
   running. Non-loopback hosts are refused unless you set `OLLAMA_HOST`
   yourself.
 
+Nothing else. The diagnostics endpoint above is the one part of wright that
+opens a socket, and it *listens* rather than dialling: it answers your own
+browser, on your own machine, only when you passed `--debug-addr`.
+
 That is the whole list, and a test in `internal/app` (`TestNoUnexpectedNetwork`)
 enforces it at the import level. There is no telemetry, no crash reporting, no
 analytics and no update check — `updates.check` defaults to `false` and
@@ -722,7 +762,7 @@ bodies.
 
 ## Status
 
-wright is pre-1.0. v0.3.4 is the current release. Working end to end
+wright is pre-1.0. v0.4.0 is the current release. Working end to end
 today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,
