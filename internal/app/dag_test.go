@@ -96,6 +96,7 @@ func TestNoUnexpectedNetwork(t *testing.T) {
 		pkg("tools"),     // web_fetch takes the ssrfguard *http.Client and builds its requests
 		pkg("app"),       // constructs that client (ssrfguard.New().Client() + CheckRedirect re-validation)
 		pkg("mcpclient"), // takes that same client for HTTP MCP transports and adds the configured headers
+		pkg("websearch"), // queries the configured search API, through the same guarded client; absent unless the user names a provider
 	}
 	graph := importGraph(t)
 	for p, imports := range graph {

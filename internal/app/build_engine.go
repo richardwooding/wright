@@ -24,6 +24,7 @@ import (
 	"github.com/richardwooding/wright/internal/prompt"
 	"github.com/richardwooding/wright/internal/redact"
 	"github.com/richardwooding/wright/internal/tools"
+	"github.com/richardwooding/wright/internal/websearch"
 )
 
 // fetchTimeout bounds one web_fetch request end to end.
@@ -56,6 +57,7 @@ func (b *builder) toolsAndEngine() error {
 	if !b.o.Print {
 		deps.Asker = late // ask_user only makes sense with a human on the other end
 	}
+	deps.Search = b.searchProvider()
 	base := tools.New(deps)
 	instructions, err := b.loadInstructions()
 	if err != nil {
@@ -367,4 +369,41 @@ func fetchClient() *http.Client {
 		return g.ValidateURLContext(req.Context(), req.URL.String())
 	}
 	return c
+}
+
+// searchProvider builds the web_search backend, or nil when the user has not
+// configured one — which is the default. A search sends the query to a third
+// party, so it happens only when asked for by name; an unconfigured or
+// misconfigured provider leaves the tool unregistered and says why.
+func (b *builder) searchProvider() tools.SearchProvider {
+	name := b.settings.Search.Provider
+	p, err := websearch.New(websearch.Config{
+		Name:   name,
+		Key:    b.env(websearch.KeyEnv(name)),
+		Client: fetchClient(),
+	})
+	switch {
+	case errors.Is(err, websearch.ErrNoProvider):
+		return nil // not configured: web_search is simply absent
+	case err != nil:
+		b.warn("web_search is not available: %v", err)
+		return nil
+	}
+	return searchAdapter{p}
+}
+
+// searchAdapter maps the provider's results onto the tool's own type, so
+// neither package has to import the other.
+type searchAdapter struct{ p websearch.Provider }
+
+func (a searchAdapter) Search(ctx context.Context, query string, limit int) ([]tools.SearchResult, error) {
+	hits, err := a.p.Search(ctx, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]tools.SearchResult, 0, len(hits))
+	for _, h := range hits {
+		out = append(out, tools.SearchResult{Title: h.Title, URL: h.URL, Snippet: h.Snippet})
+	}
+	return out, nil
 }

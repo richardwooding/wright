@@ -37,6 +37,7 @@ var (
 		"edit_file($WORKSPACE/**)",
 		"bash(git push *)",
 		"web_fetch",
+		"web_search",
 		"mcp:*",
 	}
 	builtinDeny = []string{

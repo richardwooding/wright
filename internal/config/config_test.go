@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -343,4 +344,87 @@ func FuzzDecode(f *testing.F) {
 			t.Fatalf("marshal: %v", err)
 		}
 	})
+}
+
+// TestMergeCarriesEveryField builds a Settings in which every leaf is non-zero,
+// merges it onto an empty one, and reports any leaf that did not survive.
+//
+// It exists because Merge is a hand-written field list: a field added to
+// Settings is silently ignored by every layer above the embedded defaults until
+// someone remembers to add a line here too. That is not a visible failure — the
+// setting simply never takes effect — so it needs a test that cannot be
+// forgotten rather than one row per field.
+func TestMergeCarriesEveryField(t *testing.T) {
+	var src config.Settings
+	fill(reflect.ValueOf(&src).Elem())
+
+	var dst config.Settings
+	config.Merge(&dst, src)
+
+	for _, p := range zeroLeaves(reflect.ValueOf(dst), "") {
+		t.Errorf("config.Merge did not carry %s", p)
+	}
+}
+
+// fill sets every leaf of v to a non-zero value.
+func fill(v reflect.Value) {
+	switch v.Kind() {
+	case reflect.Struct:
+		for i := range v.NumField() {
+			if v.Type().Field(i).IsExported() {
+				fill(v.Field(i))
+			}
+		}
+	case reflect.Pointer:
+		v.Set(reflect.New(v.Type().Elem()))
+		fill(v.Elem())
+	case reflect.Slice:
+		e := reflect.New(v.Type().Elem()).Elem()
+		fill(e)
+		v.Set(reflect.Append(v, e))
+	case reflect.Map:
+		k, e := reflect.New(v.Type().Key()).Elem(), reflect.New(v.Type().Elem()).Elem()
+		fill(k)
+		fill(e)
+		v.Set(reflect.MakeMap(v.Type()))
+		v.SetMapIndex(k, e)
+	case reflect.String:
+		v.SetString("x")
+	case reflect.Bool:
+		v.SetBool(true)
+	case reflect.Int, reflect.Int64:
+		v.SetInt(1)
+	case reflect.Float64:
+		v.SetFloat(1)
+	}
+}
+
+// zeroLeaves returns the dotted path of every leaf of v that is still zero.
+func zeroLeaves(v reflect.Value, path string) []string {
+	switch v.Kind() {
+	case reflect.Struct:
+		var out []string
+		for i := range v.NumField() {
+			f := v.Type().Field(i)
+			if f.IsExported() {
+				out = append(out, zeroLeaves(v.Field(i), path+"."+f.Name)...)
+			}
+		}
+		return out
+	case reflect.Pointer:
+		if v.IsNil() {
+			return []string{path}
+		}
+		return zeroLeaves(v.Elem(), path)
+	case reflect.Slice, reflect.Map:
+		if v.Len() == 0 {
+			return []string{path}
+		}
+		return nil
+	default:
+		if v.IsZero() {
+			return []string{path}
+		}
+		return nil
+	}
 }

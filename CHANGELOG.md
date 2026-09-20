@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `web_search` is wired to a configurable provider (`search.provider`, Brave
+  today) and is finally callable. With no provider named the tool is not
+  registered and no query is ever sent anywhere; the API key comes from the
+  environment (`BRAVE_API_KEY`) and is never echoed in an error. A provider
+  named by an untrusted project's settings is ignored, because a search
+  discloses the query to a third party.
+
+### Internal
+
+- `config.Merge` is a hand-written field list, so a field added to `Settings`
+  was silently ignored by every layer above the embedded defaults. A
+  reflection test now fails if any field lacks a merge rule.
+
 ## [0.1.3] - 2026-09-20
 
 From a user's session log: the sandbox's own restrictions were invisible to

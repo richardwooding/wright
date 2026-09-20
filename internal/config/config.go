@@ -31,6 +31,7 @@ type Settings struct {
 	Sandbox      Sandbox              `json:"sandbox,omitzero"`
 	MCPServers   map[string]MCPServer `json:"mcpServers,omitempty"`
 	Skills       Skills               `json:"skills,omitzero"`
+	Search       Search               `json:"search,omitzero"`
 	Git          Git                  `json:"git,omitzero"`
 	Redaction    *bool                `json:"redaction,omitempty"`
 	Instructions Instructions         `json:"instructions,omitzero"`
@@ -85,6 +86,14 @@ type MCPServer struct {
 	// Trusted connects the server without asking, as if it had been accepted
 	// once already. It is honoured only from a trusted settings layer.
 	Trusted bool `json:"trusted,omitempty"`
+}
+
+// Search configures the web_search tool. With no provider named the tool is
+// not registered at all, so wright never sends a query anywhere: searching
+// hands the text to a third party, which is the user's decision to make.
+type Search struct {
+	// Provider is a name from websearch.Providers(), e.g. "brave".
+	Provider string `json:"provider,omitempty"`
 }
 
 // Skills configures where skills are discovered.
@@ -292,6 +301,7 @@ func Merge(dst *Settings, src Settings) {
 	dst.Instructions.Files = appendDedupe(dst.Instructions.Files, src.Instructions.Files)
 	setIf(&dst.Instructions.Fallback, src.Instructions.Fallback)
 	dst.Updates.Check = dst.Updates.Check || src.Updates.Check
+	setIf(&dst.Search.Provider, src.Search.Provider)
 }
 
 func mergeModel(dst *Model, src Model) {

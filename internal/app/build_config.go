@@ -174,7 +174,7 @@ func (b *builder) projectFiles() string {
 // saying nothing, because the user reads it as an assurance.
 const untrustedNote = "its allow rules, permission mode, additional directories, env passthrough, " +
 	"MCP servers, sandbox settings (network, extra read-write and read-only mounts), " +
-	"model, skills directories, git trailer, instruction files and any \"redaction\": false are ignored; " +
+	"model, skills directories, git trailer, instruction files, web-search provider and any \"redaction\": false are ignored; " +
 	"its ask and deny rules and \"redaction\": true still apply"
 
 // checkTrust decides whether the project layers apply. With no project
@@ -285,6 +285,9 @@ func TrustPrompt(path string, layers ...config.Settings) string {
 	}
 	if n := len(p.MCPServers); n > 0 {
 		s += fmt.Sprintf("  configure %d MCP server(s)\n", n)
+	}
+	if p.Search.Provider != "" {
+		s += fmt.Sprintf("  send web searches to the %q provider\n", p.Search.Provider)
 	}
 	return s + "Trust this project's settings?"
 }

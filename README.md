@@ -187,7 +187,7 @@ the embedded `internal/config/defaults.json`) are:
   `bash(git status|diff|log|show|blame|branch --list|remote -v|rev-parse|stash list|worktree list *)`;
   `bash(go build|test|vet|fmt *)`; `bash(rg|grep|find|ls|cat|head|tail|wc *)`.
 - **ask** — `write_file($WORKSPACE/**)`, `edit_file($WORKSPACE/**)`,
-  `bash(git push *)`, `web_fetch`, `mcp:*`.
+  `bash(git push *)`, `web_fetch`, `web_search`, `mcp:*`.
 - **deny** — `.env`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.kdbx`,
   `credentials*`, `service-account*.json`; `~/.ssh`, `~/.aws`, `~/.gnupg`,
   `~/.kube`, `~/.config/gh`, `~/.config/wright`, `~/.docker/config.json`,
@@ -465,7 +465,8 @@ embedded defaults.json  <  ~/.config/wright/config.json
 ```
 
 **Project settings are inert until you trust them.** A project's `allow`
-rules, `additionalDirectories`, `sandbox.passEnv` and `mcpServers` do not
+rules, `additionalDirectories`, `sandbox.passEnv`, `search.provider` and
+`mcpServers` do not
 apply — and a warning says so — until `/trust` (or `wright init` having
 written the file) records the file's hash in `~/.config/wright/trust.json`;
 any later edit re-prompts with a diff. A project's `ask` and `deny` rules
@@ -480,6 +481,7 @@ gated view; `wright config paths` prints where each layer lives.
                    "extraReadOnly": [], "extraReadWrite": [], "passEnv": [] },
   "mcpServers":  {},
   "skills":      { "extraDirs": [], "loadClaudeSkills": false },
+  "search":      { "provider": "" },
   "git":         { "attribution": true,
                    "trailer": "Co-Authored-By: wright <wright@richardwooding.github.io>",
                    "protectedBranches": ["main", "master", "release/*"] },
@@ -492,6 +494,28 @@ gated view; `wright config paths` prints where each layer lives.
 Environment: `WRIGHT_MODEL`, `WRIGHT_MODE`, `WRIGHT_SANDBOX`, `WRIGHT_PLAIN`,
 `WRIGHT_CONFIG_DIR`, `WRIGHT_DATA_DIR`, `WRIGHT_CONTAINER`, plus `NO_COLOR`
 and `XDG_CONFIG_HOME` / `XDG_DATA_HOME`.
+
+### Web search
+
+`web_search` is **off unless you name a provider**, so wright never sends a
+query anywhere by default. Set `search.provider` and put the key in the
+matching environment variable:
+
+| provider | key | endpoint |
+| --- | --- | --- |
+| `brave` | `BRAVE_API_KEY` | `api.search.brave.com` |
+
+```json
+{ "search": { "provider": "brave" } }
+```
+
+With no provider, or with a provider whose key is missing, the tool is not
+registered at all — the model is not told it exists, and a warning on stderr
+says why. Searches go through the same SSRF-guarded client as `web_fetch`,
+the key is never echoed in an error, and `web_search` asks for approval in
+default mode like any other network tool. A provider named by an *untrusted*
+project's settings is ignored, because the query text is disclosed to whoever
+the provider is.
 
 ### Project instructions
 
@@ -610,15 +634,15 @@ wright is pre-1.0. v0.1.3 is the current release. Working end to end
 today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,
-`edit_file`, `glob`, `grep`, `list_dir`, `bash`, `web_fetch`, `todo_write`,
-`ask_user`), skills discovery, MCP servers behind consent, the `explore`
+`edit_file`, `glob`, `grep`, `list_dir`, `bash`, `web_fetch`, `web_search`,
+`todo_write`, `ask_user`), skills discovery, MCP servers behind consent, the `explore`
 sub-agent and custom agents, sessions and resume, snapshots and `/undo`,
 redaction, the audit log, model detection and cost, trust-gated project
 settings, and the release plumbing.
 
 Landing next: the interactive MCP consent prompt (until then an unaccepted
-server is declined with a full report of what it asked for), `multi_edit`,
-background `bash` jobs, and a `web_search` provider. A macOS seatbelt profile
+server is declined with a full report of what it asked for), `multi_edit`, and
+background `bash` jobs. A macOS seatbelt profile
 ships but macOS is treated conservatively until it has more mileage.
 **Not planned:** an LSP client — wright uses your repository's own tools
 instead.
@@ -630,7 +654,7 @@ instead.
 - [`llmkit`](https://github.com/richardwooding/llmkit) — multi-provider LLM
   client, streaming, and the model catalog behind cost and context.
 - [`ssrfguard`](https://github.com/richardwooding/ssrfguard) — the HTTP client
-  behind `web_fetch`.
+  behind `web_fetch` and `web_search`.
 - [Charm](https://charm.land) v2 — Bubble Tea, Lip Gloss, Bubbles, Glamour.
 - [`mvdan.cc/sh`](https://github.com/mvdan/sh) — the bash parser the shell
   classifier is built on.

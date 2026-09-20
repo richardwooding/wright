@@ -460,3 +460,72 @@ func TestExploreSubAgentRuns(t *testing.T) {
 		t.Fatalf("no depth-1 tool result from the sub-agent:\n%s", stdout.String())
 	}
 }
+
+// web_search is registered only when the user names a provider: a search
+// hands the query to a third party, so it never happens by default. A
+// provider named without its credential is a misconfiguration and must be
+// reported, not silently ignored.
+func TestWebSearchProviderWiring(t *testing.T) {
+	warningsFor := func(t *testing.T, settings string, trust bool) []string {
+		t.Helper()
+		ws := isolate(t)
+		setScript(t, []step{{text: "hi"}})
+		if settings != "" {
+			writeFile(t, filepath.Join(ws, ".wright", "settings.json"), settings)
+			if trust {
+				acceptProject(t, ws)
+			}
+		}
+		b, err := app.Build(context.Background(), baseOpts(ws))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = b.Close() }()
+		return b.Warnings
+	}
+
+	t.Run("unconfigured is silent", func(t *testing.T) {
+		for _, w := range warningsFor(t, "", false) {
+			if strings.Contains(w, "web_search") {
+				t.Errorf("unconfigured search warned: %q", w)
+			}
+		}
+	})
+
+	t.Run("configured without a key is reported", func(t *testing.T) {
+		t.Setenv("BRAVE_API_KEY", "")
+		var found bool
+		for _, w := range warningsFor(t, `{"search":{"provider":"brave"}}`, true) {
+			if strings.Contains(w, "web_search is not available") {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("a provider configured without its key was not reported")
+		}
+	})
+
+	t.Run("an unknown provider is reported", func(t *testing.T) {
+		var found bool
+		for _, w := range warningsFor(t, `{"search":{"provider":"altavista"}}`, true) {
+			if strings.Contains(w, "web_search is not available") {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("an unknown provider was not reported")
+		}
+	})
+
+	// A provider names a third party that every query is sent to, so it is a
+	// widening setting: an untrusted repository must not be able to turn it on.
+	// The same settings warn when trusted (above), so silence here is the layer
+	// being dropped, not the wiring failing to run.
+	t.Run("an untrusted project cannot name a provider", func(t *testing.T) {
+		for _, w := range warningsFor(t, `{"search":{"provider":"altavista"}}`, false) {
+			if strings.Contains(w, "web_search is not available") {
+				t.Errorf("an untrusted project's provider reached the builder: %q", w)
+			}
+		}
+	})
+}
