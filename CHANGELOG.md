@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-09-20
+
+From a user's session log: the sandbox's own restrictions were invisible to
+the agent reasoning inside them, so a command wright had deliberately
+confined looked like a broken machine. It now says which restriction caused
+the failure and what grants it.
+
 ### Fixed
 
 - `brew update`, `update-reset`, `pin` and `unpin` rewrite Homebrew's own git
