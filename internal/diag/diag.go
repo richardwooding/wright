@@ -69,6 +69,8 @@ type Server struct {
 	srv  *http.Server
 	stop func() // stops the signal handler
 
+	// mu guards last and the two fields Close clears. Addr is read from the
+	// UI while Close can run from the session shutting down.
 	mu   sync.Mutex
 	last string // path of the most recent dump
 }
@@ -97,9 +99,12 @@ func Open(o Options) (*Server, error) {
 		if err != nil {
 			return nil, fmt.Errorf("diag: listen on %s: %w", o.Addr, err)
 		}
-		s.ln = ln
-		s.srv = &http.Server{Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}
-		go func() { _ = s.srv.Serve(ln) }()
+		srv := &http.Server{Handler: s.routes(), ReadHeaderTimeout: 5 * time.Second}
+		s.ln, s.srv = ln, srv
+		// srv and ln are captured, not read from s: Close clears those
+		// fields, and a Close that lands before this goroutine is first
+		// scheduled would otherwise call Serve on a nil server.
+		go func() { _ = srv.Serve(ln) }()
 	}
 	s.stop = notifyDump(func() {
 		path, err := s.Dump()
@@ -133,7 +138,12 @@ func CheckAddr(addr string) error {
 // Addr is the address being served, with the port the kernel chose when the
 // request was for port 0. Empty when no server is running.
 func (s *Server) Addr() string {
-	if s == nil || s.ln == nil {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.ln == nil {
 		return ""
 	}
 	return s.ln.Addr().String()
@@ -224,11 +234,14 @@ func (s *Server) Close() error {
 		s.stop()
 		s.stop = nil
 	}
-	if s.srv == nil {
+	s.mu.Lock()
+	srv := s.srv
+	s.srv, s.ln = nil, nil
+	s.mu.Unlock()
+	if srv == nil {
 		return nil
 	}
-	err := s.srv.Close()
-	s.srv, s.ln = nil, nil
+	err := srv.Close()
 	if errors.Is(err, http.ErrServerClosed) {
 		return nil
 	}
