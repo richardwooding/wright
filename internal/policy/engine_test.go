@@ -863,3 +863,72 @@ func TestSavedRuleCoversARealBuildCommand(t *testing.T) {
 		}
 	})
 }
+
+// TestOfferedRuleNamesTheProgramNotTheWrapper is the acceptance test for the
+// second half of the same report. The agent writes its own timeout, so the
+// rule offered — and accepted — was bash(timeout 120 *): both too broad (any
+// command under that exact wrapper) and too narrow (timeout 30 … never
+// matched it). The binary's own rule was never proposed.
+func TestOfferedRuleNamesTheProgramNotTheWrapper(t *testing.T) {
+	f := newFixture(t)
+	// The shape from the session, `echo "exit=$?"` and all: the trailing echo
+	// is what made this script opaque before the inert-argument change, and
+	// the wrapper is what made the rule useless after it.
+	script := func(secs, suite string) policy.Request {
+		return f.bash("cd " + f.ws.Root() + " && timeout " + secs + " ./bin/llmkittests " + suite + " 2>&1 | tail -70; echo \"exit=$?\"")
+	}
+
+	t.Run("asks, and offers a rule naming the binary", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin())
+		v := e.Evaluate(script("120", "--all"))
+		if v.Decision != policy.Ask {
+			t.Fatalf("decision = %v, want Ask (%s)", v.Decision, v.Reason)
+		}
+		var texts []string
+		for _, o := range v.Offers {
+			texts = append(texts, o.Rule.String())
+		}
+		if !slices.Contains(texts, "bash(./bin/llmkittests *)") {
+			t.Errorf("offers = %v, want one naming the binary as bash(./bin/llmkittests *)", texts)
+		}
+		if slices.Contains(texts, "bash(timeout 120 *)") {
+			t.Errorf("offers = %v, still offering the wrapper", texts)
+		}
+	})
+
+	t.Run("the offered rule covers the wrapped command", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin(),
+			rules(t, policy.Allow, policy.SourceSession, "bash(./bin/llmkittests *)"))
+		// A different duration and a different suite: the variant that
+		// defeated the wrapper rule in the real session.
+		for _, req := range []policy.Request{script("120", "--all"), script("30", "--suite=parse")} {
+			if v := e.Evaluate(req); v.Decision != policy.Allow {
+				t.Errorf("decision = %v, want Allow (%s) explain=%v", v.Decision, v.Reason, v.Explain)
+			}
+		}
+	})
+
+	t.Run("a rule already saved for the wrapper keeps working", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin(),
+			rules(t, policy.Allow, policy.SourceSession, "bash(timeout 120 *)"))
+		if v := e.Evaluate(script("120", "--all")); v.Decision != policy.Allow {
+			t.Errorf("decision = %v, want Allow for the literal form it was written against (%s)", v.Decision, v.Reason)
+		}
+	})
+
+	// Matching the peeled argv widens what a rule covers, so the floors have
+	// to be shown still standing in front of it.
+	t.Run("the floors run before any of this", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin(),
+			rules(t, policy.Allow, policy.SourceSession, "bash(rm *)", "bash(./bin/llmkittests *)"))
+		for _, tc := range []struct{ name, cmd string }{
+			{"hard deny under a wrapper", "timeout 120 rm -rf ~"},
+			{"a dynamic wrapper argument is still opaque", "timeout $N ./bin/llmkittests --all"},
+			{"the wrapper is not a licence for another program", "timeout 120 frobnicate"},
+		} {
+			if v := e.Evaluate(f.bash(tc.cmd)); v.Decision == policy.Allow {
+				t.Errorf("%s: allowed (%s)", tc.name, v.Reason)
+			}
+		}
+	})
+}

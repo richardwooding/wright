@@ -18,6 +18,9 @@ type result struct {
 	// inert marks a command that takes no file operands, so a dynamic
 	// argument to it cannot become a path, a command or a request.
 	inert bool
+	// argv is the effective command after any wrapper has been peeled, when
+	// that differs from the words as written.
+	argv []string
 	// unrecognised marks a command whose argv is fully known but whose
 	// program is not in the table. That is a weaker fact than unknown and
 	// must not be confused with it: the script is perfectly legible, so a
@@ -83,6 +86,9 @@ func (a *analyzer) classifyWords(words []word) Command {
 		c.Dynamic = true
 	}
 	c.Unrecognised = r.unrecognised
+	if len(r.argv) > 0 && !slices.Equal(r.argv, argv) {
+		c.Program = r.argv
+	}
 	if r.hardDeny != "" {
 		a.hardDeny(r.hardDeny, r.class)
 	}
@@ -179,7 +185,24 @@ func (a *analyzer) inner(args []word, i int) result {
 	if i >= len(args) {
 		return result{class: SafeRead}
 	}
-	return a.classify(args[i:])
+	r := a.classify(args[i:])
+	// Remember what actually runs. Every wrapper returns its inner result,
+	// so this propagates through `env FOO=1 timeout 5 tool …` without each
+	// handler having to think about it, and a rule can then be offered for
+	// the program instead of for the wrapper in front of it.
+	if r.argv == nil {
+		r.argv = textOf(args[i:])
+	}
+	return r
+}
+
+// textOf is the literal argv of expanded words.
+func textOf(words []word) []string {
+	out := make([]string, len(words))
+	for i, w := range words {
+		out[i] = w.text
+	}
+	return out
 }
 
 // wrapSkipFlags builds a peeler that drops known options (and their values)

@@ -613,7 +613,7 @@ func (ev *eval) coverCommands(allow []*Rule) (last *Rule, why string) {
 		}
 		matched := false
 		for _, r := range allow {
-			if (r.IsBare() || r.IsBash()) && r.MatchesCommand(c.Argv) {
+			if (r.IsBare() || r.IsBash()) && matchesCommand(r, c) {
 				matched, last = true, r
 				if r.Net() {
 					break // prefer remembering a +net rule
@@ -963,7 +963,7 @@ func suggestBash(req Request) []Rule {
 		if inertCommand(c) {
 			continue
 		}
-		words := offerWords(c.Argv)
+		words := offerWords(effectiveArgv(c))
 		text := "bash(" + strings.Join(words, " ") + " *)"
 		if c.Network || sh.NeedsNetwork {
 			text += " +net"
@@ -982,6 +982,28 @@ func suggestBash(req Request) []Rule {
 		}
 	}
 	return rules
+}
+
+// effectiveArgv is the command a rule should be about: what actually runs,
+// not the wrapper in front of it. The agent writes `timeout 120 ./bin/t --all`
+// and the rule worth saving is for ./bin/t.
+func effectiveArgv(c shellclass.Command) []string {
+	if len(c.Program) > 0 {
+		return c.Program
+	}
+	return c.Argv
+}
+
+// matchesCommand reports whether a rule covers a command, by the words as
+// written or by the program a wrapper peels down to. Both, because the rule
+// offered for a wrapped command names the program — so matching only the
+// outer form would offer a rule that could never take effect — while a rule
+// someone already saved for the outer form must keep working.
+func matchesCommand(r *Rule, c shellclass.Command) bool {
+	if r.MatchesCommand(c.Argv) {
+		return true
+	}
+	return len(c.Program) > 0 && r.MatchesCommand(c.Program)
 }
 
 // offerWords is the argv prefix an offered rule pins: the program, plus a

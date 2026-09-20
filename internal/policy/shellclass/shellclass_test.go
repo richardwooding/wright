@@ -837,3 +837,34 @@ func TestDynamicArgumentOnlyPoisonsWhatCanActOnIt(t *testing.T) {
 		})
 	}
 }
+
+// TestProgramIsThePeeledCommand pins what a rule should be offered for. A
+// wrapper peels for classification but Argv keeps the words as written, so
+// without this the rule offered for `timeout 120 ./bin/t --all` names the
+// wrapper and the duration — too broad, and useless the moment the agent
+// picks a different timeout.
+func TestProgramIsThePeeledCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want []string
+	}{
+		{name: "timeout", cmd: "timeout 120 ./bin/t --all", want: []string{"./bin/t", "--all"}},
+		{name: "timeout with options", cmd: "timeout -k 5 30 ./bin/t", want: []string{"./bin/t"}},
+		{name: "env", cmd: "env FOO=1 git push", want: []string{"git", "push"}},
+		{name: "nested wrappers", cmd: "env FOO=1 timeout 5 ./bin/t --all", want: []string{"./bin/t", "--all"}},
+		{name: "no wrapper leaves it empty", cmd: "git push", want: nil},
+		{name: "plain program", cmd: "./bin/t --all", want: nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shellclass.Analyze(tt.cmd, fakeWS{})
+			if len(got.Commands) != 1 {
+				t.Fatalf("commands = %d, want 1", len(got.Commands))
+			}
+			if !slices.Equal(got.Commands[0].Program, tt.want) {
+				t.Errorf("Program = %v, want %v", got.Commands[0].Program, tt.want)
+			}
+		})
+	}
+}

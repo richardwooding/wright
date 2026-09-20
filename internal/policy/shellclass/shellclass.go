@@ -61,6 +61,10 @@ type Command struct {
 	// dynamicArgs records that an argument was dynamic but the command was
 	// inert, so walkCall can revisit that once redirects are attached.
 	dynamicArgs bool
+	// Program is the effective command after a wrapper has been peeled
+	// ("timeout 120 ./bin/t --all" → ["./bin/t","--all"]), empty when it is
+	// the same as Argv. A rule should name what runs, not the wrapper.
+	Program []string
 	// Unrecognised is true when the program is not in the command table.
 	// Unlike Dynamic this does not make the script opaque: the argv is
 	// known, so a rule naming the program can cover the command.
