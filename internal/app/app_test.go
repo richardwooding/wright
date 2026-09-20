@@ -551,3 +551,29 @@ func TestJobsCommand(t *testing.T) {
 		t.Errorf("/jobs = %q", out)
 	}
 }
+
+// TestEveryOfferedCommandIsAnswered pins the commands the TUI's registry and
+// the README both promise. app and tui cannot import each other, so the list
+// is written down here: what it catches is a command being renamed or
+// dropped on this side while the UI still offers it and completion still
+// suggests it.
+func TestEveryOfferedCommandIsAnswered(t *testing.T) {
+	ws := isolate(t)
+	setScript(t, []step{{text: "hi"}})
+	b, err := app.Build(context.Background(), baseOpts(ws))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.Close() }()
+
+	// The assertion is that the command is *known*, not that it succeeds:
+	// /diff shells out to git, and a bare temp directory is not a repository.
+	for _, name := range []string{"diff", "audit", "init", "redaction", "trust", "mcp", "skills", "agents", "jobs"} {
+		if _, err := b.Command(context.Background(), name, nil); err != nil && strings.Contains(err.Error(), "unknown command") {
+			t.Errorf("/%s is offered by the UI but not answered: %v", name, err)
+		}
+	}
+	if _, err := b.Command(context.Background(), "nope", nil); err == nil {
+		t.Error("an unknown command must be an error so the UI can say so")
+	}
+}

@@ -124,6 +124,8 @@ All notable changes to this project are documented here. The format follows
   allowed them. Edits inside the workspace now run without asking, and the
   sensitive-file, ignored-file, outside-the-workspace, `.git`, `.wright` and
   secret floors all still fire, as does any ask rule you wrote yourself.
+- `/agents` was answered by the app but never offered by the TUI, so typing
+  it said "unknown command" and completion never suggested it.
 - An overlay on a very short terminal no longer pushes the composer and status
   bar off the screen: the overlay box has a minimum height and was not clipped
   to the space it was given.

@@ -43,6 +43,8 @@ func init() {
 		{"init", "", "write an AGENTS.md for this project", hook("init")},
 		{"mcp", "", "MCP servers", hook("mcp")},
 		{"skills", "", "loaded skills", hook("skills")},
+		{"jobs", "", "background commands this session started", hook("jobs")},
+		{"agents", "", "the sub-agents this session can call", hook("agents")},
 		{"todos", "", "show the task list", (*Model).cmdTodos},
 		{"mouse", "", "toggle wheel scrolling (off keeps terminal selection)", (*Model).cmdMouse},
 		{"audit", "", "audit log summary", hook("audit")},

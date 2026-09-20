@@ -628,7 +628,7 @@ rewritten. `/redaction off` turns it off for the session.
 | `@` / `/` | file completion · command completion |
 
 `/help` `/clear` `/compact` `/cost` `/diff` `/mode` `/model` `/sessions`
-`/resume` `/export` `/undo` `/init` `/mcp` `/skills` `/jobs` `/todos` `/audit`
+`/resume` `/export` `/undo` `/init` `/mcp` `/skills` `/agents` `/jobs` `/todos` `/audit`
 `/redaction` `/reasoning` `/trust` `/mouse` `/plain` `/quit`
 
 The status bar carries the whole state of the run, and the summary is printed
