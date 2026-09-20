@@ -169,6 +169,13 @@ func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error)
 	out, newCwd := splitCwd(raw)
 	notes = append(notes, d.updateCwd(newCwd)...)
 	timedOut := tctx.Err() != nil
+	// Say plainly when the sandbox is what failed the command: without this
+	// the model spends a dozen calls rediscovering it.
+	backend := ""
+	if d.Sandbox != nil {
+		backend = d.Sandbox.Name()
+	}
+	notes = append(notes, sandboxHints(out, spec, backend)...)
 	return d.bashResult(ctx, out, cmd, runErr, dur, timedOut, timeout, notes), nil
 }
 

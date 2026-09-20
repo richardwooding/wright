@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `brew update`, `update-reset`, `pin` and `unpin` rewrite Homebrew's own git
+  repositories under the prefix, so they need the writable prefix an install
+  does. They were classified as ordinary network commands and failed on a
+  read-only mount.
+- A command that fails *because of the sandbox* now says so. When a call that
+  ran without network access reports a connection failure, or a write reports
+  a read-only file system, the result explains which restriction caused it and
+  what grants it. A user's session showed the agent spending ten tool calls
+  rediscovering that its own sandbox had no network, and still reaching the
+  wrong conclusion.
+
 ## [0.1.2] - 2026-09-20
 
 An approved call now gets what it needs to work. A user reported that

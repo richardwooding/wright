@@ -763,6 +763,10 @@ func handleBrew(a *analyzer, name string, args []word) result {
 		"install": installer("brew install"), "reinstall": installer("brew reinstall"),
 		"upgrade": installer("brew upgrade"), "fetch": installer("brew fetch"),
 		"tap": installer("brew tap"), "link": installer("brew link"), "unlink": installer("brew unlink"),
+		// update rewrites Homebrew's own git repositories under the prefix,
+		// so it needs the same writable prefix an install does.
+		"update": installer("brew update"), "update-reset": installer("brew update-reset"),
+		"pin": installer("brew pin"), "unpin": installer("brew unpin"),
 		"uninstall": uninstaller("brew uninstall"), "remove": uninstaller("brew remove"),
 		"rm": uninstaller("brew rm"), "cleanup": uninstaller("brew cleanup"),
 		"autoremove": uninstaller("brew autoremove"), "untap": uninstaller("brew untap"),

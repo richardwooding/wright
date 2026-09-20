@@ -413,7 +413,10 @@ var table = []row{
 	{cmd: "brew outdated", class: shellclass.Network, network: true},
 	{cmd: "brew search fpc", class: shellclass.Network, network: true},
 	{cmd: "brew doctor", class: shellclass.Network, network: true},
-	{cmd: "brew update", class: shellclass.Network, network: true},
+	// update rewrites Homebrew's own git repositories under the prefix, so
+	// it needs the writable prefix an install does: a user reported it
+	// failing on a read-only mount.
+	{cmd: "brew update", class: shellclass.Network, network: true, installs: true},
 	{cmd: "brew list", class: shellclass.SafeRead},
 	{cmd: "brew leaves", class: shellclass.SafeRead},
 	{cmd: "brew config", class: shellclass.SafeRead},
