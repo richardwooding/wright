@@ -35,6 +35,7 @@ var (
 	builtinAsk = []string{
 		"write_file($WORKSPACE/**)",
 		"edit_file($WORKSPACE/**)",
+		"multi_edit($WORKSPACE/**)",
 		"bash(git push *)",
 		"web_fetch",
 		"web_search",

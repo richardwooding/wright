@@ -22,6 +22,12 @@ All notable changes to this project are documented here. The format follows
   environment (`BRAVE_API_KEY`) and is never echoed in an error. A provider
   named by an untrusted project's settings is ignored, because a search
   discloses the query to a third party.
+- **`multi_edit`**: several edits in one call, across files or repeatedly in
+  one, each seeing the previous one's result. Every edit is validated before
+  any is written, so a call that cannot be applied in full changes nothing;
+  if a write still fails part-way, the files already written are put back and
+  the error says so. It asks for approval like any other write, and the
+  approval prompt shows a diff of the whole call.
 - The window (and process) title says when wright is working: `● wright — <dir>`
   while a run is in flight, `wright — <dir>` when it is idle, so a session left
   working in another tab is visible from the window list. The title is also set

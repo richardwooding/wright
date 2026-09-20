@@ -92,6 +92,16 @@ func (f *fixture) write(rel string) policy.Request {
 	return policy.Request{Tool: "edit_file", Writes: []string{f.abs(rel)}}
 }
 
+// writeTool is write for a named write tool, so the same rows can be run
+// against every tool that changes files.
+func (f *fixture) writeTool(tool string, rels ...string) policy.Request {
+	paths := make([]string, len(rels))
+	for i, rel := range rels {
+		paths[i] = f.abs(rel)
+	}
+	return policy.Request{Tool: tool, Paths: paths, Writes: paths}
+}
+
 func fetch(raw string) policy.Request {
 	u, _ := url.Parse(raw)
 	return policy.Request{Tool: "web_fetch", URL: u}
@@ -498,5 +508,50 @@ func TestRecursiveChmodOnSystemRootsIsHardDenied(t *testing.T) {
 	e := policy.New(f.ws, policy.ModeAutoEdit, policy.Builtin())
 	if v := e.Evaluate(f.bash("chmod -R 755 sub")); v.HardDeny {
 		t.Errorf("chmod -R inside the workspace was hard-denied: %s", v.Reason)
+	}
+}
+
+// TestMultiEditIsAWriteEverywhere pins multi_edit against the whole write
+// lattice. It is the newest write tool and the one most likely to be missed
+// when a check is added, because unlike edit_file it can name several files
+// in one call: a floor that holds for edit_file and not for multi_edit would
+// be a way around the floor rather than a gap in one tool.
+func TestMultiEditIsAWriteEverywhere(t *testing.T) {
+	f := newFixture(t)
+	builtin := policy.Builtin()
+	tests := []struct {
+		name   string
+		mode   policy.Mode
+		layers [][]policy.Rule
+		req    policy.Request
+		want   policy.Decision
+		reason string
+		hard   bool
+	}{
+		{name: "asks in default mode", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.writeTool("multi_edit", "main.go"), want: policy.Ask},
+		{name: "denies in plan mode", mode: policy.ModePlan, layers: [][]policy.Rule{builtin}, req: f.writeTool("multi_edit", "main.go"), want: policy.Deny, reason: "plan mode"},
+		{name: "a .git write is hard-denied", mode: policy.ModeBypass, req: f.writeTool("multi_edit", ".git/hooks/pre-commit"), want: policy.Deny, hard: true},
+		{name: "a secret write is hard-denied", mode: policy.ModeBypass, req: f.writeTool("multi_edit", ".env"), want: policy.Deny, hard: true},
+		{name: "a user deny rule wins", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Deny, policy.SourceUser, "multi_edit(**)")}, req: f.writeTool("multi_edit", "main.go"), want: policy.Deny},
+		// One call names several files, so a permitted path must not carry a
+		// forbidden one through with it. These are the rows a single-path
+		// write tool could never express.
+		{name: "a good path does not carry a protected one", mode: policy.ModeBypass, layers: [][]policy.Rule{builtin}, req: f.writeTool("multi_edit", "main.go", ".git/config"), want: policy.Deny, hard: true},
+		{name: "a good path does not carry an outside one", mode: policy.ModeDefault, req: f.writeTool("multi_edit", "main.go", "../elsewhere/f.txt"), want: policy.Ask, reason: "outside"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := policy.New(f.ws, tt.mode, tt.layers...)
+			v := e.Evaluate(tt.req)
+			if v.Decision != tt.want {
+				t.Errorf("decision = %v, want %v (%s)", v.Decision, tt.want, v.Reason)
+			}
+			if tt.hard && !v.HardDeny {
+				t.Errorf("want a hard deny, got %q", v.Reason)
+			}
+			if tt.reason != "" && !strings.Contains(v.Reason, tt.reason) {
+				t.Errorf("reason = %q, want containing %q", v.Reason, tt.reason)
+			}
+		})
 	}
 }

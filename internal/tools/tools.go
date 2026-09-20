@@ -37,6 +37,7 @@ const (
 	NameReadFile  = "read_file"
 	NameWriteFile = "write_file"
 	NameEditFile  = "edit_file"
+	NameMultiEdit = "multi_edit"
 	NameGlob      = "glob"
 	NameGrep      = "grep"
 	NameListDir   = "list_dir"
@@ -238,7 +239,7 @@ func New(deps Deps) agentkit.Toolset {
 	}
 	d := &deps
 	ts := agentkit.Toolset{
-		d.readFile(), d.writeFile(), d.editFile(), d.glob(), d.grep(), d.listDir(),
+		d.readFile(), d.writeFile(), d.editFile(), d.multiEdit(), d.glob(), d.grep(), d.listDir(),
 	}
 	if d.Sandbox != nil {
 		ts = append(ts, d.bash())
@@ -261,7 +262,7 @@ func New(deps Deps) agentkit.Toolset {
 // Names lists every tool this package can register, in registration order.
 func Names() []string {
 	return []string{
-		NameReadFile, NameWriteFile, NameEditFile, NameGlob, NameGrep, NameListDir,
+		NameReadFile, NameWriteFile, NameEditFile, NameMultiEdit, NameGlob, NameGrep, NameListDir,
 		NameBash, NameWebFetch, NameWebSearch, NameTodoWrite, NameAskUser,
 	}
 }
@@ -301,6 +302,7 @@ func Docs() []ToolDoc {
 		{NameReadFile, "Read a file with line numbers. Use offset/limit to page through long files; prefer this over cat/head/tail in bash."},
 		{NameWriteFile, "Create or completely overwrite a file. For changes to an existing file prefer edit_file so the diff stays small and reviewable."},
 		{NameEditFile, "Replace an exact, unique string in a file. Include enough surrounding lines to make old_string unique, or set replace_all to change every occurrence."},
+		{NameMultiEdit, "Apply several edits in one call, in order — across files or repeatedly in one. Every edit is validated before any is written, so a call that cannot be applied in full changes nothing. Prefer it over a run of edit_file calls for a refactor."},
 		{NameGlob, "Find files by name pattern (doublestar, e.g. **/*.go). Results are newest first and ignore-aware; use it before grep when you know the file shape."},
 		{NameGrep, "Search file contents with a regular expression. mode=files lists matching files, content shows lines with optional context, count tallies per file."},
 		{NameListDir, "Show a directory tree, directories first, ignore-aware. Use a small depth on large trees."},

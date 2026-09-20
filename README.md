@@ -154,7 +154,7 @@ gitignored), and on the command line with `--allow` / `--deny` (repeatable).
 ```
 rule    := tool [ "(" spec ")" ] [ "+net" ]
 tool    := read_file | write_file | edit_file | glob | grep | list_dir | bash
-         | web_fetch | web_search | todo_write | ask_user
+         | multi_edit | web_fetch | web_search | todo_write | ask_user
          | explore | <agent> | skill | skill_file
          | "mcp:" server [ ":" toolglob ] | "*"
 spec    := pathglob                    doublestar; relative = workspace-relative; "~/" and "$WORKSPACE/" expand
@@ -187,6 +187,7 @@ the embedded `internal/config/defaults.json`) are:
   `bash(git status|diff|log|show|blame|branch --list|remote -v|rev-parse|stash list|worktree list *)`;
   `bash(go build|test|vet|fmt *)`; `bash(rg|grep|find|ls|cat|head|tail|wc *)`.
 - **ask** — `write_file($WORKSPACE/**)`, `edit_file($WORKSPACE/**)`,
+  `multi_edit($WORKSPACE/**)`,
   `bash(git push *)`, `web_fetch`, `web_search`, `mcp:*`.
 - **deny** — `.env`, `*.pem`, `*.key`, `*.p12`, `*.pfx`, `*.jks`, `*.kdbx`,
   `credentials*`, `service-account*.json`; `~/.ssh`, `~/.aws`, `~/.gnupg`,
@@ -636,15 +637,15 @@ wright is pre-1.0. v0.1.3 is the current release. Working end to end
 today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,
-`edit_file`, `glob`, `grep`, `list_dir`, `bash`, `web_fetch`, `web_search`,
-`todo_write`, `ask_user`), skills discovery, MCP servers behind consent, the `explore`
+`edit_file`, `multi_edit`, `glob`, `grep`, `list_dir`, `bash`, `web_fetch`,
+`web_search`, `todo_write`, `ask_user`), skills discovery, MCP servers behind consent, the `explore`
 sub-agent and custom agents, sessions and resume, snapshots and `/undo`,
 redaction, the audit log, model detection and cost, trust-gated project
 settings, and the release plumbing.
 
 Landing next: the interactive MCP consent prompt (until then an unaccepted
-server is declined with a full report of what it asked for), `multi_edit`, and
-background `bash` jobs. A macOS seatbelt profile
+server is declined with a full report of what it asked for) and background
+`bash` jobs. A macOS seatbelt profile
 ships but macOS is treated conservatively until it has more mileage.
 **Not planned:** an LSP client — wright uses your repository's own tools
 instead.
