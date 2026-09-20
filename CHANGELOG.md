@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-09-20
+
+A session that stopped dead with no error, reported from a real run. Two tool
+calls needed approval at once and only one prompt could be on screen, so the
+other was never answered and its step never finished. `/ps` is the other half
+of that report: a way to see what a quiet session is actually doing.
+
 ### Fixed
 
 - **A session could stop dead when two tools needed approval at once.** Tool
