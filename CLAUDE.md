@@ -85,7 +85,8 @@ exist. Never add `replace` directives.
 ```
 cmd/wright/main.go        kong parse, signal.NotifyContext, exit codes; version/commit/date via ldflags
 internal/
-  cli/        kong CLI struct + Run methods (run, sessions, models, config, audit, init, doctor, mcp list|add|remove, skills);
+  cli/        kong CLI struct + Run methods (run, sessions, models, config, audit, init, doctor, mcp list|add|remove, skills,
+              trust list|accept|forget);
               the only importer of app; ExitError{Code} carries headless codes to main; hidden `__sandbox` landlock helper
   app/        composition root: Build = workspaceAndConfig → sandboxing → permissions → modelAndSession → toolsAndEngine;
               Run → headless.Run | Interactive hook (tui wired in cmd/wright); Command hook for /diff /audit /init /trust
@@ -113,7 +114,7 @@ internal/
   audit/      SHA-256-chained JSONL per session: Open/Write/Read/Verify/Summarize
   snapshot/   content-addressed pre-edit snapshots per run → /undo
   config/     Settings layers (embedded defaults.json < user < project < project.local < env), atomic saves
-  trust/      accepted project settings / MCP servers by hash, ~/.config/wright/trust.json
+  trust/      accepted workspaces (the directory itself) and project settings / MCP servers by hash, ~/.config/wright/trust.json
   session/    agentkit FileStore + sessions/meta/<id>.meta.json sidecars: Open/List/Get/Touch/Latest/ExportMarkdown/Delete/Purge
   model/      Choice: flag > WRIGHT_MODEL > settings > credential detection > Ollama probe; Best/Fast/List from the catalog
   cost/       Meter (usage per model → USD via catalog), FormatUSD/FormatTokens; unknown models price as "—"
@@ -180,6 +181,27 @@ client to HTTP MCP transports).
   mode table's defaults written as rules and sits *below* allow rules —
   otherwise no allow rule for `edit_file`/`web_fetch`/`git push` could ever take
   effect. `TestEvaluateTable` pins both directions.
+- **The workspace-trust baseline lives in the mode table, never in a rule.**
+  `Engine.TrustWorkspace` makes an ordinary in-workspace edit *allow* instead
+  of *ask*, and it is applied in `modeWrite`'s default branch
+  (`modeWriteDefault`) on purpose. Writing it as an allow rule would be
+  simpler and would silently widen it: allow rules are consulted *before* the
+  mode table, and `containment()` drops the ask half for the write tools
+  (`if ev.kind != kindBash { ask = "" }`) because `modeWrite` re-derives it
+  through `ev.outside(...)` — so a rule returns with the sensitive-file
+  (`*.tfvars`) and ignored-file asks never evaluated. The mode-table grant
+  alone is not enough either: the builtin ask rules
+  `write_file($WORKSPACE/**)`/`edit_file($WORKSPACE/**)` answer one step
+  earlier, so `run` skips *exactly those* for a request `trustBaseline()`
+  covers (a trusted workspace, a write tool with at least one declared write,
+  default mode). Both halves are load-bearing; reverting either one fails
+  `TestEvaluateTable`. `multi_edit` is in `writeTools` with no builtin ask
+  rule, so it reaches `modeWrite` by the other route and is pinned
+  separately. The verdict names `policy.SourceTrust` in its `Reason` so the
+  prompt and the audit log can say which decision granted it. Every floor
+  still runs first: hard-deny, `.wrightignore`, deny rules, explicit ask
+  rules, containment, outside-the-workspace, sensitive files, ignored files,
+  and plan mode, which never consults allow rules at all.
 - **Builtin rules and `config/defaults.json` must match.** `policy/builtin.go`
   and the embedded JSON are the same list; `TestBuiltinMatchesConfigDefaults`
   fails if they drift.
@@ -348,7 +370,7 @@ client to HTTP MCP transports).
 - **Project settings are inert until trusted — both files.**
   `app.ProjectHash` hashes `.wright/settings.json` *and*
   `.wright/settings.local.json` as a unit, so a repository shipping only the
-  local file cannot be trusted by default, and `checkTrust` falls through to
+  local file cannot be trusted by default, and `resolveTrust` falls through to
   the hash check as soon as either exists. `app.effectiveSettings` rebuilds
   the layers itself (defaults < user < project < project.local < env) and
   runs *both* project layers through `tighteningOnly` unless `trust.json`
@@ -373,6 +395,24 @@ client to HTTP MCP transports).
   (`trust.normalizeRoot`), never by the spelling a caller happens to hold:
   accepting under one spelling and checking under another is how project
   trust silently stopped working on macOS.
+- **Trusting a directory and trusting its settings are two questions.**
+  `trust.Record` holds them in separate fields (`SettingsHash`/`Accepted` and
+  `WorkspaceAccepted`) and every accessor preserves the other, so editing
+  `.wright/settings.json` cannot revoke the workspace and accepting the
+  workspace cannot vouch for settings nobody read. An old record has no
+  `workspaceAccepted`, which reads as "never asked" — the right answer on
+  upgrade. `app.resolveTrust` answers both with at most one `Confirm`
+  (fused when both are pending, so a first run asks once), *before*
+  `sandboxing` and `permissions`; declining the workspace returns
+  `ErrWorkspaceNotTrusted`, which `run.go` turns into `ExitTrustDeclined`
+  (5) with no session created. **A headless run (`b.headless()`: `-p` or no
+  terminal) is never asked, never exits over trust and never gets the
+  baseline**, whatever `trust.json` holds — the guard is one `&&
+  !b.headless()` in `resolveTrust`, and removing it lets a scripted
+  `edit_file` run with no approval at all. `--trust` (`RunOptions.
+  TrustWorkspace`) answers the workspace question only; `wright trust
+  accept|forget` is the out-of-band way in and back out, since nothing
+  called `ForgetProject` before it.
 - **Headless exit 3 comes from the tool result.** With `Options.Headless`
   the engine answers every Ask verdict with a denial containing
   `engine.HeadlessDenialMarker`; `headless.Run` scans `KindToolResult` text

@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Workspace trust.** The first interactive session in a directory asks
+  whether you trust it, before anything starts; declining exits with the new
+  code `5` and starts nothing. In a trusted directory, editing files inside
+  it no longer prompts — and nothing else changes: shell commands, the
+  network, paths outside the directory, sensitive files (`*.tfvars`),
+  ignored files and the whole hard-deny floor still ask or refuse, and plan
+  mode still allows no edits. The grant is applied in the permission mode
+  table, after every one of those checks, never as an allow rule.
+- `--trust` answers that question in advance for a wrapper script, and
+  `wright trust list|accept|forget` shows what has been accepted and takes it
+  back — nothing could undo trust before.
+- `wright config paths` now lists `trust.json`, the file that decides both
+  whether a directory's edits prompt and whether its settings apply.
+
+### Changed
+
+- A first run in a directory that also ships `.wright/settings.json` asks one
+  question covering both, instead of two.
+- Headless (`-p`) is deliberately unchanged: it never asks the trust
+  question, never exits over it and never takes the baseline, whatever was
+  accepted in a terminal, so an unattended run behaves the same everywhere.
+- `trust.json` records the workspace acceptance in its own field, independent
+  of the settings hash: editing `.wright/settings.json` no longer has any
+  bearing on whether the directory is trusted, and vice versa. Records
+  written by earlier versions read as "never asked".
+
 ## [0.1.3] - 2026-09-20
 
 From a user's session log: the sandbox's own restrictions were invisible to

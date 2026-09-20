@@ -85,6 +85,7 @@ Hello from the fake model. How can I help?
 | `-r, --resume` / `-c, --continue` | resume a session by ID, or the latest for this workspace |
 | `--cwd` · `--add-dir` | working directory; extra directories the agent may access (repeatable) |
 | `--max-steps` · `--reasoning` | step budget per run; reasoning effort hint (`low`, `medium`, `high`) |
+| `--trust` | trust this directory without being asked at startup (edits stop prompting; shell commands still ask). Ignored with `-p` |
 | `--strict-injection` | treat prompt-injection signals in web/MCP content as needing approval |
 | `--plain` · `-v` · `-V` | no alternate screen (`WRIGHT_PLAIN`); verbose diagnostics on stderr; version |
 
@@ -131,7 +132,7 @@ settings value: only `--bypass-permissions` can reach it.
 
 | | reads in workspace | edits in workspace | bash: read-only | bash: mutating | bash: network | bash: opaque | privilege / `sudo` | web_fetch | outside the workspace | MCP |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| **default** | allow | ask | allow | ask | ask | ask | deny | ask | ask; secret/protected deny | ask |
+| **default** | allow | ask (allow in a trusted directory) | allow | ask | ask | ask | deny | ask | ask; secret/protected deny | ask |
 | **plan** | allow | deny | allow | deny | deny | deny | deny | ask | reads ask, writes deny | read-only-annotated: ask, else deny |
 | **auto-edit** | allow | allow (not ignored/sensitive) | allow | ask | ask | ask | deny | ask | ask; secret/protected deny | ask |
 | **bypass** | allow | allow | allow | allow | allow (sandbox network still off unless `--allow-network`) | allow | **deny** | allow | allow except hard-deny | allow |
@@ -144,6 +145,32 @@ toplevel of your cwd plus anything you added with `--add-dir`, with every path
 resolved through `EvalSymlinks` first, so a symlink out of the tree is seen
 for what it is. Plan mode still *asks* for a read outside the workspace rather
 than refusing it outright; everything that would change state there is denied.
+
+### Workspace trust
+
+The first interactive session in a directory asks whether you trust it, before
+anything starts. Answering no exits with code `5` — no session, nothing read.
+Answering yes records the directory in `~/.config/wright/trust.json`, and from
+then on **editing files inside it stops prompting**.
+
+That is all it grants. In a trusted directory wright still asks — or refuses —
+for every shell command, the network, anything outside the directory, a
+sensitive file (`*.tfvars`, `*.tfstate`), an ignored file, and everything in
+the hard-deny floor below (`.git`, `.wright`, secrets, protected paths). Plan
+mode still refuses edits. The grant is applied in the mode table, *after* all
+of those checks, and never as an allow rule — which is what keeps them in
+force.
+
+`--trust` answers the question in advance for a wrapper script, and
+`wright trust list|accept|forget` shows what has been accepted and takes it
+back. **Headless (`-p`) is not affected at all**: it never asks, never exits
+over trust and never takes the baseline, however the directory was accepted in
+a terminal, so an unattended run behaves the same in every checkout.
+
+Trusting a directory is a different question from trusting its
+`.wright/settings.json` (below): editing that file does not untrust the
+directory, and trusting the directory does not make an unread settings file
+apply. A first run where both are pending asks once, for both.
 
 ### Rules
 
@@ -420,6 +447,7 @@ wright -p "…" --max-steps 20
 | `2` | usage: no prompt, unknown `--output` format |
 | `3` | approval required — a call was denied because nobody could answer; the message names the `--allow` rule or mode that would permit it |
 | `4` | budget exhausted (`--max-steps`, max tokens, deadline) |
+| `5` | the workspace-trust question was declined; nothing ran (interactive only) |
 | `130` | interrupted (SIGINT/SIGTERM); the run is cancelled and the audit `run_end` is still written |
 
 `--output stream-json` emits one JSON object per line. `type` is the event
@@ -470,7 +498,9 @@ apply — and a warning says so — until `/trust` (or `wright init` having
 written the file) records the file's hash in `~/.config/wright/trust.json`;
 any later edit re-prompts with a diff. A project's `ask` and `deny` rules
 always apply, because tightening is free. `wright config show` prints the
-gated view; `wright config paths` prints where each layer lives.
+gated view; `wright config paths` prints where each layer lives, trust.json
+included. This is the *settings* question, recorded separately from workspace
+trust above — neither one ever answers the other.
 
 ```jsonc
 {
