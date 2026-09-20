@@ -34,6 +34,11 @@ All notable changes to this project are documented here. The format follows
   counted a denial as merely asked. The recorded outcome is now the user's
   answer; `Summary.Asked` still counts prompts shown, and `wright audit show`
   names who answered.
+- A headless denial was recorded as `ask`. Headless never prompts and always
+  denies, so a CI run's log — the one most likely to be read by someone who
+  was not there — claimed nothing had been denied. The verdict that would
+  have prompted is still legible in the reason, which names the `--allow`
+  rule that would let the call through.
 - The audit log never recorded what an approval handed the call. A decision
   now carries `granted_network` and `granted_writable`, so the log can show
   that a command was allowed but ran *without* the network — the fact a

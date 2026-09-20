@@ -347,7 +347,9 @@ client to HTTP MCP transports).
   answer, and `granted_network`/`granted_writable` record what allowing that
   one call handed it — `grant` is a *saved rule*, a different thing.
   `Summary.Asked` therefore counts `by: "user"` lines rather than the `ask`
-  outcome, so it still means "prompts shown".
+  outcome, so it still means "prompts shown". The headless branch denies
+  without prompting, so it records `deny` too — a run nobody watched is the
+  one whose log has to be true.
 - **Config lists accumulate.** `config.Merge` appends+dedupes `allow/ask/deny`
   (and other slices) and overrides scalars only when non-zero; booleans that
   default to true are `*bool` so a later layer can turn them off.

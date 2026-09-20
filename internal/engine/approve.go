@@ -82,6 +82,13 @@ func (e *Engine) describe(c agentkit.Call) (policy.Request, Preview, error) {
 func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, verdict policy.Verdict, preview Preview) (agentkit.Decision, error) {
 	if e.opts.Headless {
 		verdict.Reason = headlessReason(c, verdict)
+		// Headless never prompts: this call is denied, now. Recording the Ask
+		// verdict that would have raised a prompt leaves a CI run's log
+		// claiming nothing was denied, which is the same untruth outcomeOf
+		// fixes for the two user branches. What the verdict *was* survives in
+		// Class, Rule and Reason, which names the --allow rule that would let
+		// it through.
+		verdict.Decision = policy.Deny
 		e.auditDecision(c, verdict, "headless", nil, CallGrant{})
 		return agentkit.Deny(verdict.Reason), nil
 	}

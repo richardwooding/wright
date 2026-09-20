@@ -3,6 +3,7 @@ package engine_test
 import (
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/richardwooding/agentkit"
@@ -147,5 +148,46 @@ func TestAuditRecordsTheGrant(t *testing.T) {
 				t.Errorf("granted_writable names %q = %v, want %v (%v)", prefix, named, tt.wantWritten, decs[0].GrantedWritable)
 			}
 		})
+	}
+}
+
+// TestAuditRecordsAHeadlessDenialAsADenial pins the same property for the
+// third branch. Headless never prompts and always denies, so recording the
+// Ask verdict left a CI run's log — the log most likely to be read by someone
+// who was not there — claiming nothing was denied.
+func TestAuditRecordsAHeadlessDenialAsADenial(t *testing.T) {
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.CallResp("c1", "edit_file", `{"path":"a.go"}`),
+		enginetest.TextResp("done"),
+	}}
+	f, path := auditFixture(t, client, func(o *engine.Options) { o.Headless = true })
+	if err := f.eng.Submit("edit a.go"); err != nil {
+		t.Fatal(err)
+	}
+	f.collect(t, func(ev engine.Event) {
+		if ev.Kind == engine.KindApprovalRequest {
+			t.Error("headless raised an approval prompt")
+		}
+	})
+	decs := auditedDecisions(t, path)
+	if len(decs) != 1 {
+		t.Fatalf("decisions recorded = %d, want 1: %+v", len(decs), decs)
+	}
+	if decs[0].Outcome != "deny" || decs[0].By != "headless" {
+		t.Errorf("recorded %q by %q, want deny by headless", decs[0].Outcome, decs[0].By)
+	}
+	// The verdict that would have prompted is still legible: the reason names
+	// the flag that would let the call through.
+	if !strings.Contains(decs[0].Reason, "--allow") {
+		t.Errorf("reason does not name the rule that would allow it: %q", decs[0].Reason)
+	}
+
+	// A denial must land in Denied, not in Asked: no prompt was shown.
+	sum, err := audit.Summarize(audit.Read(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Denied != 1 || sum.Asked != 0 {
+		t.Errorf("summary denied=%d asked=%d, want 1 and 0", sum.Denied, sum.Asked)
 	}
 }
