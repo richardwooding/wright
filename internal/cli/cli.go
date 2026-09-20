@@ -27,6 +27,10 @@ const (
 	ExitApproval    = headless.ExitApprovalRequired // headless run needed an approval that was not granted
 	ExitBudget      = headless.ExitBudget
 	ExitInterrupted = headless.ExitInterrupted
+	// ExitTrustDeclined is returned when the user answered "no" to the
+	// startup workspace-trust question: nothing ran, and that is not a
+	// failure, so a wrapper script can tell it apart from one.
+	ExitTrustDeclined = app.ExitTrustDeclined
 )
 
 // ExitError carries a specific process exit code out of a command. Err is
@@ -73,6 +77,7 @@ type CLI struct {
 	Model                  string           `short:"m" env:"WRIGHT_MODEL" help:"Model to use (provider auto-detected from env keys when omitted)."`
 	Mode                   string           `env:"WRIGHT_MODE" help:"Permission mode: default, plan or auto-edit (bypass only via --bypass-permissions)."`
 	BypassPermissions      bool             `help:"Skip approval prompts (hard-deny set still applies; refused without a sandbox)."`
+	Trust                  bool             `help:"Trust this directory without being asked at startup: edits to files in it do not prompt (shell commands still do). Ignored with -p."`
 	AllowUnsandboxedBypass bool             `help:"Permit --bypass-permissions even when no OS sandbox is available."`
 	Resume                 string           `short:"r" help:"Resume the session with this ID."`
 	Continue               bool             `short:"c" help:"Resume the most recent session for this workspace."`
@@ -96,6 +101,7 @@ type CLI struct {
 	MCP           MCPCmd      `cmd:"" name:"mcp" help:"Manage MCP servers."`
 	Skills        SkillsCmd   `cmd:"" help:"List discovered skills."`
 	Audit         AuditCmd    `cmd:"" help:"Inspect or verify the audit log."`
+	Trusted       TrustCmd    `cmd:"" name:"trust" help:"List, accept or forget trusted workspaces."`
 	Init          InitCmd     `cmd:"" help:"Create AGENTS.md and .wright/settings.json for this project."`
 	Doctor        DoctorCmd   `cmd:"" help:"Check sandbox backends, tools and credentials."`
 	SandboxHelper SandboxCmd  `cmd:"" name:"__sandbox" hidden:"" help:"Internal landlock helper."`
@@ -202,6 +208,7 @@ func (c *RunCmd) Run(g *Globals) error {
 		Model:                  f.Model,
 		Mode:                   f.Mode,
 		Bypass:                 f.BypassPermissions,
+		TrustWorkspace:         f.Trust,
 		AllowUnsandboxedBypass: f.AllowUnsandboxedBypass,
 		Resume:                 f.Resume,
 		Continue:               f.Continue,

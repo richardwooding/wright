@@ -27,6 +27,10 @@ func (c *ConfigPathsCmd) Run(g *Globals) error {
 		{"user cache", p.UserCache},
 		{"project settings", p.ProjectSettingsFile()},
 		{"project local", p.ProjectLocalFile()},
+		// trust.json decides whether this directory's edits prompt and
+		// whether its settings apply at all, so it belongs among the files
+		// that decide what wright may do here.
+		{"trust", p.TrustFile()},
 	}
 	for _, r := range rows {
 		state := "absent"
