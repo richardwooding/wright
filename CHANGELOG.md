@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-09-20
+
 ### Fixed
 
 - **`git remote add` failed with "Device or resource busy" and no explanation.**
