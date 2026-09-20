@@ -222,6 +222,9 @@ func decisionFacts(d audit.Decision) []string {
 			granted = "network"
 		}
 		out = append(out, "granted: "+granted)
+		if d.GrantedGitHub {
+			out = append(out, "granted: GitHub authentication as the user")
+		}
 		if len(d.GrantedWritable) > 0 {
 			out = append(out, "granted writable: `"+strings.Join(d.GrantedWritable, "`, `")+"`")
 		}

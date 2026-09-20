@@ -1,7 +1,10 @@
 package app
 
 import (
+	"context"
 	"errors"
+	"fmt"
+	"maps"
 	"path/filepath"
 	"strings"
 
@@ -67,10 +70,104 @@ func githubFailure(err error) string {
 // binary, and so the "off does nothing" property can be asserted by a
 // resolver that records whether it was called at all.
 func (b *builder) resolveGitHub() (ghauth.Result, error) {
-	if b.ghResolve != nil {
-		return b.ghResolve()
+	return resolveGitHub(b.ctx, b.ghResolve, b.env)
+}
+
+// resolveGitHub is shared by the startup phase and /github, so the command
+// resolves a token exactly the way the flag does.
+func resolveGitHub(ctx context.Context, override func() (ghauth.Result, error), env func(string) string) (ghauth.Result, error) {
+	if override != nil {
+		return override()
 	}
-	return ghauth.Resolve(b.ctx, ghauth.Deps{Env: b.env})
+	return ghauth.Resolve(ctx, ghauth.Deps{Env: env})
+}
+
+// resolveGitHub on a built session, for /github on.
+func (b *Built) resolveGitHub() (ghauth.Result, error) {
+	return resolveGitHub(context.Background(), b.ghResolve, b.opts.Env)
+}
+
+// gitHubCommand is /github: say what the session can do as you on GitHub,
+// and turn it on or off for the rest of the session.
+//
+// Turning it on here never writes a settings file. Persisting the choice
+// belongs to the user's own config, which this says rather than doing.
+func (b *Built) gitHubCommand(args []string) (string, error) {
+	switch {
+	case len(args) == 0:
+		return b.gitHubStatus(), nil
+	case strings.EqualFold(args[0], "off"):
+		if !b.gitHub.On() {
+			return "GitHub authentication is already off.", nil
+		}
+		b.gitHub.Disable()
+		b.setGitHubAuth(false)
+		return "GitHub authentication is off. Commands can still reach the network if they are allowed to; they just carry no credential.", nil
+	case strings.EqualFold(args[0], "on"):
+		return b.enableGitHub()
+	default:
+		return "", fmt.Errorf("usage: /github [on|off]")
+	}
+}
+
+func (b *Built) enableGitHub() (string, error) {
+	if b.gitHub.On() {
+		return b.gitHubStatus(), nil
+	}
+	res, err := b.resolveGitHub()
+	if err != nil {
+		return "", errors.New("GitHub authentication could not be turned on: " + githubFailure(err))
+	}
+	env := map[string]string{"GH_TOKEN": res.Token}
+	if res.GhPath != "" {
+		maps.Copy(env, git.CredentialHelperKeys("!'"+res.GhPath+"' auth git-credential"))
+	}
+	b.gitHub.Enable(env, res.Source)
+	b.setGitHubAuth(true)
+	// The token is not added to the redactor here: it is built once, at
+	// startup, and a Redactor's pattern list is fixed after New. Say so
+	// rather than implying a protection that is not there.
+	note := ""
+	if !b.tokenRedacted(res.Token) {
+		note = "\n\nNote: this token is not registered with the redactor, which only accepts patterns when it is built at startup." +
+			" It is still masked if it matches a known token shape. To have it registered, put " + userConfigSnippet +
+			" in your user config, or start wright with --github-auth."
+	}
+	return "GitHub authentication is ON for this session (token source: " + res.Source + ")." +
+		"\nAny command that runs with network access can now act as you on GitHub." +
+		"\nTo make it the default, put " + userConfigSnippet + " in your user config." + note, nil
+}
+
+// userConfigSnippet is the settings the user would paste to make the choice
+// permanent. It is named once so the two places that suggest it agree.
+const userConfigSnippet = `"github": {"auth": true}`
+
+func (b *Built) gitHubStatus() string {
+	if !b.gitHub.On() {
+		return "GitHub authentication is off: `gh` commands and `git push` over HTTPS cannot authenticate." +
+			"\nTurn it on for this session with `/github on`, or always with " + userConfigSnippet + " in your user config."
+	}
+	return "GitHub authentication is ON (token source: " + b.gitHub.Source() + ")." +
+		"\nAny command that runs with network access carries a token that can act as you on GitHub." +
+		"\nTurn it off for the rest of this session with `/github off`."
+}
+
+// tokenRedacted reports whether the redactor already masks this token, so
+// the command can say which of the two is true rather than guessing.
+func (b *Built) tokenRedacted(token string) bool {
+	if b.redactor == nil || token == "" {
+		return false
+	}
+	out, _ := b.redactor.Redact(token)
+	return out != token
+}
+
+// setGitHubAuth keeps the engine's display fact in step, so the approval
+// prompt cannot say something different from what the call gets.
+func (b *Built) setGitHubAuth(on bool) {
+	if b.Engine != nil {
+		b.Engine.SetGitHubAuth(on)
+	}
 }
 
 // gitHubWarnings are the facts the user is told once, at startup: that the

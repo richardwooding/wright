@@ -17,9 +17,11 @@ import (
 	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/diag"
 	"github.com/richardwooding/wright/internal/engine"
+	"github.com/richardwooding/wright/internal/ghauth"
 	"github.com/richardwooding/wright/internal/git"
 	"github.com/richardwooding/wright/internal/mcpclient"
 	"github.com/richardwooding/wright/internal/model"
+	"github.com/richardwooding/wright/internal/redact"
 	"github.com/richardwooding/wright/internal/sandbox"
 	"github.com/richardwooding/wright/internal/session"
 	"github.com/richardwooding/wright/internal/tools"
@@ -131,6 +133,12 @@ type Built struct {
 	// endpoint when one was asked for. Unexported because it is reached
 	// through /debug and the status bar, never by a caller poking at it.
 	diag *diag.Server
+	// gitHub is the credential holder the bash tool reads per call, and
+	// redactor is kept so /github can say truthfully whether a token it
+	// resolved later is masked.
+	gitHub    *tools.GitHubAuth
+	redactor  *redact.Redactor
+	ghResolve func() (ghauth.Result, error)
 
 	opts RunOptions
 	// jobs is the session's background commands, for /jobs. It is not

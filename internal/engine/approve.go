@@ -40,7 +40,7 @@ func (e *Engine) Approve(ctx context.Context, c agentkit.Call) (agentkit.Decisio
 	case policy.Allow:
 		// An allow rule can carry a grant too (+install), so it goes through
 		// the same handover as an approval rather than a bare allow.
-		g := ruleGrant(verdict)
+		g := e.ruleGrant(verdict)
 		e.auditDecision(c, verdict, "policy", nil, g)
 		return e.allowedWithGrant(c, verdict, nil, g), nil
 	case policy.Deny:
@@ -108,7 +108,7 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 		delete(e.pending, id)
 		e.mu.Unlock()
 	}()
-	grant := callGrant(req, verdict)
+	grant := e.callGrant(req, verdict)
 	e.emit(Event{Kind: KindApprovalRequest, RunID: c.RunID, Depth: c.Depth, Call: &c.Call, Approval: &Approval{
 		ID: id, Tool: c.Call.Name, Args: c.Call.Arguments, Request: req, Verdict: verdict,
 		Preview: preview, Offers: verdict.Offers, Severity: severity(verdict, req), Grants: grant,
@@ -172,12 +172,13 @@ func dedupeOffers(offers []policy.GrantOffer) []policy.GrantOffer {
 // is computed from the classifier, never from the model's arguments alone:
 // Request.Network only matters once the user has answered the prompt it
 // caused, and the writable prefixes only ever come from an approval.
-func callGrant(req policy.Request, v policy.Verdict) CallGrant {
+func (e *Engine) callGrant(req policy.Request, v policy.Verdict) CallGrant {
 	sh := req.Shell
 	if req.Tool != bashTool || sh == nil {
 		return CallGrant{}
 	}
 	g := CallGrant{Network: v.Network || sh.NeedsNetwork || req.Network}
+	g.GitHubAuth = e.gitHubAuth() && g.Network
 	if sh.Installs {
 		// A package manager writes outside the workspace. The prompt names
 		// these paths, so approving is consent to this exact list.
@@ -190,8 +191,9 @@ func callGrant(req policy.Request, v policy.Verdict) CallGrant {
 // anything beyond the network the verdict already pins into the arguments:
 // the writable prefixes are named here rather than in policy, which knows
 // that a grant was made but not which directories it covers.
-func ruleGrant(v policy.Verdict) CallGrant {
+func (e *Engine) ruleGrant(v policy.Verdict) CallGrant {
 	g := CallGrant{Network: v.Network}
+	g.GitHubAuth = e.gitHubAuth() && g.Network
 	if v.Installs {
 		g.Writable = sandbox.ToolPrefixes()
 	}
@@ -371,6 +373,7 @@ func (e *Engine) auditDecision(c agentkit.Call, v policy.Verdict, by string, d *
 		// v.Network is the value Engine.allowed pins into the call's
 		// arguments, so it is the network the call really gets.
 		rec.GrantedNetwork = grant.Network || v.Network
+		rec.GrantedGitHub = grant.GitHubAuth
 		rec.GrantedWritable = grant.Writable
 	}
 	e.audit(audit.Event{Kind: audit.KindDecision, Run: c.RunID, Depth: c.Depth, Tool: &audit.Tool{Name: c.Call.Name, CallID: c.Call.ID, Args: string(c.Call.Arguments)}, Decision: rec})

@@ -87,11 +87,15 @@ type Engine struct {
 	todos    []Todo
 	pending  map[string]*waiter
 	inflight map[int]InFlight
-	answers  map[string]chan Answer
-	grants   map[string]CallGrant
-	seq      int
-	ctxWin   int
-	hardDeny int
+	// githubAuth is whether this session can authenticate to GitHub. It is
+	// shown in the approval prompt; the credential itself lives in the
+	// tools layer and never reaches here.
+	githubAuth bool
+	answers    map[string]chan Answer
+	grants     map[string]CallGrant
+	seq        int
+	ctxWin     int
+	hardDeny   int
 
 	meter  cost.Meter
 	events chan Event

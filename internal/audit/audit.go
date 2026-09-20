@@ -113,7 +113,10 @@ type Decision struct {
 	// explains a session and one that does not. Old lines lack both, which
 	// reads as "nothing granted" — the right answer for a log written
 	// before an approval could grant anything.
-	GrantedNetwork  bool     `json:"granted_network,omitempty"`
+	GrantedNetwork bool `json:"granted_network,omitempty"`
+	// GrantedGitHub records that allowing let the call authenticate to
+	// GitHub. It is a fact about what was handed over, never the credential.
+	GrantedGitHub   bool     `json:"granted_github,omitempty"`
 	GrantedWritable []string `json:"granted_writable,omitempty"`
 }
 

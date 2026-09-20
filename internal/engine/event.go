@@ -118,10 +118,16 @@ type CallGrant struct {
 	// Writable are the directories outside the workspace this one call may
 	// write: the tool prefixes a package manager installs into.
 	Writable []string
+	// GitHubAuth is true when this call will carry the session's GitHub
+	// credential — which is to say, when the session has one and the call
+	// runs with the network. It is a *fact about the call*, never the
+	// credential: nothing in this struct is ever the token, and this struct
+	// is serialised into the audit log.
+	GitHubAuth bool
 }
 
 // Empty reports a grant that changes nothing.
-func (g CallGrant) Empty() bool { return !g.Network && len(g.Writable) == 0 }
+func (g CallGrant) Empty() bool { return !g.Network && len(g.Writable) == 0 && !g.GitHubAuth }
 
 // Severity drives the colour and the default focus of an approval prompt.
 type Severity uint8

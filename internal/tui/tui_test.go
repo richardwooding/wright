@@ -1027,3 +1027,86 @@ func TestStatusBarNamesTheDebugEndpoint(t *testing.T) {
 		t.Errorf("a debug segment appears with no endpoint running:\n%s", got)
 	}
 }
+
+// flatten makes an overlay's rendered text searchable: the frame's border
+// characters sit between the words of a wrapped sentence, so they have to go
+// before the line breaks are collapsed.
+func flatten(view string) string {
+	return strings.Join(strings.Fields(strings.Map(func(r rune) rune {
+		if strings.ContainsRune("│─╭╮╰╯", r) {
+			return ' '
+		}
+		return r
+	}, view)), " ")
+}
+
+// TestGitHubCommandAsksBeforeHandingOverACredential pins the ceremony.
+// /github on hands a live credential to a model-driven process, so it asks
+// the way entering bypass mode does; status and /github off widen nothing and
+// go straight through.
+func TestGitHubCommandAsksBeforeHandingOverACredential(t *testing.T) {
+	tests := []struct {
+		name     string
+		typed    string
+		wantAsk  bool
+		wantCall bool // the hook ran without any further input
+	}{
+		{name: "status goes straight through", typed: "/github", wantCall: true},
+		{name: "off goes straight through", typed: "/github off", wantCall: true},
+		{name: "on asks first", typed: "/github on", wantAsk: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var called []string
+			ctl := &fakeController{}
+			m := tui.New(ctl, tui.Options{
+				WorkspaceRoot: "/ws",
+				Command: func(_ context.Context, name string, args []string) (string, error) {
+					called = append(called, name+" "+strings.Join(args, " "))
+					return "ok", nil
+				},
+			})
+			m = update(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+			m = typeText(m, tt.typed)
+			m, cmd := updateCmd(m, key("enter"))
+			if cmd != nil {
+				cmd()
+			}
+			view := content(m)
+			asked := strings.Contains(view, "authenticate to GitHub as you")
+			if asked != tt.wantAsk {
+				t.Fatalf("asked = %v, want %v:\n%s", asked, tt.wantAsk, view)
+			}
+			if got := len(called) > 0; got != tt.wantCall {
+				t.Fatalf("hook ran = %v, want %v (%v)", got, tt.wantCall, called)
+			}
+			if !tt.wantAsk {
+				return
+			}
+			// The prompt has to say what is being handed over before the
+			// word is typed. The overlay wraps to the terminal, so compare
+			// against the text with its line breaks flattened.
+			flat := flatten(view)
+			for _, want := range []string{"act as you", "network access", "this session only"} {
+				if !strings.Contains(flat, want) {
+					t.Errorf("the prompt does not mention %q:\n%s", want, view)
+				}
+			}
+			// Anything but the word cancels.
+			wrong := typeText(m, "no")
+			if _, c := updateCmd(wrong, key("enter")); c != nil {
+				c()
+			}
+			if len(called) != 0 {
+				t.Errorf("a wrong word turned it on: %v", called)
+			}
+			right := typeText(m, "yes")
+			if _, c := updateCmd(right, key("enter")); c != nil {
+				c()
+			}
+			if len(called) != 1 || !strings.HasPrefix(called[0], "github on") {
+				t.Errorf("the confirmed command was %v", called)
+			}
+		})
+	}
+}

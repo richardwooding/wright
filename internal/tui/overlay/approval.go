@@ -111,6 +111,9 @@ func (p *Approval) grantFacts(w int) []string {
 		out = append(out, wrap(theme.GlyphWarn+" allowing also makes these writable for this call only: "+
 			strings.Join(g.Writable, ", "), w)...)
 	}
+	if g.GitHubAuth {
+		out = append(out, wrap(theme.GlyphWarn+" allowing also lets this call authenticate to GitHub as you", w)...)
+	}
 	return out
 }
 

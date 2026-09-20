@@ -38,6 +38,32 @@ func (e *Engine) Notice(text string) {
 	e.emit(Event{Kind: KindNotice, Text: text})
 }
 
+// SetGitHubAuth records whether this session can authenticate to GitHub, so
+// the approval prompt says the same thing the call will get. It is a fact
+// about the session, never the credential itself: the engine has no way to
+// see the token and no reason to.
+func (e *Engine) SetGitHubAuth(on bool) {
+	e.mu.Lock()
+	changed := e.githubAuth != on
+	e.githubAuth = on
+	e.mu.Unlock()
+	if !changed {
+		return
+	}
+	state := "off"
+	if on {
+		state = "on"
+	}
+	e.audit(audit.Event{Kind: audit.KindNotice, Text: "github auth " + state})
+}
+
+// gitHubAuth reports the recorded state.
+func (e *Engine) gitHubAuth() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.githubAuth
+}
+
 // waiter is one blocked approval: the channel its goroutine is parked on,
 // plus enough about the prompt to describe it in a dump.
 type waiter struct {

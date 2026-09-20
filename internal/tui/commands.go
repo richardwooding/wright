@@ -48,6 +48,7 @@ func init() {
 		{"ps", "", "what is running right now", (*Model).cmdPs},
 		{"jobs", "", "background commands this session started", hook("jobs")},
 		{"debug", "[dump]", "diagnostics endpoint, and write a dump of this session", hook("debug")},
+		{"github", "[on|off]", "let commands authenticate to GitHub as you", (*Model).cmdGitHub},
 		{"agents", "", "the sub-agents this session can call", hook("agents")},
 		{"todos", "", "show the task list", (*Model).cmdTodos},
 		{"mouse", "", "toggle wheel scrolling (off keeps terminal selection)", (*Model).cmdMouse},
@@ -199,6 +200,23 @@ func (m *Model) cmdMode(args []string) tea.Cmd {
 		return nil
 	}
 	m.setMode(mode)
+	return nil
+}
+
+// cmdGitHub is /github. Turning it *on* hands a credential to a
+// model-driven process, so it asks the same way entering bypass mode does —
+// the typed word, and the prompt spelling out what the session gains. Status
+// and /github off go straight through: neither widens anything.
+func (m *Model) cmdGitHub(args []string) tea.Cmd {
+	if len(args) == 0 || !strings.EqualFold(args[0], "on") {
+		return hook("github")(m, args)
+	}
+	run := hook("github")
+	m.showOverlay(overlay.NewConfirm("authenticate to GitHub as you",
+		"Every shell command that runs with network access will carry a GitHub token that can act as you: "+
+			"read and write your repositories, open pull requests, create gists. It lasts for this session only, "+
+			"and `/github off` ends it.",
+		"yes", m.th, func() tea.Cmd { return run(m, args) }))
 	return nil
 }
 

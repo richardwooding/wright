@@ -14,7 +14,8 @@ import (
 )
 
 // Command runs the slash commands that need app-level services rather than
-// the engine: /diff /audit /init /redaction /trust /mcp /skills /jobs /debug. The
+// the engine: /diff /audit /init /redaction /trust /mcp /skills /jobs /debug
+// /github. The
 // name is given without the slash. Unknown names are an error so the UI
 // can say so.
 func (b *Built) Command(ctx context.Context, name string, args []string) (string, error) {
@@ -41,6 +42,8 @@ func (b *Built) Command(ctx context.Context, name string, args []string) (string
 		return b.redaction(args)
 	case "trust":
 		return b.trustProject()
+	case "github":
+		return b.gitHubCommand(args)
 	case "debug":
 		if len(args) > 0 && args[0] == "dump" {
 			return b.dumpNow()

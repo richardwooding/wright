@@ -186,6 +186,7 @@ func (b *builder) built() *Built {
 		Warnings: b.warnings, Sandbox: b.backend, Choice: b.choice, SessionID: b.sessionID,
 		Trusted: b.trusted, WorkspaceTrusted: b.workspaceTrusted,
 		Skills: b.skills, MCP: mcp, Agents: b.agentDefs, opts: b.o, jobs: jobs, diag: dg,
+		gitHub: b.gitHub, redactor: b.redactor, ghResolve: b.ghResolve,
 		// Closing the engine ends the run; closing the MCP set terminates
 		// the server processes it started; closing the job set kills the
 		// background commands, which hold whatever their own approval
