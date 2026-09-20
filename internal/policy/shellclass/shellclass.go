@@ -64,6 +64,11 @@ type Command struct {
 	Reads  []string
 	// Network is true when the command needs network access to succeed.
 	Network bool
+	// Installs is true when the command installs, upgrades or removes
+	// software outside the workspace (a package manager's install verbs).
+	// Approving such a call is what makes the tool prefixes writable for
+	// that one call; nothing else widens the sandbox.
+	Installs bool
 }
 
 // Analysis is the result for a whole script.
@@ -83,6 +88,10 @@ type Analysis struct {
 	Reasons []string
 	// NeedsNetwork is true when any command needs the network.
 	NeedsNetwork bool
+	// Installs is true when any command installs software outside the
+	// workspace, so approving the script should make the tool prefixes
+	// writable for that call.
+	Installs bool
 }
 
 // Workspace is the slice of the workspace the classifier needs. It is an
@@ -139,6 +148,9 @@ func (a Analysis) Summary() string {
 	}
 	if a.NeedsNetwork {
 		b.WriteString(" [needs network]")
+	}
+	if a.Installs {
+		b.WriteString(" [installs software]")
 	}
 	return b.String()
 }

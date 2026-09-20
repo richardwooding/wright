@@ -365,12 +365,22 @@ func handleSysctl(a *analyzer, name string, args []word) result {
 	return safe("sysctl read")
 }
 
+// remoteIndexManagers query a remote index even for their read-only verbs:
+// dnf/yum refresh expired metadata before answering, and snap and flatpak
+// ask the store about anything that is not installed. apt, pacman, apk,
+// zypper, rpm and port answer from the index already on disk, so their
+// queries stay local.
+var remoteIndexManagers = []string{"dnf", "yum", "snap", "flatpak", "rpm-ostree"}
+
 // handlePkgManager: system package managers need root; queries are safe.
 func handlePkgManager(a *analyzer, name string, args []word) result {
 	switch first(args) {
 	case "list", "search", "show", "info", "policy", "depends", "rdepends", "provides", "-Q", "-Qi", "-Ss", "-Si", "-q", "-qa", "-qi", "-ql", "status", "--version", "version", "":
 		if name == "rpm" && (hasShort(args, 'i') || hasShort(args, 'e') || hasShort(args, 'U')) {
 			return privilegeDeny("rpm installs or erases packages")
+		}
+		if slices.Contains(remoteIndexManagers, name) {
+			return network(name + " " + first(args) + " queries the remote index")
 		}
 		return safe(name + " query")
 	}

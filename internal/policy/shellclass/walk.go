@@ -45,6 +45,9 @@ func (a *analyzer) finish() {
 		if c.Network {
 			out.NeedsNetwork = true
 		}
+		if c.Installs {
+			out.Installs = true
+		}
 	}
 	out.Reasons = dedupe(out.Reasons)
 }

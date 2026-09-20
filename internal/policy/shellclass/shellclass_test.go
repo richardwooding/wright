@@ -74,6 +74,7 @@ type row struct {
 	unknown  bool
 	hardDeny bool
 	network  bool
+	installs bool
 }
 
 // The 64-row table from the safety spec. hardDeny implies a non-empty
@@ -403,6 +404,55 @@ var table = []row{
 	{cmd: `git bundle create ~/.bashrc HEAD`, class: shellclass.Destructive, hardDeny: true},
 	{cmd: `git bundle create /tmp/x.bundle HEAD`, class: shellclass.MutatingWorkspace},
 	{cmd: `git bundle verify /tmp/x.bundle`, class: shellclass.SafeRead},
+	// --- package managers: a verb that needs the network must not be a local
+	// read. Classified safe it was auto-allowed with the network switched off,
+	// so `brew info fpc` failed with "Could not connect" and the user never
+	// saw a prompt at which to grant anything.
+	{cmd: "brew info fpc", class: shellclass.Network, network: true},
+	{cmd: "brew deps fpc", class: shellclass.Network, network: true},
+	{cmd: "brew outdated", class: shellclass.Network, network: true},
+	{cmd: "brew search fpc", class: shellclass.Network, network: true},
+	{cmd: "brew doctor", class: shellclass.Network, network: true},
+	{cmd: "brew update", class: shellclass.Network, network: true},
+	{cmd: "brew list", class: shellclass.SafeRead},
+	{cmd: "brew leaves", class: shellclass.SafeRead},
+	{cmd: "brew config", class: shellclass.SafeRead},
+	{cmd: "brew --prefix", class: shellclass.SafeRead},
+	{cmd: "brew --version", class: shellclass.SafeRead},
+	{cmd: "npm doctor", class: shellclass.Network, network: true},
+	{cmd: "npm ping", class: shellclass.Network, network: true},
+	{cmd: "pip list --outdated", class: shellclass.Network, network: true},
+	{cmd: "gem list --remote rails", class: shellclass.Network, network: true},
+	{cmd: "dnf info bash", class: shellclass.Network, network: true},
+	{cmd: "dnf search bash", class: shellclass.Network, network: true},
+	{cmd: "snap info hello", class: shellclass.Network, network: true},
+	{cmd: "flatpak search gimp", class: shellclass.Network, network: true},
+	{cmd: "apt search ripgrep", class: shellclass.SafeRead}, // reads /var/lib/apt/lists
+	{cmd: "zypper search ripgrep", class: shellclass.SafeRead},
+	{cmd: "npm ls --depth 0", class: shellclass.SafeRead},
+	{cmd: "pip list", class: shellclass.SafeRead},
+	{cmd: "gem list", class: shellclass.SafeRead},
+	// --- installs: writes outside the workspace, so approving one widens the
+	// sandbox for that call and nothing else.
+	{cmd: "brew install fpc", class: shellclass.Network, network: true, installs: true},
+	{cmd: "brew upgrade fpc", class: shellclass.Network, network: true, installs: true},
+	{cmd: "brew tap homebrew/cask", class: shellclass.Network, network: true, installs: true},
+	{cmd: "brew uninstall fpc", class: shellclass.Destructive, installs: true},
+	{cmd: "brew cleanup", class: shellclass.Destructive, installs: true},
+	{cmd: "go install golang.org/x/tools/cmd/stringer@latest", class: shellclass.Network, network: true, installs: true},
+	{cmd: "cargo install ripgrep", class: shellclass.Network, network: true, installs: true},
+	{cmd: "npm install -g typescript", class: shellclass.Network, network: true, installs: true},
+	{cmd: "pnpm global add typescript", class: shellclass.Network, network: true, installs: true},
+	{cmd: "pipx install black", class: shellclass.Network, network: true, installs: true},
+	{cmd: "uv tool install ruff", class: shellclass.Network, network: true, installs: true},
+	{cmd: "pip install --user requests", class: shellclass.Network, network: true, installs: true},
+	{cmd: "gem install rails", class: shellclass.Network, network: true, installs: true},
+	{cmd: "rustup update", class: shellclass.Network, network: true, installs: true},
+	// A project-local install stays inside the workspace: node_modules and a
+	// virtualenv need nothing but the network.
+	{cmd: "npm install", class: shellclass.Network, network: true},
+	{cmd: "pip install requests", class: shellclass.Network, network: true},
+	{cmd: "go build ./...", class: shellclass.MutatingWorkspace},
 }
 
 func TestAnalyzeTable(t *testing.T) {
@@ -420,6 +470,9 @@ func TestAnalyzeTable(t *testing.T) {
 			}
 			if got.NeedsNetwork != tt.network {
 				t.Errorf("NeedsNetwork = %v, want %v (%s)", got.NeedsNetwork, tt.network, got.Summary())
+			}
+			if got.Installs != tt.installs {
+				t.Errorf("Installs = %v, want %v (%s)", got.Installs, tt.installs, got.Summary())
 			}
 		})
 	}

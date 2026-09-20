@@ -13,6 +13,7 @@ type result struct {
 	class    Class
 	reason   string
 	network  bool
+	installs bool
 	unknown  bool
 	hardDeny string
 	writes   []string
@@ -42,7 +43,7 @@ func (a *analyzer) classifyWords(words []word) Command {
 	}
 	c := Command{Argv: argv, Dynamic: dynamic}
 	r := a.classify(words)
-	c.Class, c.Reason, c.Network = r.class, r.reason, r.network
+	c.Class, c.Reason, c.Network, c.Installs = r.class, r.reason, r.network, r.installs
 	c.Writes, c.Reads = r.writes, r.reads
 	if r.unknown {
 		c.Dynamic = true

@@ -114,6 +114,24 @@ func destructive(reason string) result {
 	return result{class: Destructive, reason: reason}
 }
 
+// installer is a command that downloads software and writes it outside the
+// workspace (brew install, go install, npm install -g…). Approving one is
+// what makes the tool prefixes writable for that single call, so the verb
+// has to be marked here or the install fails on a read-only mount.
+func installer(reason string) result {
+	r := network(reason)
+	r.installs = true
+	return r
+}
+
+// uninstaller removes or prunes installed software: destructive, and it
+// writes the same prefixes, but it needs no network.
+func uninstaller(reason string) result {
+	r := destructive(reason)
+	r.installs = true
+	return r
+}
+
 func privilegeDeny(reason string) result {
 	return result{class: Privilege, reason: reason, hardDeny: reason}
 }
@@ -502,7 +520,13 @@ func registerBuildTools() {
 		"xcodebuild", "buck", "buck2", "rebar3", "dune", "shellcheck", "shfmt", "hadolint", "yamllint", "markdownlint",
 		"terraform-docs", "protoc", "buf", "wasm-pack", "emcc", "nasm", "as", "ld", "ar", "strip", "patch",
 	)
-	register(func(a *analyzer, name string, args []word) result { return network("downloads toolchain") }, "rustup", "govulncheck", "nvm", "fnm", "volta", "asdf", "mise", "sdk", "pyenv", "rbenv", "gvm")
+	// These download a toolchain into the user's home (~/.rustup, ~/.nvm,
+	// ~/.asdf…), so they install as well as fetch.
+	register(func(a *analyzer, name string, args []word) result { return installer(name + " downloads a toolchain") },
+		"rustup", "nvm", "fnm", "volta", "asdf", "mise", "sdk", "pyenv", "rbenv", "gvm")
+	register(func(a *analyzer, name string, args []word) result {
+		return network("govulncheck downloads the vulnerability database")
+	}, "govulncheck")
 }
 
 // goExecFlags name go options whose value is a program the toolchain runs, or
@@ -544,8 +568,11 @@ func handleGo(a *analyzer, name string, args []word) result {
 	sub := first(args)
 	rest := nonFlags(args)
 	switch sub {
-	case "get", "install":
-		return network("go " + sub + " downloads modules")
+	case "get":
+		return network("go get downloads modules")
+	case "install":
+		// The binary lands in $GOBIN or $GOPATH/bin, outside the workspace.
+		return installer("go install downloads and installs a binary")
 	case "mod":
 		if len(rest) > 1 && rest[1].text == "download" {
 			return network("go mod download")
@@ -569,11 +596,11 @@ func handleGo(a *analyzer, name string, args []word) result {
 
 func handleCargo(a *analyzer, name string, args []word) result {
 	v := verbs{
-		"fetch": network("cargo fetch"), "install": network("cargo install"), "add": network("cargo add"),
+		"fetch": network("cargo fetch"), "install": installer("cargo install"), "add": network("cargo add"),
 		"update": network("cargo update"), "publish": network("cargo publish"), "login": privilegeDeny("cargo login stores credentials"),
 		"search": network("cargo search"), "yank": destructive("cargo yank"), "owner": network("cargo owner"),
 		"version": safe("cargo version"), "metadata": safe("cargo metadata"), "tree": safe("cargo tree"),
-		"clean": destructive("cargo clean removes target/"),
+		"clean": destructive("cargo clean removes target/"), "uninstall": uninstaller("cargo uninstall"),
 	}
 	return v.lookup(args, mutating("cargo "+first(args)))
 }
@@ -583,15 +610,27 @@ func handleNpm(a *analyzer, name string, args []word) result {
 		return network(name + " downloads and runs a package")
 	}
 	sub := first(args)
+	// yarn and pnpm spell a global install `global add <pkg>`; the verb that
+	// decides the class is the one after it.
+	if rest := texts(nonFlags(args)); sub == "global" && len(rest) > 1 {
+		sub = rest[1]
+	}
+	if r, ok := npmPackageVerb(name, sub, args); ok {
+		return r
+	}
 	switch sub {
-	case "install", "i", "add", "ci", "update", "up", "upgrade", "publish", "audit", "outdated", "view", "info", "search",
-		"dlx", "create", "init", "link", "import", "dedupe", "prune", "rebuild", "pack", "x", "exec", "pm":
+	case "publish", "audit", "outdated", "view", "info", "search",
+		"dlx", "create", "init", "import", "dedupe", "prune", "pack", "x", "exec", "pm":
 		return network(name + " " + sub)
+	// `npm doctor` and `npm ping` both contact the registry; classifying them
+	// as local reads meant they ran with no network and no prompt.
+	case "doctor", "ping":
+		return network(name + " " + sub + " contacts the registry")
 	case "login", "adduser", "logout", "token", "whoami", "owner", "access", "profile":
 		return privilegeDeny(name + " " + sub + " touches registry credentials")
-	case "uninstall", "remove", "rm", "un", "unlink", "unpublish", "deprecate", "cache":
+	case "unpublish", "deprecate", "cache":
 		return destructive(name + " " + sub)
-	case "ls", "list", "why", "explain", "config", "get", "--version", "-v", "help", "bin", "root", "prefix", "doctor", "ping", "":
+	case "ls", "list", "why", "explain", "config", "get", "--version", "-v", "help", "bin", "root", "prefix", "":
 		if sub == "config" && (hasFlag(args, "set", "delete") || slices.Contains(texts(args), "set")) {
 			return mutating("npm config write")
 		}
@@ -600,14 +639,57 @@ func handleNpm(a *analyzer, name string, args []word) result {
 	return mutating(name + " " + sub)
 }
 
+// npmPackageVerb classifies the verbs that add or remove packages. A global
+// one writes the npm prefix, outside the workspace, and so needs the prefix
+// mounted writable when the user approves it; a local one only fills
+// node_modules and needs nothing but the network.
+func npmPackageVerb(name, sub string, args []word) (result, bool) {
+	switch sub {
+	case "install", "i", "add", "ci", "update", "up", "upgrade", "link", "rebuild":
+		if npmGlobal(args) {
+			return installer(name + " " + sub + " --global"), true
+		}
+		return network(name + " " + sub), true
+	case "uninstall", "remove", "rm", "un", "unlink":
+		if npmGlobal(args) {
+			return uninstaller(name + " " + sub + " --global"), true
+		}
+		return destructive(name + " " + sub), true
+	}
+	return result{}, false
+}
+
+// npmGlobal reports an install that writes the npm prefix instead of the
+// workspace's node_modules: `-g`/`--global`, or yarn/pnpm's `global` verb.
+func npmGlobal(args []word) bool {
+	return hasFlag(args, "-g", "--global", "--location") || slices.Contains(texts(nonFlags(args)), "global")
+}
+
+// pipUserTools install into the user's home (~/.local/bin, ~/.local/pipx,
+// the uv tool directory) rather than a project virtualenv, so their installs
+// need the tool prefixes writable.
+var pipUserTools = []string{"pipx", "uv", "uvx", "conda", "mamba"}
+
 func handlePip(a *analyzer, name string, args []word) result {
 	sub := first(args)
 	switch sub {
-	case "install", "download", "sync", "add", "lock", "publish", "search", "update", "upgrade", "wheel", "index", "tool", "python", "self", "cache", "create", "env", "inject", "reinstall", "upgrade-all", "ensurepath":
+	case "install", "sync", "add", "update", "upgrade", "tool", "self", "reinstall", "upgrade-all", "inject", "ensurepath", "python":
+		if slices.Contains(pipUserTools, name) || hasFlag(args, "--user") {
+			return installer(name + " " + sub)
+		}
+		return network(name + " " + sub)
+	case "download", "lock", "publish", "search", "wheel", "index", "cache", "create", "env":
 		return network(name + " " + sub)
 	case "uninstall", "remove", "rm":
+		if slices.Contains(pipUserTools, name) || hasFlag(args, "--user") {
+			return uninstaller(name + " " + sub)
+		}
 		return destructive(name + " " + sub)
 	case "list", "show", "freeze", "check", "config", "debug", "version", "--version", "tree", "export", "info", "":
+		// `--outdated` turns the local listing into an index query.
+		if hasFlag(args, "-o", "--outdated") {
+			return network(name + " " + sub + " --outdated queries the index")
+		}
 		return safe(name + " " + sub)
 	case "run", "shell":
 		return mutating(name + " run")
@@ -659,13 +741,31 @@ func handleDotnet(a *analyzer, name string, args []word) result {
 	return mutating("dotnet " + sub)
 }
 
+// brewLocalFlags are the query options that only print what is already on
+// disk. They are options, not verbs, so `verbs.lookup` (which reads the first
+// *positional* word) can never see them.
+var brewLocalFlags = []string{"--prefix", "--cellar", "--caskroom", "--repository", "--repo", "--version", "--cache", "--env"}
+
+// handleBrew: only a handful of brew verbs are local. `info`, `deps`,
+// `outdated`, `search` and `doctor` all query the Homebrew API or a tap's git
+// remote, so classifying them as safe reads gave them no network *and* no
+// prompt at which to ask for it: `brew info fpc` failed with "Could not
+// connect" after the user had allowed it.
 func handleBrew(a *analyzer, name string, args []word) result {
+	if hasFlag(args, brewLocalFlags...) {
+		return safe("brew " + strings.Join(texts(args), " "))
+	}
 	v := verbs{
-		"list": safe("brew list"), "ls": safe("brew ls"), "info": safe("brew info"), "deps": safe("brew deps"),
-		"config": safe("brew config"), "doctor": safe("brew doctor"), "--version": safe("brew version"),
-		"--prefix": safe("brew prefix"), "outdated": safe("brew outdated"), "leaves": safe("brew leaves"),
-		"uninstall": destructive("brew uninstall"), "remove": destructive("brew remove"), "rm": destructive("brew rm"),
-		"cleanup": destructive("brew cleanup"), "autoremove": destructive("brew autoremove"),
+		// Local: these read the installed Cellar and the local taps only.
+		"list": safe("brew list"), "ls": safe("brew ls"), "config": safe("brew config"),
+		"leaves": safe("brew leaves"), "--version": safe("brew version"), "": safe("brew"),
+		// Writes the Homebrew prefix and its cache.
+		"install": installer("brew install"), "reinstall": installer("brew reinstall"),
+		"upgrade": installer("brew upgrade"), "fetch": installer("brew fetch"),
+		"tap": installer("brew tap"), "link": installer("brew link"), "unlink": installer("brew unlink"),
+		"uninstall": uninstaller("brew uninstall"), "remove": uninstaller("brew remove"),
+		"rm": uninstaller("brew rm"), "cleanup": uninstaller("brew cleanup"),
+		"autoremove": uninstaller("brew autoremove"), "untap": uninstaller("brew untap"),
 	}
 	return v.lookup(args, network("brew "+first(args)))
 }
@@ -673,11 +773,25 @@ func handleBrew(a *analyzer, name string, args []word) result {
 func handleGem(a *analyzer, name string, args []word) result {
 	sub := first(args)
 	switch sub {
-	case "install", "update", "push", "fetch", "add", "outdated", "lock", "search", "owner", "yank", "signin", "signout":
+	case "install", "update":
+		if name == "gem" {
+			// Gems land in GEM_HOME (~/.gem), outside the workspace; a
+			// bundler install fills the project's vendor/bundle.
+			return installer(name + " " + sub)
+		}
+		return network(name + " " + sub)
+	case "push", "fetch", "add", "outdated", "lock", "search", "owner", "yank", "signin", "signout":
 		return network(name + " " + sub)
 	case "uninstall", "remove", "clean", "cleanup":
+		if name == "gem" {
+			return uninstaller(name + " " + sub)
+		}
 		return destructive(name + " " + sub)
 	case "list", "info", "show", "env", "help", "version", "--version", "check", "contents", "which", "config", "":
+		// `--remote`/`-r` asks rubygems.org instead of the local index.
+		if hasFlag(args, "-r", "--remote", "--both") {
+			return network(name + " " + sub + " --remote queries rubygems.org")
+		}
 		return safe(name + " " + sub)
 	}
 	return mutating(name + " " + sub)
