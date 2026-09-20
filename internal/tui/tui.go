@@ -9,6 +9,7 @@ import (
 	"context"
 	"io"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -131,7 +132,13 @@ type Model struct {
 	tr            *transcript.Model
 	comp          composer.Model
 	ov            overlay.Overlay
-	spin          spinner.Model
+	// ovQueue holds overlays raised while another was open. Tool calls run
+	// in parallel, so one step can raise several approvals at once, and each
+	// one a caller is waiting on an answer for: an overlay that is replaced
+	// instead of queued is a tool call that never gets an answer and a run
+	// that never ends. See queueOverlay.
+	ovQueue []overlay.Overlay
+	spin    spinner.Model
 
 	status engine.Status
 	git    git.Summary
@@ -305,6 +312,39 @@ func (m Model) windowTitle() string {
 // bordered box would add side columns the composer does not have.
 func (m Model) rule() string {
 	return m.th.Rule.Render(strings.Repeat("─", max(m.width, 1)))
+}
+
+// showOverlay puts ov on screen, or behind whatever is already there.
+//
+// Approvals and questions are raised by a goroutine blocked on the answer,
+// so dropping one hangs that caller for as long as the session lives. Every
+// overlay therefore queues rather than replaces; nextOverlay brings the next
+// one up when the current one closes.
+func (m *Model) showOverlay(ov overlay.Overlay) {
+	if m.ov != nil {
+		m.ovQueue = append(m.ovQueue, ov)
+		return
+	}
+	m.ov = ov
+}
+
+// nextOverlay closes the current overlay and raises the next queued one.
+func (m *Model) nextOverlay() {
+	m.ov = nil
+	if len(m.ovQueue) > 0 {
+		m.ov, m.ovQueue = m.ovQueue[0], m.ovQueue[1:]
+	}
+}
+
+// dropQueuedApproval removes an approval from the queue once it has been
+// answered elsewhere — the engine decides for itself when a run is cancelled,
+// and a stale prompt for a call that is already over would ask the user about
+// something they can no longer affect.
+func (m *Model) dropQueuedApproval(id string) {
+	m.ovQueue = slices.DeleteFunc(m.ovQueue, func(ov overlay.Overlay) bool {
+		ap, ok := ov.(*overlay.Approval)
+		return ok && ap.ID() == id
+	})
 }
 
 // viewportHeight is the transcript height after the fixed rows, and the

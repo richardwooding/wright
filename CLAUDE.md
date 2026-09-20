@@ -573,6 +573,18 @@ client to HTTP MCP transports).
   everything. `markdown.Renderer` caches one glamour renderer per
   `(width, isDark)`. Break either rule and a long transcript re-renders on
   every keystroke.
+- **Overlays queue; they never replace.** Tools run in parallel
+  (`WithParallel(4)`), so one step can raise several approvals at once, and
+  every approval or question has a goroutine blocked on its answer. `m.ov`
+  was a single field that each new request overwrote, so the replaced prompt
+  was never shown and never answered: its tool call blocked `execTools`, the
+  step never returned, the run never ended and — since v0.3.0 persists per
+  completed step — nothing of it was ever written. The session simply stopped,
+  with no error and no prompt. Every overlay now goes through `showOverlay`
+  and `nextOverlay` (`tui.go`). A run's own prompts are dropped when it ends
+  (`discardRunOverlays`), because `Engine.failPending` abandons the waiters
+  without deciding them, so a prompt left on screen asks about a call that is
+  already over.
 - **UI honesty.** Every status is glyph + word (`✓ ok`, `✗ denied`,
   `⛔ bypass`, `sandbox off`), never colour alone; the approval prompt focuses
   deny for `SeverityDestructive`, says in the "allow" label *and* in the facts

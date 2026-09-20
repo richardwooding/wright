@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A session could stop dead when two tools needed approval at once.** Tool
+  calls run in parallel, so one step can raise several approval prompts, and
+  each has a call waiting on its answer — but the overlay was a single slot
+  that each new prompt overwrote. The replaced prompt was never shown and
+  never answered, so its tool call blocked the step forever: no error, no
+  prompt, no further output, and nothing written to the transcript because
+  the step never completed. Prompts now queue, and a run's prompts are
+  dismissed when the run ends rather than lingering over a call that is
+  already over.
+
 ## [0.3.0] - 2026-09-20
 
 A session you are sitting in is now a session you can read. v0.2.1 made it

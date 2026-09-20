@@ -147,7 +147,7 @@ func (m Model) onGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		m.refresh()
 		return true, m, nil
 	case "ctrl+t":
-		m.ov = overlay.NewTodos(m.todos, m.th)
+		m.showOverlay(overlay.NewTodos(m.todos, m.th))
 		return true, m, nil
 	case "shift+tab":
 		m.cycleMode()
@@ -231,7 +231,7 @@ func (m Model) onOverlayMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	ov, cmd, done := m.ov.Update(msg)
 	m.ov = ov
 	if done {
-		m.ov = nil
+		m.nextOverlay()
 	}
 	return m, cmd
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -113,6 +114,8 @@ func (m *Model) applyNotice(ev engine.Event) {
 	case engine.KindTodos:
 		m.todos = ev.Todos
 		if _, open := m.ov.(*overlay.Todos); open {
+			// Refresh the open view in place; queueing would stack a second
+			// copy of it behind the first.
 			m.ov = overlay.NewTodos(m.todos, m.th)
 		}
 	case engine.KindQueued:
@@ -217,7 +220,7 @@ func (m *Model) applyApprovalRequest(ev engine.Event) {
 		}
 	}
 	ctl, id := m.ctl, a.ID
-	m.ov = overlay.NewApproval(a, m.th, func(d engine.Decision) { ctl.Reply(id, d) })
+	m.showOverlay(overlay.NewApproval(a, m.th, func(d engine.Decision) { ctl.Reply(id, d) }))
 	m.follow = true
 }
 
@@ -226,7 +229,12 @@ func (m *Model) applyApprovalDecided(ev engine.Event) {
 		return
 	}
 	if ap, ok := m.ov.(*overlay.Approval); ok && ev.Approval != nil && ap.ID() == ev.Approval.ID {
-		m.ov = nil
+		m.nextOverlay()
+	} else if ev.Approval != nil {
+		// Decided without this UI answering it — a cancelled run, or a
+		// headless decision. Take it out of the queue so the user is not
+		// asked about a call that is already over.
+		m.dropQueuedApproval(ev.Approval.ID)
 	}
 	d := ev.Decision
 	block := &transcript.Approval{Allowed: d.Allow, By: d.By, Reason: d.Reason}
@@ -255,18 +263,42 @@ func (m *Model) applyApprovalDecided(ev engine.Event) {
 	m.tr.Append(block)
 }
 
+// discardRunOverlays drops the prompts that only the finished run could have
+// answered. The engine abandons its pending approvals when a run ends — a
+// cancellation leaves nothing listening — so an approval or question still on
+// screen is asking about a call that is already over, and an answer to it
+// goes nowhere.
+func (m *Model) discardRunOverlays() {
+	m.ovQueue = slices.DeleteFunc(m.ovQueue, ofFinishedRun)
+	if ofFinishedRun(m.ov) {
+		m.nextOverlay()
+	}
+}
+
+// ofFinishedRun reports whether an overlay belongs to a run rather than to
+// the user: the user's own help, picker or todos view stays up.
+func ofFinishedRun(ov overlay.Overlay) bool {
+	switch ov.(type) {
+	case *overlay.Approval, *overlay.Question:
+		return true
+	default:
+		return false
+	}
+}
+
 func (m *Model) applyQuestion(ev engine.Event) {
 	if ev.Question == nil {
 		return
 	}
 	ctl, id := m.ctl, ev.Question.ID
-	m.ov = overlay.NewQuestion(*ev.Question, m.th, func(a engine.Answer) { ctl.Answer(id, a) })
+	m.showOverlay(overlay.NewQuestion(*ev.Question, m.th, func(a engine.Answer) { ctl.Answer(id, a) }))
 }
 
 // applyRunFinished closes the run and records the summary shown at exit.
 func (m *Model) applyRunFinished(ev engine.Event) {
 	m.running = false
 	m.finishLive()
+	m.discardRunOverlays()
 	m.status = m.ctl.Status()
 	f := ev.Finish
 	if f == nil {

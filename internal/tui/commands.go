@@ -140,7 +140,7 @@ func (m Model) onCommandDone(msg commandDoneMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m *Model) cmdHelp([]string) tea.Cmd {
-	m.ov = overlay.NewHelp(m.th, keyHelp, commandHelp())
+	m.showOverlay(overlay.NewHelp(m.th, keyHelp, commandHelp()))
 	return nil
 }
 
@@ -189,9 +189,9 @@ func (m *Model) cmdMode(args []string) tea.Cmd {
 		return nil
 	}
 	if mode == policy.ModeBypass {
-		m.ov = overlay.NewConfirm("bypass permissions",
+		m.showOverlay(overlay.NewConfirm("bypass permissions",
 			"Bypass runs every tool without asking. The hard-deny set still applies and the sandbox stays on. Only a process started with --bypass-permissions can enter it.",
-			"yes", m.th, func() tea.Cmd { return pick(pickBypass, "") })
+			"yes", m.th, func() tea.Cmd { return pick(pickBypass, "") }))
 		return nil
 	}
 	m.setMode(mode)
@@ -216,7 +216,7 @@ func (m *Model) cmdModel(args []string) tea.Cmd {
 		}
 		items[i] = overlay.Item{Label: c.Name, Desc: desc, Value: c.Name}
 	}
-	m.ov = overlay.NewPicker("model", items, m.th, func(it overlay.Item) tea.Cmd { return pick(pickModel, it.Value) })
+	m.showOverlay(overlay.NewPicker("model", items, m.th, func(it overlay.Item) tea.Cmd { return pick(pickModel, it.Value) }))
 	return nil
 }
 
@@ -283,7 +283,7 @@ func (m Model) onSessions(msg sessionsMsg) (tea.Model, tea.Cmd) {
 	if msg.resume {
 		title = "resume"
 	}
-	m.ov = overlay.NewPicker(title, items, m.th, func(it overlay.Item) tea.Cmd { return pick(pickResume, it.Value) })
+	m.showOverlay(overlay.NewPicker(title, items, m.th, func(it overlay.Item) tea.Cmd { return pick(pickResume, it.Value) }))
 	return m, nil
 }
 
@@ -302,7 +302,7 @@ func (m *Model) cmdExport(args []string) tea.Cmd {
 		return m.export(args[0])
 	}
 	def := "wright-" + m.status.SessionID + ".md"
-	m.ov = overlay.NewInput("export session", "Write the transcript as markdown to:", def, m.th, func(path string) tea.Cmd { return pick(pickExport, path) })
+	m.showOverlay(overlay.NewInput("export session", "Write the transcript as markdown to:", def, m.th, func(path string) tea.Cmd { return pick(pickExport, path) }))
 	return nil
 }
 
@@ -341,7 +341,7 @@ func (m *Model) cmdMouse([]string) tea.Cmd {
 }
 
 func (m *Model) cmdTodos([]string) tea.Cmd {
-	m.ov = overlay.NewTodos(m.todos, m.th)
+	m.showOverlay(overlay.NewTodos(m.todos, m.th))
 	return nil
 }
 

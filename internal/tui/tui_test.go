@@ -831,3 +831,65 @@ func TestPlainModeDeniesOnEOF(t *testing.T) {
 		t.Fatalf("EOF did not deny: %+v", ctl.replies)
 	}
 }
+
+// TestConcurrentApprovalsAreAllAnswered is the hang a user hit: the agent
+// runs tools in parallel, so one step can raise several approvals at once,
+// and the overlay was a single field that each new request overwrote. The
+// replaced request was never shown and never answered, so the tool call
+// waiting on it blocked its step forever — the run stopped dead with no
+// error, no prompt and nothing in the transcript, because the step never
+// completed and so was never persisted.
+func TestConcurrentApprovalsAreAllAnswered(t *testing.T) {
+	ctl := &fakeController{}
+	m := newModel(t, ctl, 80, 30)
+	m = event(m, engine.Event{Kind: engine.KindRunStarted})
+	for _, id := range []string{"ap1", "ap2", "ap3"} {
+		m = event(m, engine.Event{Kind: engine.KindToolCall, Call: call(id, "bash", `{"command":"echo"}`)})
+		m = event(m, engine.Event{Kind: engine.KindApprovalRequest, Call: call(id, "bash", ""), Approval: &engine.Approval{
+			ID: id, Tool: "bash", Preview: engine.Preview{Title: "echo " + id},
+		}})
+	}
+	// Answer whatever is on screen until nothing is left to answer.
+	for range 10 {
+		if !strings.Contains(content(m), "[y] allow once") {
+			break
+		}
+		m = update(m, key("y"))
+	}
+	if len(ctl.replies) != 3 {
+		t.Fatalf("answered %d of 3 approvals: %+v — the unanswered tool calls block their step forever", len(ctl.replies), ctl.replies)
+	}
+	got := map[string]bool{}
+	for _, r := range ctl.replies {
+		got[r.id] = true
+	}
+	for _, id := range []string{"ap1", "ap2", "ap3"} {
+		if !got[id] {
+			t.Errorf("approval %s was never answered", id)
+		}
+	}
+}
+
+// TestRunEndDropsItsPrompts pins that prompts belonging to a finished run go
+// away with it. The engine abandons its pending approvals when a run ends, so
+// one still on screen asks about a call that is already over and an answer to
+// it reaches nobody — while the user's own overlays are theirs to close.
+func TestRunEndDropsItsPrompts(t *testing.T) {
+	ctl := &fakeController{}
+	m := newModel(t, ctl, 80, 30)
+	m = event(m, engine.Event{Kind: engine.KindRunStarted})
+	for _, id := range []string{"ap1", "ap2"} {
+		m = event(m, engine.Event{Kind: engine.KindApprovalRequest, Call: call(id, "bash", ""), Approval: &engine.Approval{
+			ID: id, Tool: "bash", Preview: engine.Preview{Title: "echo " + id},
+		}})
+	}
+	m = event(m, engine.Event{Kind: engine.KindRunFinished, Finish: &engine.Finish{StopReason: "cancelled"}})
+	if v := content(m); strings.Contains(v, "[y] allow once") {
+		t.Fatalf("an approval for a finished run is still on screen:\n%s", v)
+	}
+	// Typing must not answer a prompt that is gone.
+	update(m, key("y"))
+	if len(ctl.replies) != 0 {
+		t.Errorf("replied to a finished run's approval: %+v", ctl.replies)
+	}
+}
