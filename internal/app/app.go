@@ -78,6 +78,12 @@ type RunOptions struct {
 	// Confirm asks the user a yes/no question before the UI starts (the
 	// project-trust prompt). nil means "no".
 	Confirm func(prompt string) bool
+	// Select asks the user to pick one of options before the UI starts (the
+	// MCP consent prompt, which has three answers rather than two). It
+	// returns the chosen index; ok is false when the user did not choose,
+	// which callers must read as the most restrictive option. nil means the
+	// same, so a caller that cannot ask never widens anything.
+	Select func(prompt string, options []string) (choice int, ok bool)
 }
 
 // Built is everything Build produced. Close releases the engine, which in

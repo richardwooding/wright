@@ -305,10 +305,14 @@ rule covers; `readOnlyHint` and friends are the server's claims, so they are
 shown to you and can only *tighten* what plan mode allows, never approve
 anything. `/mcp` shows what the current session connected.
 
-The interactive consent prompt is not built yet: until it lands, an
-unaccepted server is reported in full and declined, and you accept it by
-adding `"trusted": true` to its entry in a settings file that is itself
-trusted.
+An interactive session asks before connecting an unaccepted server, after
+showing you that list, and offers three answers: **do not connect**, **connect
+for this session only**, or **connect and remember this server**. Only the
+third writes anything to `trust.json`. Anything that is not one of the three —
+no answer, no terminal, `-p` — declines, so nothing is ever connected because
+a question could not be asked. You can still pre-accept a server by adding
+`"trusted": true` to its entry in a settings file that is itself trusted, which
+is how an unattended run gets one at all.
 
 ## Skills
 
@@ -680,9 +684,7 @@ sub-agent and custom agents, sessions and resume, snapshots and `/undo`,
 redaction, the audit log, model detection and cost, trust-gated project
 settings, and the release plumbing.
 
-Landing next: the interactive MCP consent prompt (until then an unaccepted
-server is declined with a full report of what it asked for) and background
-`bash` jobs. A macOS seatbelt profile
+Landing next: background `bash` jobs. A macOS seatbelt profile
 ships but macOS is treated conservatively until it has more mileage.
 **Not planned:** an LSP client — wright uses your repository's own tools
 instead.

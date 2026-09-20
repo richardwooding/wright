@@ -80,17 +80,28 @@ func (b *builder) trustStore() *trust.Store {
 }
 
 // mcpConsent is how a new or changed server is accepted. Headless runs never
-// accept anything new (nil denies). Interactive runs do not have a consent
-// form yet, so they decline as well, but they say exactly what was proposed
-// and how to accept it — silently skipping a configured server would be the
-// worse failure.
+// accept anything new (nil denies), because a run nobody is watching must
+// not be the one that adds a tool source. An interactive run asks; when
+// there is nobody to ask — no terminal, an embedder with no Select — it
+// declines and says exactly what was proposed and how to accept it, since
+// silently skipping a configured server is the worse failure.
 func (b *builder) mcpConsent() mcpclient.ConsentFunc {
 	if b.headless() {
 		return nil
 	}
-	return func(_ context.Context, p mcpclient.Proposal) (mcpclient.Choice, error) {
-		b.warn("%s\n  not connected: the interactive consent prompt is not built yet — add \"trusted\": true to this server in .wright/settings.json (or your user config) to accept it", p.String())
-		return mcpclient.Deny, nil
+	ask := mcpclient.ConsentFromSelect("\nConnect to this MCP server?", b.o.Select)
+	if ask == nil {
+		return func(_ context.Context, p mcpclient.Proposal) (mcpclient.Choice, error) {
+			b.warn("%s\n  not connected: there is no terminal to ask — add \"trusted\": true to this server in .wright/settings.json (or your user config) to accept it", p.String())
+			return mcpclient.Deny, nil
+		}
+	}
+	return func(ctx context.Context, p mcpclient.Proposal) (mcpclient.Choice, error) {
+		c, err := ask(ctx, p)
+		if err == nil && c == mcpclient.Deny {
+			b.warn("mcp server %q not connected: you did not accept it", p.Name)
+		}
+		return c, err
 	}
 }
 

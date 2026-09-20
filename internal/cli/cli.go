@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/alecthomas/kong"
@@ -230,6 +231,7 @@ func (c *RunCmd) Run(g *Globals) error {
 		Env:                    os.Getenv,
 		IsTerminal:             stdoutTTY && isTerminal(g.Stdin),
 		Confirm:                confirm(g),
+		Select:                 selectOne(g),
 	}
 	code, err := app.Run(g.Ctx, o, g.Interactive)
 	if code != ExitOK || err != nil {
@@ -252,6 +254,33 @@ func confirm(g *Globals) func(string) bool {
 		}
 		answer = strings.ToLower(strings.TrimSpace(answer))
 		return answer == "y" || answer == "yes"
+	}
+}
+
+// selectOne asks the user to pick one of several answers on the terminal
+// before the UI starts. Like confirm it is offered only on a terminal, and
+// anything that is not one of the options — an empty line, EOF, a typo — is
+// not a choice, so the caller applies its own default rather than this
+// function guessing one.
+func selectOne(g *Globals) func(string, []string) (int, bool) {
+	if !isTerminal(g.Stdin) || !isTerminal(g.Stdout) {
+		return nil
+	}
+	return func(question string, options []string) (int, bool) {
+		fmt.Fprintln(g.Stdout, question)
+		for i, o := range options {
+			fmt.Fprintf(g.Stdout, "  %d) %s\n", i+1, o)
+		}
+		fmt.Fprintf(g.Stdout, "Choose 1-%d: ", len(options))
+		var answer string
+		if _, err := fmt.Fscanln(g.Stdin, &answer); err != nil {
+			return 0, false
+		}
+		n, err := strconv.Atoi(strings.TrimSpace(answer))
+		if err != nil || n < 1 || n > len(options) {
+			return 0, false
+		}
+		return n - 1, true
 	}
 }
 

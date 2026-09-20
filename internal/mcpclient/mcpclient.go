@@ -137,6 +137,48 @@ func annotationSuffix(t ToolInfo) string {
 // is what headless runs use: nothing new is connected without a person.
 type ConsentFunc func(ctx context.Context, p Proposal) (Choice, error)
 
+// ConsentOptions are the three answers as a picker should list them, in
+// Choice order. Declining is first because it is the answer that changes
+// nothing: a server is someone else's code, and the tool list it just sent
+// is the only thing describing it.
+func ConsentOptions() []string {
+	return []string{
+		"do not connect",
+		"connect for this session only",
+		"connect and remember this server",
+	}
+}
+
+// ConsentFromSelect turns a picker into a ConsentFunc. It is the mapping
+// every front end needs and none of them should write twice.
+//
+// It fails closed at each step, because every way of not getting an answer
+// means the same thing: a nil picker denies, a picker that reports no
+// choice denies, and an index outside ConsentOptions denies. Only an
+// explicit pick of "once" or "remember" connects anything.
+//
+// question is prepended to the proposal, which describes the server and
+// every tool it offers.
+func ConsentFromSelect(question string, sel func(prompt string, options []string) (int, bool)) ConsentFunc {
+	if sel == nil {
+		return nil
+	}
+	return func(_ context.Context, p Proposal) (Choice, error) {
+		i, ok := sel(p.String()+question, ConsentOptions())
+		if !ok {
+			return Deny, nil
+		}
+		switch Choice(i) {
+		case Once:
+			return Once, nil
+		case Always:
+			return Always, nil
+		default:
+			return Deny, nil
+		}
+	}
+}
+
 // Deps is what Connect needs from the rest of wright.
 type Deps struct {
 	// Trust records accepted servers. nil means nothing is remembered and

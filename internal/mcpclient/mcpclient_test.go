@@ -244,3 +244,68 @@ func TestConnectWithoutServers(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestConsentFromSelect pins the mapping every front end shares, and the
+// fail-closed rule behind it: the only answers that connect anything are an
+// explicit pick of "once" or "remember". Everything else — no picker, no
+// answer, an index that is not on the list — denies, because a server is
+// someone else's code and connecting it is the irreversible half.
+func TestConsentFromSelect(t *testing.T) {
+	tests := []struct {
+		name   string
+		pick   int
+		ok     bool
+		want   mcpclient.Choice
+		record bool
+	}{
+		{name: "decline", pick: 0, ok: true, want: mcpclient.Deny},
+		{name: "once", pick: 1, ok: true, want: mcpclient.Once},
+		{name: "remember", pick: 2, ok: true, want: mcpclient.Always, record: true},
+		{name: "no answer", pick: 2, ok: false, want: mcpclient.Deny},
+		{name: "an index off the list", pick: 7, ok: true, want: mcpclient.Deny},
+		{name: "a negative index", pick: -1, ok: true, want: mcpclient.Deny},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var asked string
+			var offered []string
+			consent := mcpclient.ConsentFromSelect("\nConnect?", func(prompt string, options []string) (int, bool) {
+				asked, offered = prompt, options
+				return tt.pick, tt.ok
+			})
+			st := store(t)
+			set, err := mcpclient.Connect(context.Background(), servers(stdioCfg()),
+				mcpclient.Deps{Trust: st, Consent: consent, Dial: serve(t, "search")})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = set.Close() }()
+
+			connected := len(set.Tools) > 0
+			if connected != (tt.want != mcpclient.Deny) {
+				t.Errorf("tools registered = %d, want connected = %v", len(set.Tools), tt.want != mcpclient.Deny)
+			}
+			if recorded := len(st.Servers()) > 0; recorded != tt.record {
+				t.Errorf("recorded in trust.json = %v, want %v", recorded, tt.record)
+			}
+			// The picker must be handed the proposal, not just a question:
+			// consent to a server whose tools you were not shown is not
+			// consent to anything.
+			if !strings.Contains(asked, "search") || !strings.Contains(asked, "Connect?") {
+				t.Errorf("prompt = %q, want the tool list and the question", asked)
+			}
+			if len(offered) != 3 || !strings.Contains(offered[0], "not connect") {
+				t.Errorf("options = %v, want declining first", offered)
+			}
+		})
+	}
+}
+
+// TestConsentFromSelectWithoutAPicker pins that a nil picker produces a nil
+// ConsentFunc, which Connect already treats as a denial — so a front end
+// that cannot ask never becomes a front end that assumes yes.
+func TestConsentFromSelectWithoutAPicker(t *testing.T) {
+	if got := mcpclient.ConsentFromSelect("?", nil); got != nil {
+		t.Error("a nil picker must not produce a consent function")
+	}
+}

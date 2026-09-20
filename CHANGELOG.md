@@ -22,6 +22,13 @@ All notable changes to this project are documented here. The format follows
   environment (`BRAVE_API_KEY`) and is never echoed in an error. A provider
   named by an untrusted project's settings is ignored, because a search
   discloses the query to a third party.
+- **The interactive MCP consent prompt.** An unaccepted server was reported
+  in full and then declined, because there was no form to ask with. An
+  interactive session now asks, after showing the server's command and every
+  tool it offers: do not connect, connect for this session only, or connect
+  and remember it. Only the last records anything. Anything that is not one
+  of the three — no answer, no terminal, `-p` — still declines, so a server
+  is never connected because a question could not be asked.
 - **`+install` rule flag**: `--allow 'bash(brew install *) +install'` grants
   an installing command the network *and* the package-manager prefixes for
   that one call — the same grant an interactive approval makes, so an
