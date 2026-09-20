@@ -893,3 +893,42 @@ func TestRunEndDropsItsPrompts(t *testing.T) {
 		t.Errorf("replied to a finished run's approval: %+v", ctl.replies)
 	}
 }
+
+// TestPsSaysWhatIsRunning covers the question a session that has gone quiet
+// raises. A tool card spins but never says for how long, and a run waiting on
+// the model looks exactly like a run waiting on a command — which is how a
+// stalled session got read as a frozen bash process.
+func TestPsSaysWhatIsRunning(t *testing.T) {
+	ctl := &fakeController{}
+	m := newModel(t, ctl, 100, 40)
+
+	m = update(m, key("/"))
+	m = typeText(m, "ps")
+	m = update(m, key("enter"))
+	if v := content(m); !strings.Contains(v, "Not running") {
+		t.Fatalf("/ps before a run:\n%s", v)
+	}
+
+	m = event(m, engine.Event{Kind: engine.KindRunStarted})
+	m = event(m, engine.Event{Kind: engine.KindToolCall, Call: call("c1", "bash", `{"command":"sleep 600"}`)})
+	m = update(m, key("/"))
+	m = typeText(m, "ps")
+	m = update(m, key("enter"))
+	v := content(m)
+	if !strings.Contains(v, "bash") || !strings.Contains(v, "sleep 600") {
+		t.Errorf("/ps does not name the running call:\n%s", v)
+	}
+	if !strings.Contains(v, "in flight") {
+		t.Errorf("/ps does not say a call is in flight:\n%s", v)
+	}
+
+	// With the call finished, the run is waiting on the model — the state
+	// most easily mistaken for a stuck command.
+	m = event(m, engine.Event{Kind: engine.KindToolResult, Call: call("c1", "bash", ""), Result: &core.ToolResult{Content: []core.Part{core.Text("done")}}})
+	m = update(m, key("/"))
+	m = typeText(m, "ps")
+	m = update(m, key("enter"))
+	if v := content(m); !strings.Contains(v, "waiting for the model") {
+		t.Errorf("/ps after the call returned:\n%s", v)
+	}
+}

@@ -18,6 +18,14 @@ All notable changes to this project are documented here. The format follows
   dismissed when the run ends rather than lingering over a call that is
   already over.
 
+### Added
+
+- **`/ps`** — what the session is doing right now: the tool calls in flight
+  and how long each has been running, or that the run is waiting on the model,
+  plus any prompts queued behind the one on screen. A spinner does not say how
+  long it has been spinning, and a run waiting on the model looks exactly like
+  a run waiting on a command.
+
 ## [0.3.0] - 2026-09-20
 
 A session you are sitting in is now a session you can read. v0.2.1 made it

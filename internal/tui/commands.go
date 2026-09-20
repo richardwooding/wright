@@ -2,7 +2,9 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -43,6 +45,7 @@ func init() {
 		{"init", "", "write an AGENTS.md for this project", hook("init")},
 		{"mcp", "", "MCP servers", hook("mcp")},
 		{"skills", "", "loaded skills", hook("skills")},
+		{"ps", "", "what is running right now", (*Model).cmdPs},
 		{"jobs", "", "background commands this session started", hook("jobs")},
 		{"agents", "", "the sub-agents this session can call", hook("agents")},
 		{"todos", "", "show the task list", (*Model).cmdTodos},
@@ -403,4 +406,71 @@ func (m Model) onPicked(msg pickedMsg) (tea.Model, tea.Cmd) {
 	}
 	m.refresh()
 	return m, cmd
+}
+
+// cmdPs answers "what is it doing right now?" — the question a session that
+// has gone quiet raises, and the one nothing else in the UI answers. A tool
+// card shows a spinner but not how long it has been spinning, and a run
+// waiting on the model looks identical to a run waiting on a tool.
+func (m *Model) cmdPs([]string) tea.Cmd {
+	var b strings.Builder
+	running := m.runningCards()
+	switch {
+	case !m.running:
+		b.WriteString("Not running.")
+	case len(running) == 0:
+		// Every tool call has returned, so the step is over and the run is
+		// waiting on the model. Saying so is the whole point: this is the
+		// state most easily mistaken for a stuck command.
+		b.WriteString("Running — waiting for the model (no tool call in flight).")
+	default:
+		fmt.Fprintf(&b, "Running — %s in flight:", countOf(len(running), "tool call"))
+		for _, c := range running {
+			fmt.Fprintf(&b, "\n  %s%-10s %s", strings.Repeat("  ", c.Depth), c.Name, formatDuration(time.Since(c.Started)))
+			if s := c.Summary(); s != "" {
+				fmt.Fprintf(&b, "  %s", s)
+			}
+		}
+	}
+	if n := len(m.ovQueue); n > 0 {
+		fmt.Fprintf(&b, "\n\n%s waiting behind the one on screen.", countOf(n, "more prompt"))
+	}
+	if m.queued > 0 {
+		fmt.Fprintf(&b, "\n%s queued to send after this run.", countOf(m.queued, "message"))
+	}
+	b.WriteString("\n\nBackground commands started with the job tool are listed by /jobs.")
+	m.notice(b.String(), transcript.LevelInfo)
+	return nil
+}
+
+// runningCards lists the tool calls that have not returned, oldest first.
+func (m Model) runningCards() []*transcript.ToolCard {
+	var out []*transcript.ToolCard
+	for _, c := range m.cards {
+		if c.Status == transcript.StatusRunning {
+			out = append(out, c)
+		}
+	}
+	slices.SortFunc(out, func(a, b *transcript.ToolCard) int { return a.Started.Compare(b.Started) })
+	return out
+}
+
+// countOf renders "1 tool call" / "3 tool calls".
+func countOf(n int, noun string) string {
+	if n == 1 {
+		return "1 " + noun
+	}
+	return fmt.Sprintf("%d %ss", n, noun)
+}
+
+// formatDuration renders an elapsed time that is being read, not measured.
+func formatDuration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return d.Round(time.Second).String()
+	case d < time.Hour:
+		return d.Round(time.Second).String()
+	default:
+		return d.Round(time.Minute).String()
+	}
 }

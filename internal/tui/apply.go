@@ -147,6 +147,7 @@ func (m *Model) applyToolCall(ev engine.Event) {
 	card := &transcript.ToolCard{
 		ID: ev.Call.ID, Name: ev.Call.Name, Args: ev.Call.Arguments,
 		Status: transcript.StatusRunning, Depth: ev.Depth, Expanded: m.toolsExpanded,
+		Started: time.Now(),
 	}
 	m.cards[card.ID] = card
 	m.lastCard = card

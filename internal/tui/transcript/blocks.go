@@ -64,6 +64,7 @@ type ToolCard struct {
 	Expanded bool
 	Status   Status
 	Depth    int // subagent nesting; indented two spaces per level
+	Started  time.Time
 	Duration time.Duration
 	Badges   []string // "injection", "redacted ×2" …
 }
