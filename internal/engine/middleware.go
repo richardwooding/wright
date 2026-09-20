@@ -55,6 +55,12 @@ func (e *Engine) auditMiddleware() agentkit.Middleware {
 				c, _ := agentkit.CallFrom(ctx)
 				e.audit(audit.Event{Kind: audit.KindToolCall, Run: c.RunID, Depth: c.Depth, Tool: toolRef(c, args)})
 				start := e.now()
+				// This middleware wraps the tool's actual execution, so it
+				// is the one place that knows a call is running, at every
+				// depth: a dump asking "what has not come back" is answered
+				// from here. Deferred, because agentkit.Recover sits outside
+				// this middleware and a panicking tool unwinds through here.
+				defer e.startCall(c)()
 				out, err := next.Call(ctx, args)
 				rec := &audit.Result{IsError: out.IsError || err != nil, Bytes: len(out.Text()), DurationMS: e.now().Sub(start).Milliseconds()}
 				ev := audit.Event{Kind: audit.KindToolResult, Run: c.RunID, Depth: c.Depth, Tool: toolRef(c, args), Result: rec}

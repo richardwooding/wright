@@ -99,7 +99,9 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 	e.seq++
 	id := fmt.Sprintf("%s-%d", c.Call.ID, e.seq)
 	reply := make(chan Decision, 1)
-	e.pending[id] = reply
+	// The prompt's own words are kept beside the channel so a dump can name
+	// what the session is waiting for, not merely that it is waiting.
+	e.pending[id] = &waiter{reply: reply, tool: c.Call.Name, title: promptLabel(c.Call.Name, preview), since: e.now()}
 	e.mu.Unlock()
 	defer func() {
 		e.mu.Lock()
@@ -257,14 +259,29 @@ func (e *Engine) allowed(c agentkit.Call, verdict policy.Verdict, edited json.Ra
 // been cancelled meanwhile).
 func (e *Engine) Reply(id string, d Decision) {
 	e.mu.Lock()
-	ch, ok := e.pending[id]
+	w, ok := e.pending[id]
 	e.mu.Unlock()
 	if ok {
 		select {
-		case ch <- d:
+		case w.reply <- d:
 		default:
 		}
 	}
+}
+
+// promptLabel is the most specific line the prompt is showing, for a dump
+// that has to say what the session is waiting on. A preview title is often
+// the model's own one-line description, but it falls back to the tool's name
+// — which, next to the tool's name, says nothing — so the body's first line
+// (for bash, the command itself) is used instead.
+func promptLabel(tool string, p Preview) string {
+	if p.Title != "" && p.Title != tool {
+		return p.Title
+	}
+	if first, _, _ := strings.Cut(p.Body, "\n"); strings.TrimSpace(first) != "" {
+		return first
+	}
+	return p.Title
 }
 
 // Ask relays an ask_user question to the UI and blocks for the answer.

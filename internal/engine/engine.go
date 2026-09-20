@@ -85,7 +85,8 @@ type Engine struct {
 	queued   int
 	inbox    *agentkit.Inbox
 	todos    []Todo
-	pending  map[string]chan Decision
+	pending  map[string]*waiter
+	inflight map[int]InFlight
 	answers  map[string]chan Answer
 	grants   map[string]CallGrant
 	seq      int
@@ -117,20 +118,21 @@ func New(ctx context.Context, o Options) (*Engine, error) {
 		o.Timeout = 2 * time.Hour
 	}
 	e := &Engine{
-		opts:    o,
-		client:  o.Client,
-		fast:    o.FastClient,
-		choice:  o.Model,
-		mode:    o.Mode,
-		policy:  o.Policy,
-		session: o.SessionID,
-		inbox:   agentkit.NewInbox(),
-		pending: map[string]chan Decision{},
-		answers: map[string]chan Answer{},
-		grants:  map[string]CallGrant{},
-		events:  make(chan Event, 256),
-		closed:  make(chan struct{}),
-		now:     o.Now,
+		opts:     o,
+		client:   o.Client,
+		fast:     o.FastClient,
+		choice:   o.Model,
+		mode:     o.Mode,
+		policy:   o.Policy,
+		session:  o.SessionID,
+		inbox:    agentkit.NewInbox(),
+		pending:  map[string]*waiter{},
+		inflight: map[int]InFlight{},
+		answers:  map[string]chan Answer{},
+		grants:   map[string]CallGrant{},
+		events:   make(chan Event, 256),
+		closed:   make(chan struct{}),
+		now:      o.Now,
 	}
 	if e.client == nil {
 		c, err := openClient(o.Model.Model)
