@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-09-20
+
+An approved call now gets what it needs to work. A user reported that
+`brew install` could not succeed even after they allowed it: the command
+needed the network and a writable Homebrew prefix, and approving granted
+neither, so the agent was left reporting a failure the user had already
+said yes to.
+
 The sandbox was strict in a way that made ordinary work impossible: the user
 allowed `brew install`, and it still could not run. A harness that cannot do
 ordinary work is not secure, it is broken.
