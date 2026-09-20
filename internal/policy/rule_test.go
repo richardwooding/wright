@@ -16,6 +16,7 @@ func TestParseRule(t *testing.T) {
 		tool    string
 		str     string
 		net     bool
+		install bool
 	}{
 		{text: "bash", tool: "bash", str: "bash"},
 		{text: "bash(go test *)", tool: "bash", str: "bash(go test *)"},
@@ -23,6 +24,14 @@ func TestParseRule(t *testing.T) {
 		{text: "  bash( go   test  * )  ", tool: "bash", str: "bash(go test *)"},
 		{text: "bash(go mod download *) +net", tool: "bash", str: "bash(go mod download *) +net", net: true},
 		{text: "bash(go mod download *)+net", tool: "bash", str: "bash(go mod download *) +net", net: true},
+		// +install implies +net: a package manager that cannot reach its
+		// index is a grant that cannot do its job.
+		{text: "bash(brew install *) +install", tool: "bash", str: "bash(brew install *) +install", net: true, install: true},
+		{text: "bash(brew install *)+install", tool: "bash", str: "bash(brew install *) +install", net: true, install: true},
+		{text: "bash(brew install *) +net +install", tool: "bash", str: "bash(brew install *) +net +install", net: true, install: true},
+		{text: "bash(brew install *) +install +net", tool: "bash", str: "bash(brew install *) +net +install", net: true, install: true},
+		{text: "read_file(**) +install", wantErr: true},
+		{text: "web_fetch +install", wantErr: true},
 		{text: "bash(re:^go (test|build) )", tool: "bash", str: "bash(re:^go (test|build) )"},
 		{text: "bash(re:()", wantErr: true},
 		{text: "bash(*)", wantErr: true},
@@ -64,8 +73,8 @@ func TestParseRule(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if r.Tool != tt.tool || r.String() != tt.str || r.Net() != tt.net || r.Source != policy.SourceUser {
-				t.Errorf("got tool=%q str=%q net=%v src=%q", r.Tool, r, r.Net(), r.Source)
+			if r.Tool != tt.tool || r.String() != tt.str || r.Net() != tt.net || r.Installs() != tt.install || r.Source != policy.SourceUser {
+				t.Errorf("got tool=%q str=%q net=%v install=%v src=%q", r.Tool, r, r.Net(), r.Installs(), r.Source)
 			}
 			again, err := policy.ParseRule(r.String(), policy.SourceUser)
 			if err != nil || again.String() != r.String() {
@@ -245,7 +254,7 @@ func TestParseMode(t *testing.T) {
 }
 
 func FuzzParseRule(f *testing.F) {
-	for _, s := range []string{"bash", "bash(go test *)", "bash(re:^x)", "read_file(~/**)", "web_fetch(*.x.com)", "mcp:a:b*", "*(**/.env)", "bash(x) +net", "(", ")", "mcp:", "a(b)c"} {
+	for _, s := range []string{"bash", "bash(go test *)", "bash(re:^x)", "read_file(~/**)", "web_fetch(*.x.com)", "mcp:a:b*", "*(**/.env)", "bash(x) +net", "bash(x) +install", "(", ")", "mcp:", "a(b)c"} {
 		f.Add(s)
 	}
 	f.Fuzz(func(t *testing.T, text string) {

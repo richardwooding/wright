@@ -149,6 +149,7 @@ func TestEvaluateTable(t *testing.T) {
 		reason   string // substring of Verdict.Reason
 		offers   bool   // expect at least one offer
 		network  bool
+		installs bool
 		noOffers bool
 		trusted  bool // the user accepted this workspace at startup
 	}
@@ -264,6 +265,15 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "allow rule without +net does not cover a network request", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(git status *)")}, req: withNet(f.bash("git status")), want: policy.Ask, reason: "network"},
 		{name: "allow rule without +net does not cover a network command", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(go get *)")}, req: f.bash("go get x"), want: policy.Ask, reason: "network"},
 		{name: "allow rule with +net covers and grants network", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(go get *) +net")}, req: f.bash("go get x"), want: policy.Allow, network: true},
+		// A saved rule for an installing command needs +install as well as
+		// the network: without it the call was allowed and then failed on a
+		// read-only prefix, which is a grant that cannot do its job. The
+		// rule now has to say so, and the prompt it falls through to can.
+		{name: "allow rule with only +net does not cover an install", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(brew install *) +net")}, req: f.bash("brew install fpc"), want: policy.Ask},
+		{name: "allow rule with +install covers and grants both", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(brew install *) +install")}, req: f.bash("brew install fpc"), want: policy.Allow, network: true, installs: true},
+		{name: "+install does not grant an install to another command", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(go get *) +install")}, req: f.bash("go get x"), want: policy.Allow, network: true, installs: true},
+		{name: "a non-installing command allowed by +net grants no install", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "bash(go get *) +net")}, req: f.bash("go get x"), want: policy.Allow, network: true, installs: false},
+		{name: "bypass grants no install", mode: policy.ModeBypass, req: f.bash("brew install fpc"), want: policy.Allow, installs: false},
 		{name: "bash plan safe read allowed", mode: policy.ModePlan, req: f.bash("git log"), want: policy.Allow},
 		// Allow rules match tool and argv, never the effect, so plan mode
 		// must not consult them: the builtin bash(git show *) would
@@ -354,6 +364,9 @@ func TestEvaluateTable(t *testing.T) {
 			}
 			if v.Network != tt.network {
 				t.Errorf("Network = %v, want %v", v.Network, tt.network)
+			}
+			if v.Installs != tt.installs {
+				t.Errorf("Installs = %v, want %v", v.Installs, tt.installs)
 			}
 			if len(v.Explain) == 0 {
 				t.Error("Explain is empty")
@@ -634,4 +647,56 @@ func TestMultiEditIsAWriteEverywhere(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestInstallGrantIsSavable pins the saved-rule half of the install grant.
+// An interactive approval of an installing command mounts the package
+// manager's prefixes read-write for that one call; before +install there was
+// no way to write that down, so --allow 'bash(brew install *) +net' produced
+// a call that was allowed and then failed on a read-only file system. That
+// is a grant that cannot do its job, which is worse than a prompt.
+func TestInstallGrantIsSavable(t *testing.T) {
+	f := newFixture(t)
+	req := f.bash("brew install fpc")
+
+	t.Run("without +install the reason names it", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin(),
+			rules(t, policy.Allow, policy.SourceUser, "bash(brew install *) +net"))
+		v := e.Evaluate(req)
+		if v.Decision != policy.Allow && !containsAny(v.Explain, "+install") {
+			t.Errorf("nothing told the user which flag to add: %v", v.Explain)
+		}
+		if v.Installs {
+			t.Error("a rule without +install granted the prefixes anyway")
+		}
+	})
+
+	t.Run("the offer for an installing command carries it", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin())
+		v := e.Evaluate(req)
+		var texts []string
+		for _, o := range v.Offers {
+			texts = append(texts, o.Rule.String())
+		}
+		if !containsAny(texts, "+install") {
+			t.Errorf("offers = %v, want one carrying +install", texts)
+		}
+		// +install implies the network, so the offer must not also say +net:
+		// one grant, described once.
+		for _, s := range texts {
+			if strings.Contains(s, "+install") && strings.Contains(s, "+net") {
+				t.Errorf("offer %q describes one grant as two", s)
+			}
+		}
+	})
+}
+
+// containsAny reports whether any element of list contains sub.
+func containsAny(list []string, sub string) bool {
+	for _, s := range list {
+		if strings.Contains(s, sub) {
+			return true
+		}
+	}
+	return false
 }

@@ -183,6 +183,11 @@ type Verdict struct {
 	// Network is true when the command should run with network access if it
 	// runs at all (a +net rule matched, or the request asked and was allowed).
 	Network bool
+	// Installs is true when a +install rule allowed an installing command,
+	// so the caller should also make the package-manager prefixes writable
+	// for that one call. The paths themselves live in the sandbox package;
+	// policy names the grant, not the directories.
+	Installs bool
 }
 
 // Errors returned by Engine methods.

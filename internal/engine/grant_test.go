@@ -37,7 +37,7 @@ func (b *recordingBackend) Command(ctx context.Context, spec sandbox.Spec) (*exe
 // which is the only level at which "approving this call makes it work" can be
 // checked: the classifier, the verdict, the approval and the Spec all take
 // part.
-func bashFixture(t *testing.T, script string) (fixture, *recordingBackend) {
+func bashFixture(t *testing.T, script string, mutate ...func(*engine.Options)) (fixture, *recordingBackend) {
 	t.Helper()
 	rec := &recordingBackend{}
 	client := &enginetest.Scripted{Responses: []*core.Response{
@@ -62,6 +62,9 @@ func bashFixture(t *testing.T, script string) (fixture, *recordingBackend) {
 				return policy.Request{}, engine.Preview{}, false, err
 			}
 			return req, engine.Preview{Title: pv.Title, Diff: pv.Diff, Body: pv.Body}, true, nil
+		}
+		for _, m := range mutate {
+			m(o)
 		}
 	})
 	return f, rec
@@ -209,5 +212,61 @@ func TestModelCannotSelfGrantNetwork(t *testing.T) {
 	}
 	if len(rec.specs) != 0 {
 		t.Fatalf("the model's network request ran without approval: %+v", rec.specs)
+	}
+}
+
+// TestSavedInstallRuleGrantsThePrefix is the headless half of
+// TestApprovalGrantsWhatTheCommandNeeds. An interactive approval can mount
+// the package manager's prefixes for one call, but until +install there was
+// no way to write that down, so an unattended run with
+// --allow 'bash(brew install *) +net' was allowed and then failed on a
+// read-only file system. The rule has to be able to grant what the approval
+// grants, or saving an approval is not saving the same thing.
+func TestSavedInstallRuleGrantsThePrefix(t *testing.T) {
+	tests := []struct {
+		name        string
+		rule        string
+		wantPrompt  bool
+		wantWritten bool
+	}{
+		{name: "+install grants it", rule: "bash(brew install *) +install", wantWritten: true},
+		// Not a silent downgrade: the call falls through to a prompt that
+		// can grant it, rather than running without what it needs.
+		{name: "+net alone falls through to a prompt", rule: "bash(brew install *) +net", wantPrompt: true, wantWritten: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			prefix := fakeBrewPrefix(t)
+			rule, err := policy.ParseRules([]string{tt.rule}, policy.Allow, policy.SourceUser)
+			if err != nil {
+				t.Fatal(err)
+			}
+			f, rec := bashFixture(t, "brew install fpc", func(o *engine.Options) {
+				o.Policy = policy.New(o.WS, policy.ModeDefault, policy.Builtin(), rule)
+			})
+			if err := f.eng.Submit("do it"); err != nil {
+				t.Fatal(err)
+			}
+			prompted := false
+			f.collect(t, func(ev engine.Event) {
+				if ev.Kind == engine.KindApprovalRequest {
+					prompted = true
+					f.eng.Reply(ev.Approval.ID, engine.Decision{Allow: true})
+				}
+			})
+			if prompted != tt.wantPrompt {
+				t.Fatalf("prompted = %v, want %v", prompted, tt.wantPrompt)
+			}
+			if len(rec.specs) != 1 {
+				t.Fatalf("sandboxed commands = %d, want 1", len(rec.specs))
+			}
+			spec := rec.specs[0]
+			if !spec.Network {
+				t.Error("an installing command ran without the network")
+			}
+			if written := slices.Contains(spec.ReadWrite, prefix); written != tt.wantWritten {
+				t.Errorf("Spec.ReadWrite contains %q = %v, want %v (%v)", prefix, written, tt.wantWritten, spec.ReadWrite)
+			}
+		})
 	}
 }

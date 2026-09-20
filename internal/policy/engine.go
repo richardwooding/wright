@@ -528,6 +528,7 @@ func (ev *eval) allowed() bool {
 		return false
 	}
 	ev.v.Network = ev.allowNetwork(rule)
+	ev.v.Installs = ev.kind == kindBash && rule.Installs()
 	ev.decide(Allow, fmt.Sprintf("allow rule %s [%s]", rule, rule.Source), rule)
 	return true
 }
@@ -580,8 +581,29 @@ func (ev *eval) coverBash(allow []*Rule) (bool, *Rule, string) {
 	if sh.Unknown {
 		return false, nil, "an opaque script (allow rules never match dynamic shell)"
 	}
-	var last *Rule
-	for _, c := range sh.Commands {
+	last, why := ev.coverCommands(allow)
+	if why != "" {
+		return false, nil, why
+	}
+	if last == nil {
+		return false, nil, "an empty script"
+	}
+	// An installing command writes outside the workspace, into the package
+	// manager's own prefixes. Allowing it on a rule that does not grant that
+	// produces a call that runs and then fails on a read-only file system —
+	// the shape of failure this whole flag exists to stop — so the rule has
+	// to say +install or the command falls through to a prompt that can.
+	if sh.Installs && !last.Installs() {
+		return false, nil, "write access to the package-manager prefixes (the allow rule has no +install)"
+	}
+	return true, last, ""
+}
+
+// coverCommands checks every simple command in the script against the allow
+// rules. It returns the last rule that matched, or the element nothing
+// covered.
+func (ev *eval) coverCommands(allow []*Rule) (last *Rule, why string) {
+	for _, c := range ev.req.Shell.Commands {
 		matched := false
 		for _, r := range allow {
 			if (r.IsBare() || r.IsBash()) && r.MatchesCommand(c.Argv) {
@@ -592,16 +614,13 @@ func (ev *eval) coverBash(allow []*Rule) (bool, *Rule, string) {
 			}
 		}
 		if !matched {
-			return false, nil, "command `" + strings.Join(c.Argv, " ") + "`"
+			return nil, "command `" + strings.Join(c.Argv, " ") + "`"
 		}
 		if (c.Network || ev.req.Network) && !last.Net() {
-			return false, nil, "network access for `" + strings.Join(c.Argv, " ") + "` (the allow rule has no +net)"
+			return nil, "network access for `" + strings.Join(c.Argv, " ") + "` (the allow rule has no +net)"
 		}
 	}
-	if last == nil {
-		return false, nil, "an empty script"
-	}
-	return true, last, ""
+	return last, ""
 }
 
 func (ev *eval) coverPaths(allow []*Rule) (bool, *Rule, string) {
@@ -907,6 +926,11 @@ func suggestBash(req Request) []Rule {
 		text := "bash(" + strings.Join(words, " ") + " *)"
 		if c.Network || sh.NeedsNetwork {
 			text += " +net"
+		}
+		if sh.Installs {
+			// +install implies the network, so it replaces +net rather than
+			// joining it: the offer should read as one grant, not two.
+			text = strings.TrimSuffix(text, " +net") + " +install"
 		}
 		if seen[text] {
 			continue

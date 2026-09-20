@@ -38,8 +38,11 @@ func (e *Engine) Approve(ctx context.Context, c agentkit.Call) (agentkit.Decisio
 	verdict := e.policyFor(c.Depth).Evaluate(req)
 	switch verdict.Decision {
 	case policy.Allow:
-		e.auditDecision(c, verdict, "policy", nil, CallGrant{})
-		return e.allowed(c, verdict, nil), nil
+		// An allow rule can carry a grant too (+install), so it goes through
+		// the same handover as an approval rather than a bare allow.
+		g := ruleGrant(verdict)
+		e.auditDecision(c, verdict, "policy", nil, g)
+		return e.allowedWithGrant(c, verdict, nil, g), nil
 	case policy.Deny:
 		e.auditDecision(c, verdict, "policy", nil, CallGrant{})
 		if verdict.HardDeny {
@@ -150,6 +153,18 @@ func callGrant(req policy.Request, v policy.Verdict) CallGrant {
 	if sh.Installs {
 		// A package manager writes outside the workspace. The prompt names
 		// these paths, so approving is consent to this exact list.
+		g.Writable = sandbox.ToolPrefixes()
+	}
+	return g
+}
+
+// ruleGrant is what an allow *rule* hands the call. Only +install adds
+// anything beyond the network the verdict already pins into the arguments:
+// the writable prefixes are named here rather than in policy, which knows
+// that a grant was made but not which directories it covers.
+func ruleGrant(v policy.Verdict) CallGrant {
+	g := CallGrant{Network: v.Network}
+	if v.Installs {
 		g.Writable = sandbox.ToolPrefixes()
 	}
 	return g

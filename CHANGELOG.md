@@ -22,6 +22,13 @@ All notable changes to this project are documented here. The format follows
   environment (`BRAVE_API_KEY`) and is never echoed in an error. A provider
   named by an untrusted project's settings is ignored, because a search
   discloses the query to a third party.
+- **`+install` rule flag**: `--allow 'bash(brew install *) +install'` grants
+  an installing command the network *and* the package-manager prefixes for
+  that one call — the same grant an interactive approval makes, so an
+  approval can now be saved as a rule. Previously only `+net` could be
+  written down, and an unattended install was allowed and then failed on a
+  read-only file system; a rule with only `+net` now falls through to a
+  prompt that can grant it instead.
 - **`multi_edit`**: several edits in one call, across files or repeatedly in
   one, each seeing the previous one's result. Every edit is validated before
   any is written, so a call that cannot be applied in full changes nothing;

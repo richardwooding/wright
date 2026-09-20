@@ -24,7 +24,7 @@ const (
 
 // Rule is one parsed permission rule.
 //
-//	rule    := tool [ "(" spec ")" ] [ "+net" ]
+//	rule    := tool [ "(" spec ")" ] { "+net" | "+install" }
 //	tool    := name | "mcp:" server [ ":" toolglob ] | "*"
 //	spec    := pathglob | argv-prefix [ "*" ] | "re:" RE2 | "domain:" host | "*.host"
 type Rule struct {
@@ -35,6 +35,7 @@ type Rule struct {
 
 	kind     ruleKind
 	net      bool
+	install  bool
 	argv     []string
 	wildcard bool
 	re       *regexp.Regexp
@@ -55,10 +56,23 @@ var (
 func ParseRule(text string, src Source) (Rule, error) {
 	r := Rule{Source: src}
 	text = strings.TrimSpace(text)
-	if strings.HasSuffix(text, "+net") {
-		r.net = true
-		text = strings.TrimSpace(strings.TrimSuffix(text, "+net"))
+	// The flags may appear in either order and both may be present, so they
+	// are stripped in a loop rather than as one fixed suffix.
+	for {
+		switch {
+		case strings.HasSuffix(text, "+net"):
+			r.net = true
+			text = strings.TrimSpace(strings.TrimSuffix(text, "+net"))
+		case strings.HasSuffix(text, "+install"):
+			r.install = true
+			text = strings.TrimSpace(strings.TrimSuffix(text, "+install"))
+		default:
+		}
+		if !strings.HasSuffix(text, "+net") && !strings.HasSuffix(text, "+install") {
+			break
+		}
 	}
+	text = strings.TrimSpace(text)
 	tool, spec, err := splitRule(text)
 	if err != nil {
 		return Rule{}, err
@@ -72,6 +86,9 @@ func ParseRule(text string, src Source) (Rule, error) {
 	}
 	if r.net && !argvTools[r.Tool] {
 		return Rule{}, fmt.Errorf("policy: +net only applies to bash rules: %q", text)
+	}
+	if r.install && !argvTools[r.Tool] {
+		return Rule{}, fmt.Errorf("policy: +install only applies to bash rules: %q", text)
 	}
 	return r, nil
 }
@@ -244,11 +261,23 @@ func (r Rule) String() string {
 	if r.net {
 		b.WriteString(" +net")
 	}
+	if r.install {
+		b.WriteString(" +install")
+	}
 	return b.String()
 }
 
 // Net reports whether the rule also grants sandbox network access.
-func (r Rule) Net() bool { return r.net }
+// +install implies it: a package manager that cannot reach its index is a
+// command that can only fail, and a rule whose grant cannot do its job is
+// the bug this flag exists to fix.
+func (r Rule) Net() bool { return r.net || r.install }
+
+// Installs reports whether the rule also grants the command write access to
+// the package-manager prefixes for that one call. It is the saved-rule
+// equivalent of what an interactive approval of an installing command hands
+// over, and like that grant it is never implied — a rule has to say so.
+func (r Rule) Installs() bool { return r.install }
 
 // MatchesTool reports whether the rule's tool part applies to tool. "*"
 // matches everything; mcp rules match "mcp:server:tool" names.

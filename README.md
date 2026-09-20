@@ -179,7 +179,7 @@ Rules live under `"permissions"` in `~/.config/wright/config.json`,
 gitignored), and on the command line with `--allow` / `--deny` (repeatable).
 
 ```
-rule    := tool [ "(" spec ")" ] [ "+net" ]
+rule    := tool [ "(" spec ")" ] { "+net" | "+install" }
 tool    := read_file | write_file | edit_file | glob | grep | list_dir | bash
          | multi_edit | web_fetch | web_search | todo_write | ask_user
          | explore | <agent> | skill | skill_file
@@ -194,6 +194,7 @@ spec    := pathglob                    doublestar; relative = workspace-relative
 {
   "permissions": {
     "allow": ["bash(go test *)", "bash(curl -sS https://pkg.go.dev/*) +net",
+              "bash(brew install *) +install",
               "edit_file($WORKSPACE/internal/**)", "web_fetch(domain:*.pkg.go.dev)"],
     "ask":   ["bash(git push *)"],
     "deny":  ["*(**/*.tfstate)", "bash(docker *)"]
@@ -201,8 +202,14 @@ spec    := pathglob                    doublestar; relative = workspace-relative
 }
 ```
 
-`+net` is a bash-only suffix: it allows the command *and* grants the sandbox
-network for it. A script is allowed by rules only when **every** command in it
+`+net` and `+install` are bash-only suffixes. `+net` allows the command *and*
+grants the sandbox network for it. `+install` grants the network **and** makes
+the package-manager prefixes (`$HOMEBREW_PREFIX`, and the others
+`wright doctor` lists) writable for that one call — the same grant an
+interactive approval of an installing command makes, so an approval you liked
+can actually be written down. A saved rule for an installing command needs
+`+install`: with only `+net` the call falls through to a prompt rather than
+running and failing on a read-only file system. A script is allowed by rules only when **every** command in it
 matches an allow rule and nothing in it is opaque. `*` is refused in allow
 lists. An "always allow" offer in the approval prompt is never made for
 destructive or opaque commands and never widens beyond two argv words.
