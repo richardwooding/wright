@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-20
+
+Three bugs from a real v0.2.0 session, all of them wright contradicting
+itself: a mode that removed tools its own policy allowed, an offer that
+could not be honoured, and a session that did not exist while you were
+sitting in it.
+
 ### Fixed
 
 - **Plan mode removed tools the model was told it had.** The toolset plan
