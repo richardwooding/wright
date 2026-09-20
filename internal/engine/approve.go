@@ -13,11 +13,17 @@ import (
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/policy/shellclass"
+	"github.com/richardwooding/wright/internal/sandbox"
 )
 
 // maxHardDenials aborts a run that keeps hitting the hard-deny set; a model
 // that is being steered by injected content should not get unlimited tries.
 const maxHardDenials = 3
+
+// bashTool is the one tool whose decision carries a sandbox grant. It is
+// named here rather than imported from internal/tools, which sits below the
+// engine and must not be pulled into it.
+const bashTool = "bash"
 
 // Approve implements agentkit.Approver. It runs on the tool goroutine: it
 // evaluates policy, and for an Ask verdict emits an approval request and
@@ -90,9 +96,10 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 		delete(e.pending, id)
 		e.mu.Unlock()
 	}()
+	grant := callGrant(req, verdict)
 	e.emit(Event{Kind: KindApprovalRequest, RunID: c.RunID, Depth: c.Depth, Call: &c.Call, Approval: &Approval{
 		ID: id, Tool: c.Call.Name, Args: c.Call.Arguments, Request: req, Verdict: verdict,
-		Preview: preview, Offers: verdict.Offers, Severity: severity(verdict, req),
+		Preview: preview, Offers: verdict.Offers, Severity: severity(verdict, req), Grants: grant,
 	}})
 	select {
 	case <-ctx.Done():
@@ -113,10 +120,69 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 				e.emit(Event{Kind: KindNotice, Text: "could not record grant: " + err.Error()})
 			}
 		}
-		verdict.Network = verdict.Network || d.Network
+		// Approving grants what the command needs. Offering "allow" and
+		// "allow with network" separately for a command that cannot work
+		// without the network only produces a call that fails after the
+		// user said yes — `brew info fpc` did exactly that.
+		verdict.Network = verdict.Network || d.Network || grant.Network
 		e.auditDecision(c, verdict, "user", &d)
-		return e.allowed(c, verdict, d.Args), nil
+		return e.allowedWithGrant(c, verdict, d.Args, grant), nil
 	}
+}
+
+// callGrant is what allowing this call will give it beyond the defaults. It
+// is computed from the classifier, never from the model's arguments alone:
+// Request.Network only matters once the user has answered the prompt it
+// caused, and the writable prefixes only ever come from an approval.
+func callGrant(req policy.Request, v policy.Verdict) CallGrant {
+	sh := req.Shell
+	if req.Tool != bashTool || sh == nil {
+		return CallGrant{}
+	}
+	g := CallGrant{Network: v.Network || sh.NeedsNetwork || req.Network}
+	if sh.Installs {
+		// A package manager writes outside the workspace. The prompt names
+		// these paths, so approving is consent to this exact list.
+		g.Writable = sandbox.ToolPrefixes()
+	}
+	return g
+}
+
+// grantKeyFor identifies one tool call for the grant handover between
+// Approve and the middleware that puts the grant on the context. agentkit's
+// approval middleware runs the tool with the context it already had, so an
+// Approver cannot add to it; the arguments are part of the key because they
+// are what the middleware passes on after any edit.
+func grantKeyFor(callID string, args json.RawMessage) string {
+	return callID + "\x00" + string(args)
+}
+
+// allowedWithGrant is allowed(), plus the per-call sandbox grant the user's
+// approval earned. Only a non-empty writable set is recorded: network
+// already travels as the rewritten "network" argument.
+func (e *Engine) allowedWithGrant(c agentkit.Call, verdict policy.Verdict, edited json.RawMessage, grant CallGrant) agentkit.Decision {
+	d := e.allowed(c, verdict, edited)
+	if len(grant.Writable) == 0 {
+		return d
+	}
+	args := c.Call.Arguments
+	if d.Arguments != nil {
+		args = d.Arguments
+	}
+	e.mu.Lock()
+	e.grants[grantKeyFor(c.Call.ID, args)] = grant
+	e.mu.Unlock()
+	return d
+}
+
+// takeGrant pops the grant recorded for a call, if any.
+func (e *Engine) takeGrant(callID string, args json.RawMessage) (CallGrant, bool) {
+	key := grantKeyFor(callID, args)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	g, ok := e.grants[key]
+	delete(e.grants, key)
+	return g, ok
 }
 
 // allowed builds the Allow decision. For bash the "network" argument is
@@ -124,7 +190,7 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 // request: only a +net rule or the user's answer turns networking on.
 func (e *Engine) allowed(c agentkit.Call, verdict policy.Verdict, edited json.RawMessage) agentkit.Decision {
 	args := edited
-	if c.Call.Name == "bash" {
+	if c.Call.Name == bashTool {
 		src := args
 		if src == nil {
 			src = c.Call.Arguments
@@ -202,6 +268,9 @@ func (e *Engine) failPending() {
 	for id := range e.answers {
 		delete(e.answers, id)
 	}
+	// A grant whose call never ran (a cancelled run) must not be waiting for
+	// the next call that happens to carry the same arguments.
+	clear(e.grants)
 }
 
 func (e *Engine) countHardDeny(ctx context.Context) {

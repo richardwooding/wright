@@ -9,6 +9,7 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/policy/shellclass"
+	"github.com/richardwooding/wright/internal/sandbox"
 )
 
 const (
@@ -41,21 +43,6 @@ type bashArgs struct {
 	Timeout     int    `json:"timeout,omitempty" jsonschema:"seconds before the command is killed (default 120, max 600)"`
 	Description string `json:"description,omitempty" jsonschema:"one line saying what the command does, shown to the user"`
 	Network     bool   `json:"network,omitempty" jsonschema:"request network access for this command (asks the user)"`
-}
-
-// networkKey carries an engine-granted network override.
-type networkKey struct{}
-
-// WithNetwork lets the engine grant (or refuse) sandbox network access for
-// the bash call running under ctx, overriding the model's argument.
-func WithNetwork(ctx context.Context, allow bool) context.Context {
-	return context.WithValue(ctx, networkKey{}, allow)
-}
-
-// NetworkFrom reports an override set with WithNetwork.
-func NetworkFrom(ctx context.Context) (allow, ok bool) {
-	allow, ok = ctx.Value(networkKey{}).(bool)
-	return allow, ok
 }
 
 func (d *Deps) bash() agentkit.Tool {
@@ -159,8 +146,13 @@ func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error)
 	// policy verdict before the call reaches here; spec.Network carries the
 	// --allow-network flag.
 	spec.Network = spec.Network || a.Network
-	if allow, ok := NetworkFrom(ctx); ok {
-		spec.Network = allow
+	// What the user approved for this one call: the network the classifier
+	// says the command needs, and — for an install — the tool prefixes it
+	// writes, which the approval prompt named. Only the engine sets a grant;
+	// the base spec is never widened.
+	if g, ok := sandbox.GrantFrom(ctx); ok {
+		spec.Network = spec.Network || g.Network
+		spec.ReadWrite = withGranted(spec.ReadWrite, g.Writable)
 	}
 	spec.Timeout = timeout
 
@@ -178,6 +170,22 @@ func (d *Deps) runBash(ctx context.Context, a bashArgs) (agentkit.Output, error)
 	notes = append(notes, d.updateCwd(newCwd)...)
 	timedOut := tctx.Err() != nil
 	return d.bashResult(ctx, out, cmd, runErr, dur, timedOut, timeout, notes), nil
+}
+
+// withGranted returns base plus the granted directories, without touching
+// base: Deps.SandboxSpec is shared by every call, so appending to its slice
+// in place would leak one call's grant into the next.
+func withGranted(base, granted []string) []string {
+	if len(granted) == 0 {
+		return base
+	}
+	out := slices.Clone(base)
+	for _, p := range granted {
+		if !slices.Contains(out, p) {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // execute wires the pipes, streams merged output to the UI and waits.

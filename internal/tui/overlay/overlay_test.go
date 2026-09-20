@@ -226,28 +226,45 @@ func TestApprovalExplain(t *testing.T) {
 	}
 }
 
-func TestApprovalNetworkOption(t *testing.T) {
+// TestApprovalStatesWhatItGrants: allowing a command that needs the network
+// grants it, so the prompt says so and there is no separate "allow with
+// network" option to miss. An install also names the paths it will make
+// writable — consent has to be to something specific.
+func TestApprovalStatesWhatItGrants(t *testing.T) {
 	var got *engine.Decision
 	a := engine.Approval{
-		ID: "ap-2", Tool: "bash", Args: json.RawMessage(`{"command":"go mod download"}`),
-		Request: policy.Request{Tool: "bash", Shell: &shellclass.Analysis{Raw: "go mod download", NeedsNetwork: true, Reasons: []string{"go mod download needs the network"}}},
+		ID: "ap-2", Tool: "bash", Args: json.RawMessage(`{"command":"brew install fpc"}`),
+		Request: policy.Request{Tool: "bash", Shell: &shellclass.Analysis{
+			Raw: "brew install fpc", NeedsNetwork: true, Installs: true,
+			Reasons: []string{"brew install"},
+		}},
 		Verdict: policy.Verdict{Decision: policy.Ask},
+		Grants:  engine.CallGrant{Network: true, Writable: []string{"/opt/homebrew"}},
 	}
 	var o overlay.Overlay = overlay.NewApproval(a, th, func(d engine.Decision) { got = &d })
 	view := plain(o.View(80, 30))
-	for _, want := range []string{"[w] allow with network", "go mod download needs the network", "go mod download"} {
+	for _, want := range []string{
+		"allow once (with network and the writes below)",
+		"allowing runs this call with network access",
+		"/opt/homebrew",
+		"brew install fpc",
+	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("missing %q:\n%s", want, view)
 		}
 	}
-	_, done := press(o, "w")
-	if !done || got == nil || !got.Allow || !got.Network {
-		t.Fatalf("network allow not sent: %+v", got)
+	if strings.Contains(view, "[w]") {
+		t.Errorf("the separate network option is a trap and must be gone:\n%s", view)
 	}
-	// Already allowed with network → no option.
-	a.Verdict.Network = true
-	if v := plain(overlay.NewApproval(a, th, nil).View(80, 30)); strings.Contains(v, "[w]") {
-		t.Error("network option offered when the verdict already grants it")
+	_, done := press(o, "y")
+	if !done || got == nil || !got.Allow {
+		t.Fatalf("plain allow not sent: %+v", got)
+	}
+	// A call that needs nothing extra says nothing extra.
+	a.Grants = engine.CallGrant{}
+	v := plain(overlay.NewApproval(a, th, nil).View(80, 30))
+	if !strings.Contains(v, "[y] allow once") || strings.Contains(v, "network access") {
+		t.Errorf("a call with no grant must not advertise one:\n%s", v)
 	}
 }
 

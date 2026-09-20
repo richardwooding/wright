@@ -141,11 +141,9 @@ func (r *plainRunner) answerApproval(text string) {
 	a := r.approval
 	r.approval = nil
 	d := engine.Decision{Allow: false, Reason: "denied by user", By: byUser}
-	switch {
-	case text == "1" || text == "y":
+	switch text {
+	case "1", "y":
 		d = engine.Decision{Allow: true, By: byUser}
-	case text == "w" && a.Tool == "bash":
-		d = engine.Decision{Allow: true, Network: true, By: byUser}
 	default:
 		if n, err := strconv.Atoi(text); err == nil && n >= 2 && n-2 < len(a.Offers) {
 			offer := a.Offers[n-2]
@@ -218,12 +216,12 @@ func (r *plainRunner) askApproval(ev engine.Event) {
 			r.line("    " + l)
 		}
 	}
+	for _, l := range grantLines(a.Grants) {
+		r.line("    " + l)
+	}
 	r.line("  1) allow once")
 	for i, o := range a.Offers {
 		r.line(fmt.Sprintf("  %d) allow and remember: %s  [%s]", i+2, o.Rule.String(), o.Scope))
-	}
-	if a.Tool == "bash" && a.Request.Shell != nil && a.Request.Shell.NeedsNetwork && !a.Verdict.Network {
-		r.line("  w) allow with network")
 	}
 	r.line("  n) deny (default)")
 	fmt.Fprint(r.out, "> ")
@@ -231,6 +229,20 @@ func (r *plainRunner) askApproval(ev engine.Event) {
 	if r.eof {
 		r.onEOF() // stdin already closed: nobody can answer
 	}
+}
+
+// grantLines say what allowing hands over. Allowing a command the classifier
+// says needs the network grants it, so the prompt has to name that (and any
+// paths it will make writable) before the answer, not after the failure.
+func grantLines(g engine.CallGrant) []string {
+	var out []string
+	if g.Network {
+		out = append(out, "allowing runs this call with network access")
+	}
+	if len(g.Writable) > 0 {
+		out = append(out, "allowing also makes these writable for this call only: "+strings.Join(g.Writable, ", "))
+	}
+	return out
 }
 
 func (r *plainRunner) askQuestion(ev engine.Event) {

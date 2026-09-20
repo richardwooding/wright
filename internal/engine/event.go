@@ -102,7 +102,26 @@ type Approval struct {
 	Preview  Preview
 	Offers   []policy.GrantOffer // narrowest first; empty for destructive or opaque calls
 	Severity Severity
+	// Grants is what allowing this call will give it beyond the defaults:
+	// the network when the command cannot work without it, and the tool
+	// prefixes an install writes. The prompt must show both — the user is
+	// consenting to these, not only to the command text.
+	Grants CallGrant
 }
+
+// CallGrant is the extra reach one approved call gets. It is the engine's
+// own shape of sandbox.Grant so the UI, which must not import the sandbox,
+// can still show the user exactly what allowing will hand over.
+type CallGrant struct {
+	// Network is true when allowing this call runs it with network access.
+	Network bool
+	// Writable are the directories outside the workspace this one call may
+	// write: the tool prefixes a package manager installs into.
+	Writable []string
+}
+
+// Empty reports a grant that changes nothing.
+func (g CallGrant) Empty() bool { return !g.Network && len(g.Writable) == 0 }
 
 // Severity drives the colour and the default focus of an approval prompt.
 type Severity uint8
@@ -139,7 +158,7 @@ type Decision struct {
 	Allow   bool
 	Grant   *policy.GrantOffer // accepted offer, when the user chose "allow for …"
 	Args    json.RawMessage    // edited arguments, nil when unchanged
-	Network bool               // run this bash call with network access
+	Network bool               // extra network grant; allowing already grants what the classifier says the call needs
 	Reason  string             // shown to the model when denied
 	By      string             // "user", "policy", "headless"
 }

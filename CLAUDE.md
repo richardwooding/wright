@@ -91,7 +91,8 @@ internal/
               Run → headless.Run | Interactive hook (tui wired in cmd/wright); Command hook for /diff /audit /init /trust
               /redaction /mcp /skills /agents; InitProject, LoadEffective, OpenStore, ListSkills/ListMCPServers/Add/RemoveMCPServer
               for the read-only and settings commands; DAG/network tests
-  engine/     wraps agentkit: runs, fan-in Event channel, Approver, Asker, Inbox steering, mode/model switch, Compact, Undo
+  engine/     wraps agentkit: runs, fan-in Event channel, Approver, Asker, Inbox steering, mode/model switch, Compact, Undo;
+              grantMiddleware puts the approved call's sandbox.Grant (network + writable tool prefixes) on its context
   enginetest/ Scripted core.Chatter + TextResp/CallResp shared by the engine, headless and app tests
   tuiwire/    adapts app.Interactive → tui.Run (Controller/SessionSource shims, "@" file walk); the only package importing both
   tui/        Bubble Tea v2 root model (Controller + Event channel → engine); --plain loop; subpackages
@@ -105,7 +106,8 @@ internal/
   agents/     sub-agents as tools: explore (read-only, fast model) + custom .wright/agents/*.md definitions; Build/Toolset/Names/Docs
   policy/     rule grammar, modes, verdict lattice, hard-deny set, grants, child engines
   policy/shellclass/  mvdan.cc/sh AST → per-command class; Unknown/HardDeny; leaf package (interface Workspace)
-  sandbox/    Backend: container | bwrap | landlock | seatbelt | none; filtered Env(); __sandbox Helper
+  sandbox/    Backend: container | bwrap | landlock | seatbelt | none; filtered Env(); __sandbox Helper;
+              Grant/WithGrant + ToolPrefixes: the per-call widening an approval earns
   workspace/  roots + extra dirs, symlink-safe Resolve, .gitignore/.wrightignore, secret/protected paths
   redact/     high-confidence secret patterns → "[redacted: <name>…last4]"; line-buffered Writer
   audit/      SHA-256-chained JSONL per session: Open/Write/Read/Verify/Summarize
@@ -223,6 +225,47 @@ client to HTTP MCP transports).
   would just `mkdir` it. The policy layer already denies *declared* writes
   there (`workspace.IsProtected`); this is the layer for writes it cannot
   see.
+- **Approval grants what the command needs.** This is a deliberate
+  security-posture decision, not an accident to tidy away. When
+  `shellclass` says a bash command needs the network, the *ordinary* "allow"
+  grants the network for that call (`engine.callGrant` → `verdict.Network`),
+  and when it says the command installs software (`Analysis.Installs`) the
+  approval also mounts `sandbox.ToolPrefixes()` read-write **for that one
+  call**. The prompt states both before the answer and names the exact
+  directories: consent has to be to something specific. There is no separate
+  "allow with network" option, and adding one back would recreate the bug —
+  the user allowed `brew info fpc`, got a call with no network, and read
+  `curl: (7) Could not connect`. A harness that cannot do ordinary work is
+  not secure, it is broken. What must *not* change with it:
+  the model's own `network: true` argument never self-grants (it turns an
+  allow into an ask, and `Engine.allowed` rewrites the argument to the
+  verdict for every bash call); a *persisted* rule still needs an explicit
+  `+net`, which is what makes a saved grant explicit; and the write grant
+  comes only from an interactive approval — never from an allow rule, never
+  from bypass mode, and never in the base `Spec`. The grant reaches the tool
+  through `sandbox.WithGrant` on the call's context, applied by
+  `Engine.grantMiddleware` directly inside `agentkit.ApproveWith`, because
+  that middleware runs the tool with the context it already had: an
+  `Approver` cannot add to it, so the decision and the context are joined by
+  a per-call entry (`Engine.grants`, keyed by call ID + final arguments) that
+  the middleware pops. `bash` copies the spec per call and must *clone*
+  `ReadWrite` before appending — `Deps.SandboxSpec` is shared, so appending
+  in place would hand the next command the last one's prefixes.
+- **A package-manager verb that uses the network is not a safe read.** A
+  command classified `SafeRead` is auto-allowed with no prompt *and* no
+  network, so misclassifying one is not "slightly wrong", it is a command
+  that can never work and a user who is never asked. `brew info`, `deps`,
+  `outdated`, `search` and `doctor` all contact the Homebrew API or a tap's
+  remote; only `list`/`ls`, `config`, `leaves` and the `--prefix`/`--version`
+  options are local. The same question has to be asked of every manager
+  before adding a verb to a safe set: `npm doctor`/`ping` contact the
+  registry, `pip list --outdated` and `gem list --remote` query the index,
+  and `dnf`/`yum`/`snap`/`flatpak` refresh remote metadata even for queries,
+  while `apt`, `pacman`, `apk`, `zypper`, `rpm` and `port` answer from the
+  index already on disk. Note also that `verbs.lookup` and `first()` read the
+  first *positional* word, so an option-spelled verb (`brew --prefix`,
+  `pacman -Ss`) never matches a map key — it has to be matched with
+  `hasFlag`.
 - **The landlock helper's namespaces are the confinement.** The backend
   re-execs it with `CLONE_NEWUSER|CLONE_NEWNET`, `Unshareflags:
   CLONE_NEWNS`, an identity uid/gid map and ambient `CAP_SYS_ADMIN`
@@ -419,8 +462,10 @@ client to HTTP MCP transports).
   every keystroke.
 - **UI honesty.** Every status is glyph + word (`✓ ok`, `✗ denied`,
   `⛔ bypass`, `sandbox off`), never colour alone; the approval prompt focuses
-  deny for `SeverityDestructive`, offers "allow…" only when the engine
-  produced `Offers`, shows each offer's exact rule text and scope, validates
+  deny for `SeverityDestructive`, says in the "allow" label *and* in the facts
+  what allowing hands over (`Approval.Grants`: network, and the exact
+  directories an install will be able to write), offers "allow…" only when the
+  engine produced `Offers`, shows each offer's exact rule text and scope, validates
   edited arguments with `json.Valid`, and `esc` is deny. Bypass is reachable
   only through the typed-word confirm and still goes through
   `Controller.SetMode`, which the policy engine refuses without the flag.

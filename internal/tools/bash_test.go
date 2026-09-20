@@ -15,6 +15,7 @@ import (
 	"github.com/richardwooding/agentkit"
 
 	"github.com/richardwooding/wright/internal/redact"
+	"github.com/richardwooding/wright/internal/sandbox"
 	"github.com/richardwooding/wright/internal/tools"
 )
 
@@ -212,13 +213,74 @@ func TestBashCommitTrailer(t *testing.T) {
 	}
 }
 
-func TestNetworkContext(t *testing.T) {
-	if _, ok := tools.NetworkFrom(context.Background()); ok {
-		t.Error("unset context should report ok=false")
+// recordingBackend keeps the Spec of every call and runs nothing: a test
+// that asserts on what an approved `brew install` would be given must not
+// install anything on the machine it runs on.
+type recordingBackend struct{ specs []sandbox.Spec }
+
+func (b *recordingBackend) Name() string                    { return "recording" }
+func (b *recordingBackend) Available(context.Context) error { return nil }
+func (b *recordingBackend) Command(ctx context.Context, spec sandbox.Spec) (*exec.Cmd, error) {
+	b.specs = append(b.specs, spec)
+	return exec.CommandContext(ctx, "true"), nil
+}
+
+func (b *recordingBackend) last(t *testing.T) sandbox.Spec {
+	t.Helper()
+	if len(b.specs) == 0 {
+		t.Fatal("no sandboxed command was built")
 	}
-	ctx := tools.WithNetwork(context.Background(), true)
-	if allow, ok := tools.NetworkFrom(ctx); !ok || !allow {
-		t.Error("override lost")
+	return b.specs[len(b.specs)-1]
+}
+
+// TestBashGrantAppliesToOneCallOnly pins the per-call widening: the grant the
+// engine puts on the context reaches this call's Spec and nothing else. The
+// base spec is shared by every call, so appending to its slice in place would
+// hand the next command the last one's writable prefixes.
+func TestBashGrantAppliesToOneCallOnly(t *testing.T) {
+	rec := &recordingBackend{}
+	prefix := t.TempDir()
+	f := newFixture(t, func(d *tools.Deps) { d.Sandbox = rec })
+	granted := sandbox.WithGrant(context.Background(), sandbox.Grant{Network: true, Writable: []string{prefix}})
+	if _, err := f.call(granted, tools.NameBash, `{"command":"echo install"}`); err != nil {
+		t.Fatal(err)
+	}
+	spec := rec.last(t)
+	if !spec.Network {
+		t.Error("granted network did not reach the spec")
+	}
+	if !slices.Contains(spec.ReadWrite, prefix) {
+		t.Errorf("granted prefix missing from ReadWrite: %v", spec.ReadWrite)
+	}
+	if _, err := f.call(context.Background(), tools.NameBash, `{"command":"echo plain"}`); err != nil {
+		t.Fatal(err)
+	}
+	spec = rec.last(t)
+	if spec.Network {
+		t.Error("the next call kept the granted network")
+	}
+	if slices.Contains(spec.ReadWrite, prefix) {
+		t.Errorf("the next call kept the granted prefix: %v", spec.ReadWrite)
+	}
+}
+
+// TestBashNetworkArgumentDoesNotSelfGrant pins that the model's own argument
+// reaches the sandbox only because the engine rewrote it to the verdict: the
+// tool has no opinion, so a grant-free call with network:true still runs with
+// whatever the base spec says. (The engine-side pinning is what makes that
+// argument trustworthy; see TestApprovalGrantsWhatTheCommandNeeds.)
+func TestBashGrantIsTheOnlyWidening(t *testing.T) {
+	rec := &recordingBackend{}
+	f := newFixture(t, func(d *tools.Deps) { d.Sandbox = rec })
+	if _, err := f.text(tools.NameBash, `{"command":"echo hi"}`); err != nil {
+		t.Fatal(err)
+	}
+	spec := rec.last(t)
+	if spec.Network {
+		t.Error("a call with no grant must not have network")
+	}
+	if len(spec.ReadWrite) != len(f.deps.SandboxSpec.ReadWrite) {
+		t.Errorf("ReadWrite widened without a grant: %v", spec.ReadWrite)
 	}
 }
 

@@ -54,12 +54,9 @@ type Approval struct {
 // offered when the policy engine produced offers.
 func NewApproval(a engine.Approval, th theme.Theme, decide func(engine.Decision)) *Approval {
 	p := &Approval{a: a, th: th, decide: decide}
-	p.opts.items = append(p.opts.items, listItem{key: "y", label: "allow once"})
+	p.opts.items = append(p.opts.items, listItem{key: "y", label: allowLabel(a.Grants)})
 	if len(a.Offers) > 0 {
 		p.opts.items = append(p.opts.items, listItem{key: "a", label: "allow… (choose a rule to remember)"})
-	}
-	if p.offersNetwork() {
-		p.opts.items = append(p.opts.items, listItem{key: "w", label: "allow with network"})
 	}
 	p.opts.items = append(p.opts.items,
 		listItem{key: "e", label: "edit arguments"},
@@ -80,11 +77,39 @@ func NewApproval(a engine.Approval, th theme.Theme, decide func(engine.Decision)
 	return p
 }
 
-// offersNetwork is true for a bash call the classifier says needs the
-// network when the verdict would run it without.
-func (p *Approval) offersNetwork() bool {
-	sh := p.a.Request.Shell
-	return p.a.Tool == "bash" && sh != nil && sh.NeedsNetwork && !p.a.Verdict.Network
+// allowLabel spells out what "allow" hands over. A command the classifier
+// says needs the network gets it when the user allows — so the option has to
+// say so, rather than leaving the user to discover it from a command that
+// failed after they said yes.
+func allowLabel(g engine.CallGrant) string {
+	switch {
+	case g.Network && len(g.Writable) > 0:
+		return "allow once (with network and the writes below)"
+	case g.Network:
+		return "allow once (with network access)"
+	case len(g.Writable) > 0:
+		return "allow once (with the writes below)"
+	default:
+		return "allow once"
+	}
+}
+
+// grantFacts name what allowing hands over, path by path: consent has to be
+// to something specific.
+func (p *Approval) grantFacts(w int) []string {
+	g := p.a.Grants
+	if g.Empty() {
+		return nil
+	}
+	var out []string
+	if g.Network {
+		out = append(out, p.th.Warm.Render(theme.GlyphWarn+" ")+"allowing runs this call with network access")
+	}
+	if len(g.Writable) > 0 {
+		out = append(out, wrap(theme.GlyphWarn+" allowing also makes these writable for this call only: "+
+			strings.Join(g.Writable, ", "), w)...)
+	}
+	return out
 }
 
 // ID is the approval's request ID.
@@ -167,8 +192,6 @@ func (p *Approval) choose(key string) bool {
 	switch key {
 	case "y":
 		return p.send(engine.Decision{Allow: true, By: byUser})
-	case "w":
-		return p.send(engine.Decision{Allow: true, Network: true, By: byUser})
 	case "a":
 		p.state = stateGrants
 	case "e":
@@ -311,6 +334,7 @@ func (p *Approval) facts(w int) []string {
 			out = append(out, p.th.Warm.Render(theme.GlyphWarn+" contains constructs the analyser cannot see through"))
 		}
 	}
+	out = append(out, p.grantFacts(w)...)
 	if p.a.Verdict.Reason != "" {
 		out = append(out, p.th.Subtle.Render(ansiTrunc(p.a.Verdict.Reason, w)))
 	}

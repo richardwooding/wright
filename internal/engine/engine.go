@@ -87,6 +87,7 @@ type Engine struct {
 	todos    []Todo
 	pending  map[string]chan Decision
 	answers  map[string]chan Answer
+	grants   map[string]CallGrant
 	seq      int
 	ctxWin   int
 	hardDeny int
@@ -126,6 +127,7 @@ func New(ctx context.Context, o Options) (*Engine, error) {
 		inbox:   agentkit.NewInbox(),
 		pending: map[string]chan Decision{},
 		answers: map[string]chan Answer{},
+		grants:  map[string]CallGrant{},
 		events:  make(chan Event, 256),
 		closed:  make(chan struct{}),
 		now:     o.Now,

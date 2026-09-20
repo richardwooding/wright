@@ -338,9 +338,22 @@ container is the boundary, policy still applies) → **bwrap** → **landlock** 
   and bypass mode is refused.
 
 The network is off inside the sandbox unless a `+net` rule matched, you
-answered the network offer in the approval prompt, or you passed
-`--allow-network`. The model can never grant itself network: asking for it is
-what turns an allow into an ask.
+approved a call the classifier says needs it, or you passed `--allow-network`.
+**Approving a call grants what that call needs**: when the classifier says a
+command cannot work without the network, allowing it runs it with the
+network, and the prompt says so before you answer — an approval that leaves
+the command unable to work is a trap, not a safeguard. The model can never
+grant itself network: asking for it is what turns an allow into an ask, and a
+*saved* rule still needs an explicit `+net`.
+
+Installing software is the same idea one step further. A package manager
+writes outside the workspace — the Homebrew prefix and cache, the npm global
+prefix, `~/.cargo`, `$GOBIN`, `~/.local/bin`, the gem home — which the sandbox
+mounts read-only. When the classifier recognises an install (`brew install`,
+`go install`, `npm install -g`, `pipx install`, `cargo install`, …), the
+approval prompt **names those directories** and allowing the call mounts them
+read-write **for that one call**. Nothing else widens them: not a saved allow
+rule, not bypass mode, and never the base sandbox.
 
 The environment a sandboxed command sees is an **allowlist** (`PATH`, `HOME`,
 `LANG`, `TERM`, `XDG_*`, `GO*`, `CARGO_HOME`, `NODE_OPTIONS`, `PYTHONPATH`,

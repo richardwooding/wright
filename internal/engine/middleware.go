@@ -11,6 +11,7 @@ import (
 
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/prompt"
+	"github.com/richardwooding/wright/internal/sandbox"
 )
 
 // Middleware is the chain every tool call runs through, at any depth: panic
@@ -19,7 +20,27 @@ import (
 // app gives sub-agents the same chain, so a child's calls are approved,
 // audited and fenced exactly like the main agent's.
 func (e *Engine) Middleware() []agentkit.Middleware {
-	return []agentkit.Middleware{agentkit.Recover(), agentkit.ApproveWith(e), e.auditMiddleware(), e.untrustedMiddleware()}
+	return []agentkit.Middleware{agentkit.Recover(), agentkit.ApproveWith(e), e.grantMiddleware(), e.auditMiddleware(), e.untrustedMiddleware()}
+}
+
+// grantMiddleware hands the approved call the sandbox grant its approval
+// earned. It sits directly inside the approval middleware because that is
+// the only place the decision and the call's context meet: agentkit's
+// ApproveWith calls the tool with the context it already had, so Approve
+// itself cannot add to it. A call with no recorded grant is untouched — the
+// sandbox is never widened by default.
+func (e *Engine) grantMiddleware() agentkit.Middleware {
+	return func(next agentkit.Tool) agentkit.Tool {
+		def := next.Definition()
+		return agentkit.Raw(def.Name, def.Description, def.Parameters,
+			func(ctx context.Context, args json.RawMessage) (agentkit.Output, error) {
+				c, _ := agentkit.CallFrom(ctx)
+				if g, ok := e.takeGrant(c.Call.ID, args); ok {
+					ctx = sandbox.WithGrant(ctx, sandbox.Grant{Network: g.Network, Writable: g.Writable})
+				}
+				return next.Call(ctx, args)
+			})
+	}
 }
 
 // maxAuditArgs bounds the argument text kept in the audit log.

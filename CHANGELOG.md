@@ -6,6 +6,51 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+The sandbox was strict in a way that made ordinary work impossible: the user
+allowed `brew install`, and it still could not run. A harness that cannot do
+ordinary work is not secure, it is broken.
+
+### Changed
+
+- **Approving a call now grants what that call needs.** When the classifier
+  says a bash command needs the network, allowing it runs it with the
+  network, and the prompt says so before you answer. The separate "allow with
+  network" option (`w` in the TUI and in `--plain`) is gone: offering it for
+  a command that cannot work without the network meant plain "allow" produced
+  a call that failed after the user had said yes — which is what happened to
+  `brew info fpc` ("curl: (7) Could not connect", with the status bar showing
+  `bwrap ⊘net`). The two invariants around it are unchanged: the model's own
+  `network: true` argument never self-grants (it turns an allow into an ask,
+  and the engine rewrites the argument to the verdict), and a *persisted*
+  rule still needs an explicit `+net` to carry the network.
+- A command the classifier identifies as installing software (`brew install`,
+  `go install`, `cargo install`, `npm install -g`, `pipx install`, `gem
+  install`, `rustup update`, …) gets the tool prefixes it writes — the
+  Homebrew prefix and cache, the npm global prefix, `CARGO_HOME`,
+  `RUSTUP_HOME`, `$GOBIN`, `~/.local/bin`, the uv and pipx directories and the
+  gem home, whichever exist — mounted read-write **for that one call**, and
+  only when the user approves it. The approval prompt names the exact
+  directories, so the consent is to a specific list. The base sandbox is
+  unchanged: nothing outside the workspace is writable by default, no saved
+  rule and no mode widens it, and `$HOME` and `/` are never bound.
+
+### Fixed
+
+- Package-manager verbs that use the network were classified as local reads,
+  so they ran with the network off *and* with no prompt at which to ask for
+  it. `brew info`, `brew deps`, `brew outdated` and `brew doctor` are network
+  commands (only `list`/`ls`, `config`, `leaves`, `--prefix` and `--version`
+  are local, and the option-spelled ones are now recognised at all — the verb
+  lookup only ever saw positional words, so `brew --version` fell through to
+  the network default). The same audit fixed `npm doctor` and `npm ping`
+  (both contact the registry), `pip list --outdated` and `gem list --remote`
+  (both query the index), and `dnf`/`yum`/`snap`/`flatpak`/`rpm-ostree`
+  queries, which refresh metadata from a remote index — while `apt`, `pacman`,
+  `apk`, `zypper`, `rpm` and `port` answer from the index on disk and stay
+  local.
+- `pnpm global add` / `yarn global add` were classified as an unknown verb
+  (`mutating`) instead of a global install.
+
 ## [0.1.1] - 2026-09-20
 
 Four defects found by CI's macOS job and by following its lead on Linux.
