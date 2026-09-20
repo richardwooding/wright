@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-09-20
+
+"Always allow" now works for programs wright has never heard of. Reported from
+a session compiling Pascal, where the same `fpc` command was approved five
+times because no rule could ever have covered it.
+
 ### Fixed
 
 - **A program wright has no description of could never be allowed — you were
