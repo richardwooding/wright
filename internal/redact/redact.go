@@ -64,6 +64,25 @@ func WithExtra(patterns ...Pattern) Option {
 	return func(c *config) { c.extra = append(c.extra, patterns...) }
 }
 
+// Literal builds a Pattern matching one exact secret — a token wright was
+// handed rather than one it recognised by shape.
+//
+// The value is quoted, so a secret containing regexp metacharacters cannot
+// corrupt the pattern, and there is no word boundary: a token abutting other
+// characters still matches, which is exactly the case the shape-based
+// patterns miss. It is not redundant with them — a legacy 40-character hex
+// PAT matches no default pattern at all, and an enterprise token can carry a
+// prefix nobody has written down.
+//
+// keep is how many trailing characters survive in the marker; it must be
+// shorter than the secret, or the marker would show the whole thing.
+func Literal(name, secret string, keep int) Pattern {
+	if keep >= len(secret) {
+		keep = 0
+	}
+	return Pattern{Name: name, Re: regexp.MustCompile(regexp.QuoteMeta(secret)), Keep: keep}
+}
+
 // WithGeneric enables the opt-in generic pattern: KEY=value assignments
 // whose value has Shannon entropy above 3.5 bits per character.
 func WithGeneric() Option {

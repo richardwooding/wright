@@ -438,3 +438,79 @@ func TestWriterWithoutPrivateKeyPattern(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestLiteralSecret covers the pattern for a token wright was handed rather
+// than one it recognised by shape. The middle two rows are the point: they
+// are secrets the default patterns do not match, which is why a literal is
+// not redundant with them.
+func TestLiteralSecret(t *testing.T) {
+	tests := []struct {
+		name      string
+		secret    string
+		input     string
+		byDefault bool // whether the shape-based defaults already catch it
+	}{
+		{
+			name:      "a modern gh token is caught twice over",
+			secret:    "gho_" + strings.Repeat("a", 36),
+			input:     "token is gho_" + strings.Repeat("a", 36) + " ok",
+			byDefault: true,
+		},
+		{
+			// No default pattern matches a bare 40-character hex PAT: the
+			// github pattern needs a gh?_ prefix and github-pat needs
+			// github_pat_.
+			name:   "a legacy hex PAT is caught only by the literal",
+			secret: "0123456789abcdef0123456789abcdef01234567",
+			input:  "GH_TOKEN=0123456789abcdef0123456789abcdef01234567",
+		},
+		{
+			// \b in the default pattern means a token abutting a word
+			// character does not match it; the literal has no boundary.
+			name:   "a token abutting a word character",
+			secret: "gho_" + strings.Repeat("b", 36),
+			input:  "X" + "gho_" + strings.Repeat("b", 36),
+		},
+		{
+			name:   "metacharacters cannot corrupt the pattern",
+			secret: `a.b*c+d(e)[f]|g`,
+			input:  `value=a.b*c+d(e)[f]|g end`,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := redact.New(redact.WithExtra(redact.Literal("github-token", tt.secret, 4)))
+			got, hits := r.Redact(tt.input)
+			if strings.Contains(got, tt.secret) {
+				t.Fatalf("the secret survived: %q", got)
+			}
+			if len(hits) == 0 {
+				t.Fatalf("no pattern fired on %q", tt.input)
+			}
+			if !strings.Contains(got, "[redacted:") {
+				t.Errorf("no marker in %q", got)
+			}
+			// Idempotence: the marker keeps only the last four characters,
+			// so no pattern can match inside it.
+			if again, _ := r.Redact(got); again != got {
+				t.Errorf("not idempotent:\n first %q\nsecond %q", got, again)
+			}
+
+			// The claim that the literal is doing the work, checked rather
+			// than assumed.
+			plain, _ := redact.New().Redact(tt.input)
+			if caught := !strings.Contains(plain, tt.secret); caught != tt.byDefault {
+				t.Errorf("defaults caught it = %v, want %v (%q)", caught, tt.byDefault, plain)
+			}
+		})
+	}
+}
+
+// A secret shorter than the marker's tail would otherwise be shown in full.
+func TestLiteralKeepsNothingOfAShortSecret(t *testing.T) {
+	r := redact.New(redact.WithExtra(redact.Literal("tiny", "abc", 4)))
+	got, _ := r.Redact("x=abc")
+	if strings.Contains(got, "abc") {
+		t.Fatalf("the whole secret is in the marker: %q", got)
+	}
+}
