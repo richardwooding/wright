@@ -23,7 +23,12 @@ import (
 var envAllow = []string{
 	"PATH", "HOME", "LANG", "LC_*", "TERM", "XDG_*",
 	"GOPATH", "GOMODCACHE", "GOCACHE", "GOOS", "GOARCH", "GOTOOLCHAIN", "GOROOT",
-	"CARGO_HOME", "npm_config_cache",
+	"CARGO_HOME", "RUSTUP_HOME", "npm_config_cache",
+	// The prefixes ToolPrefixes mounts: if the tool inside the sandbox
+	// recomputed a different one the grant would mount the wrong directory
+	// and the install would fail against a read-only mount.
+	"HOMEBREW_PREFIX", "HOMEBREW_CELLAR", "HOMEBREW_REPOSITORY",
+	"NPM_CONFIG_PREFIX", "GEM_HOME", "GOBIN",
 	"PYTHONPATH", "VIRTUAL_ENV", "JAVA_HOME", "CI", "NO_COLOR",
 	"USER", "LOGNAME", "SHELL", "TMPDIR", "TZ", "COLORTERM",
 }
