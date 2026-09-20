@@ -21,6 +21,7 @@ import (
 	"github.com/richardwooding/wright/internal/app"
 	"github.com/richardwooding/wright/internal/config"
 	"github.com/richardwooding/wright/internal/headless"
+	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/sandbox"
 )
 
@@ -576,4 +577,64 @@ func TestEveryOfferedCommandIsAnswered(t *testing.T) {
 	if _, err := b.Command(context.Background(), "nope", nil); err == nil {
 		t.Error("an unknown command must be an error so the UI can say so")
 	}
+}
+
+// TestResumeKeepsTheMode pins that resuming continues where the session was
+// left. A session switched to plan and picked up later came back in default
+// mode — silently, which is the wrong direction for a permission mode to move
+// on its own. An explicit --mode still wins, because naming one means it.
+func TestResumeKeepsTheMode(t *testing.T) {
+	ws := isolate(t)
+	setScript(t, []step{{text: "hi"}})
+	ctx := context.Background()
+
+	// A session that was left in plan mode.
+	first, err := app.Build(ctx, baseOpts(ws))
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := first.SessionID
+	if err := first.Engine.SetMode(policy.ModePlan); err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("resumed without a flag", func(t *testing.T) {
+		o := baseOpts(ws)
+		o.Resume = id
+		b, err := app.Build(ctx, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = b.Close() }()
+		if got := b.Engine.Mode(); got != policy.ModePlan {
+			t.Errorf("resumed in %v, want the mode the session was left in (%v)", got, policy.ModePlan)
+		}
+	})
+
+	t.Run("an explicit mode wins", func(t *testing.T) {
+		o := baseOpts(ws)
+		o.Resume, o.Mode = id, "default"
+		b, err := app.Build(ctx, o)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = b.Close() }()
+		if got := b.Engine.Mode(); got != policy.ModeDefault {
+			t.Errorf("resumed in %v, want the mode asked for on the command line", got)
+		}
+	})
+
+	t.Run("a fresh session is unaffected", func(t *testing.T) {
+		b, err := app.Build(ctx, baseOpts(ws))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = b.Close() }()
+		if got := b.Engine.Mode(); got != policy.ModeDefault {
+			t.Errorf("a new session started in %v", got)
+		}
+	})
 }

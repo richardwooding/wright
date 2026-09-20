@@ -337,3 +337,47 @@ func messageKey(m core.Message) string {
 	}
 	return key
 }
+
+// TestModeChangeIsRecordedImmediately pins that switching mode reaches disk
+// when it happens. The sidecar was rewritten only when a run ended, so a mode
+// changed before the first run — shift+tab before typing, the usual moment —
+// was lost if that run never finished, and the session came back in the mode
+// it was started in rather than the one it was left in.
+func TestModeChangeIsRecordedImmediately(t *testing.T) {
+	dir := t.TempDir()
+	ws, err := workspace.Open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := session.Open(filepath.Join(dir, ".data"), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const id = "20260920-120000-abcd"
+	eng, err := engine.New(context.Background(), engine.Options{
+		Model:     model.Choice{Model: "fake-model", Provider: "fake"},
+		Client:    &enginetest.Scripted{},
+		WS:        ws,
+		Cwd:       dir,
+		Mode:      policy.ModeDefault,
+		Store:     store,
+		SessionID: id,
+		Sandbox:   "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = eng.Close() }()
+
+	if err := eng.SetMode(policy.ModePlan); err != nil {
+		t.Fatal(err)
+	}
+	// No run has happened, and none needs to.
+	m, ok, err := store.Get(context.Background(), id)
+	if err != nil || !ok {
+		t.Fatalf("Get = %v %v", ok, err)
+	}
+	if m.Mode != policy.ModePlan.String() {
+		t.Errorf("recorded mode = %q, want %q", m.Mode, policy.ModePlan)
+	}
+}

@@ -492,6 +492,15 @@ client to HTTP MCP transports).
   Plan mode also consults no allow rules, so `Suggest` returns nothing there:
   an offer that cannot take effect is worse than none — the overlay would
   invite "always allow" and then keep asking.
+- **Session metadata is written when it changes, not when a run ends.**
+  `SetMode`/`SetModel` call `touchQuietly` directly, because a mode changed
+  with shift+tab before the first prompt — the usual moment — was otherwise
+  lost when that run did not finish. Resuming restores the recorded mode:
+  `builder.restoreMode` (build_model.go) runs in `modelAndSession`, since the
+  session id is not known when `resolveMode` runs, and it goes through
+  `policy.Engine.SetMode` so bypass is refused. An explicit `--mode` or
+  `WRIGHT_MODE` wins over it; settings do not, because resuming means
+  continuing.
 - **A session exists from the moment it starts, not when a run ends.**
   `engine.New` writes the sidecar, because it used to be written only by
   `touch` at the end of a run: for the whole of the first run `/sessions`

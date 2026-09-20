@@ -7,6 +7,7 @@ import (
 
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/model"
+	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/redact"
 	"github.com/richardwooding/wright/internal/session"
 	"github.com/richardwooding/wright/internal/snapshot"
@@ -32,6 +33,7 @@ func (b *builder) modelAndSession() error {
 	if b.sessionID, err = b.pickSession(); err != nil {
 		return err
 	}
+	b.restoreMode()
 	if b.settings.RedactionEnabled() {
 		b.redactor = redact.New()
 	} else {
@@ -47,6 +49,36 @@ func (b *builder) modelAndSession() error {
 	return nil
 }
 
+// restoreMode puts a resumed session back in the permission mode it was left
+// in. Resuming is meant to be continuing, and a session switched to plan and
+// picked up the next day came back in default mode — silently, which is the
+// wrong direction for a mode to move on its own.
+//
+// It runs here rather than in resolveMode because the session is not known
+// until this phase; the policy engine already exists, so the mode is changed
+// through it. An explicit --mode or WRIGHT_MODE still wins: someone naming a
+// mode on the command line means it. A mode recorded as bypass is ignored —
+// bypass is reachable only through its own flag, and policy.SetMode refuses
+// it anyway.
+func (b *builder) restoreMode() {
+	if b.resumed == "" || b.o.Mode != "" || b.env("WRIGHT_MODE") != "" {
+		return
+	}
+	m, found, err := b.store.Get(b.ctx, b.resumed)
+	if err != nil || !found || m.Mode == "" {
+		return
+	}
+	mode, err := policy.ParseMode(m.Mode)
+	if err != nil || mode == b.mode {
+		return
+	}
+	if err := b.pol.SetMode(mode); err != nil {
+		return // bypass, or anything else the engine will not take
+	}
+	b.mode = mode
+	b.warn("this session was left in %s mode and resumes in it; pass --mode to start it in another", mode)
+}
+
 // pickSession honours --resume, then --continue (falling back to a new
 // session when there is nothing to continue), else starts fresh.
 func (b *builder) pickSession() (string, error) {
@@ -59,6 +91,7 @@ func (b *builder) pickSession() (string, error) {
 		if !found {
 			return "", fmt.Errorf("app: session %q not found (see `wright sessions list`)", b.o.Resume)
 		}
+		b.resumed = b.o.Resume
 		return b.o.Resume, nil
 	case b.o.Continue:
 		m, found, err := b.store.Latest(b.ctx)
@@ -66,6 +99,7 @@ func (b *builder) pickSession() (string, error) {
 			return "", err
 		}
 		if found {
+			b.resumed = m.ID
 			return m.ID, nil
 		}
 		b.warn("no previous session in this workspace; starting a new one")

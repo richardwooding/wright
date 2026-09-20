@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Resuming a session lost its permission mode.** A session switched to plan
+  and picked up later came back in default mode — silently, which is the wrong
+  direction for a permission mode to move on its own. A resumed session now
+  starts in the mode it was left in and says so; an explicit `--mode` or
+  `WRIGHT_MODE` still wins.
+- **A mode or model change was only recorded when a run finished.** Switching
+  with `shift+tab` before typing anything — the usual moment — was lost if that
+  run never completed, so even the record of the mode was wrong. Both are
+  written as soon as they change.
+
 ## [0.3.1] - 2026-09-20
 
 A session that stopped dead with no error, reported from a real run. Two tool

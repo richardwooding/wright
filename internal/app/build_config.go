@@ -54,6 +54,7 @@ type builder struct {
 	skills    *akskills.Set
 	mcp       *mcpclient.Set
 	jobs      *tools.JobSet
+	resumed   string // session id when this run continues one, else ""
 
 	choice    model.Choice
 	store     *session.Store

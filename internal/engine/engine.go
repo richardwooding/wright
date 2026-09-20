@@ -203,6 +203,11 @@ func (e *Engine) SetMode(m policy.Mode) error {
 	e.mode = m
 	e.meta.Mode = m.String()
 	e.mu.Unlock()
+	// Record it now. The sidecar was only rewritten when a run ended, so a
+	// mode changed before the first run — the usual moment, with shift+tab
+	// before typing — was lost if that run never finished, and the session
+	// came back in the wrong mode.
+	e.touchQuietly()
 	e.audit(audit.Event{Kind: audit.KindNotice, Text: "mode " + m.String()})
 	e.emit(Event{Kind: KindNotice, Text: "permission mode: " + m.String()})
 	return nil
@@ -224,6 +229,7 @@ func (e *Engine) SetModel(_ context.Context, name string) error {
 	e.ctxWin, _ = model.ContextWindow(choice, e.opts.ContextWindow)
 	e.meta.Model = name
 	e.mu.Unlock()
+	e.touchQuietly()
 	e.audit(audit.Event{Kind: audit.KindNotice, Text: "model " + name})
 	e.emit(Event{Kind: KindNotice, Text: "model: " + name})
 	return nil
@@ -339,6 +345,15 @@ func (e *Engine) audit(ev audit.Event) {
 	e.mu.Unlock()
 	if err := e.opts.Audit.Write(ev); err != nil {
 		e.emit(Event{Kind: KindNotice, Text: "audit log: " + err.Error()})
+	}
+}
+
+// touchQuietly records the session metadata for a change the user made
+// directly. Failing to write it is worth saying but must not fail the change
+// itself: the mode is already set in the engine either way.
+func (e *Engine) touchQuietly() {
+	if err := e.touch(context.Background()); err != nil {
+		e.emit(Event{Kind: KindNotice, Text: "session metadata: " + err.Error()})
 	}
 }
 
