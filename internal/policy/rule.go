@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/bmatcuk/doublestar/v4"
 )
@@ -166,7 +167,13 @@ func (r *Rule) parseSpec() error {
 }
 
 func (r *Rule) parseBash() error {
-	if re, ok := strings.CutPrefix(strings.TrimLeft(r.Pattern, " \t"), "re:"); ok {
+	// The leading trim must use the same notion of whitespace as the argv
+	// branch's TrimSpace below, or a pattern can be read one way and printed
+	// another: "\rre:(" trimmed only of spaces and tabs is not a regex, so it
+	// became the argv word "re:(" — and String() then rendered "bash(re:()",
+	// which re-parses as a regex and fails. A rule that does not mean what it
+	// prints is one an audit log and a permissions list cannot describe.
+	if re, ok := strings.CutPrefix(strings.TrimLeftFunc(r.Pattern, unicode.IsSpace), "re:"); ok {
 		compiled, err := regexp.Compile(re)
 		if err != nil {
 			return fmt.Errorf("policy: bad bash regex: %w", err)

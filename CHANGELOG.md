@@ -124,6 +124,12 @@ All notable changes to this project are documented here. The format follows
   allowed them. Edits inside the workspace now run without asking, and the
   sensitive-file, ignored-file, outside-the-workspace, `.git`, `.wright` and
   secret floors all still fire, as does any ask rule you wrote yourself.
+- A rule could mean one thing and print another. `bash(\rre:()` was read as
+  an argv rule (the regex-prefix check trimmed only spaces and tabs, while
+  the argv branch trimmed all whitespace) and then rendered as
+  `bash(re:()` — a rule a permissions list or an audit log could not
+  describe. Both branches now trim the same whitespace. Found by the rule
+  fuzzer; it predates v0.1.3.
 - `/agents` was answered by the app but never offered by the TUI, so typing
   it said "unknown command" and completion never suggested it.
 - An overlay on a very short terminal no longer pushes the composer and status

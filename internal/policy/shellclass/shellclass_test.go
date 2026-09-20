@@ -674,15 +674,22 @@ func commandStart(script string, start int) bool {
 	if k == 0 {
 		return true
 	}
-	if strings.IndexByte("\n;&|({", script[k-1]) < 0 {
+	sep := script[k-1]
+	if strings.IndexByte("\n;&|({", sep) < 0 {
 		return false
 	}
-	// "{" opens a block only when a blank follows it: `{rm` is a single word,
-	// so `az {rm -rf ~` passes "{rm" to az and removes nothing.
-	if script[k-1] == '{' && k == start {
-		return false
+	// "{" and "(" are reserved words, not separators: they open a block only
+	// where a command could itself have begun. In `az { rm -rf ~` the "{" is
+	// an argument, so bash passes "{", "rm", "-rf" and "~" to az and removes
+	// nothing — which is what Analyze reports, and what this helper used to
+	// call an escape. "{" also needs a blank after it, so `{rm` is one word.
+	if sep == '{' || sep == '(' {
+		if sep == '{' && k == start {
+			return false
+		}
+		return commandStart(script, k-1)
 	}
-	redirect := k >= 2 && (script[k-1] == '&' || script[k-1] == '|') && (script[k-2] == '>' || script[k-2] == '<')
+	redirect := k >= 2 && (sep == '&' || sep == '|') && (script[k-2] == '>' || script[k-2] == '<')
 	return !redirect
 }
 
@@ -696,5 +703,40 @@ func TestHardDenySurvivesWrapping(t *testing.T) {
 		if a.Class < shellclass.Destructive {
 			t.Errorf("%q: class %v", script, a.Class)
 		}
+	}
+}
+
+// TestBraceIsOnlyAKeywordInCommandPosition pins the distinction the fuzz
+// helper depends on. `{` opens a block only where a command could itself
+// begin; after a command word it is an ordinary argument, so bash passes it
+// (and everything after it) to that command and removes nothing. Treating
+// every `{` as a separator would report an escape that the shell does not
+// actually perform — and the real risk here, an opaque command given odd
+// arguments, is covered by the class, not by the hard deny.
+func TestBraceIsOnlyAKeywordInCommandPosition(t *testing.T) {
+	tests := []struct {
+		name     string
+		script   string
+		hardDeny bool
+	}{
+		{name: "a real block still hard-denies", script: "{ rm -rf ~; }", hardDeny: true},
+		{name: "a block after a separator still hard-denies", script: "git status; { rm -rf ~; }", hardDeny: true},
+		{name: "a subshell still hard-denies", script: "(rm -rf ~)", hardDeny: true},
+		// bash runs `az` with the arguments "{", "rm", "-rf", "~".
+		{name: "a brace argument is not a block", script: "az { rm -rf ~"},
+		{name: "a brace glued to the word is not a block", script: "az {rm -rf ~"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			a := shellclass.Analyze(tt.script, fakeWS{})
+			if (a.HardDeny != "") != tt.hardDeny {
+				t.Errorf("HardDeny = %q, want hardDeny=%v (%s)", a.HardDeny, tt.hardDeny, a.Summary())
+			}
+			// Either way it must never be a safe read: an unknown command
+			// handed arguments nobody modelled is not something to auto-allow.
+			if !tt.hardDeny && a.Class <= shellclass.SafeRead && !a.Unknown {
+				t.Errorf("class = %v, want more than a safe read (%s)", a.Class, a.Summary())
+			}
+		})
 	}
 }

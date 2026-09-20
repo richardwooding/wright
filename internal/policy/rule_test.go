@@ -34,6 +34,14 @@ func TestParseRule(t *testing.T) {
 		{text: "web_fetch +install", wantErr: true},
 		{text: "bash(re:^go (test|build) )", tool: "bash", str: "bash(re:^go (test|build) )"},
 		{text: "bash(re:()", wantErr: true},
+		// A regex prefix behind any leading whitespace is still a regex. The
+		// argv branch trims with TrimSpace, so a branch that trimmed less
+		// read "\rre:(" as the argv word "re:(" and then printed it as
+		// "bash(re:()" — a rule that does not mean what it prints.
+		{text: "bash(\rre:()", wantErr: true},
+		{text: "bash(\nre:()", wantErr: true},
+		{text: "bash(\rre:^go test )", tool: "bash", str: "bash(re:^go test )"},
+		{text: "bash(  re:^go test )", tool: "bash", str: "bash(re:^go test )"},
 		{text: "bash(*)", wantErr: true},
 		{text: "bash(git * status)", wantErr: true},
 		{text: "read_file($WORKSPACE/**)", tool: "read_file", str: "read_file($WORKSPACE/**)"},
