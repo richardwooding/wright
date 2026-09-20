@@ -932,3 +932,54 @@ func TestOfferedRuleNamesTheProgramNotTheWrapper(t *testing.T) {
 		}
 	})
 }
+
+// TestABroadGhRuleCannotReachTheFloor is the hole this closes, taken from a
+// real settings file. The first gh command a session ran happened to be
+// `gh --version`, whose second word is flag-shaped, so the offer was the
+// broadest rule the grammar allows — and the only Destructive guard in the
+// policy layer is in *offering* a rule, never in matching one. So that saved
+// rule auto-allowed every gh command, deletions included.
+func TestABroadGhRuleCannotReachTheFloor(t *testing.T) {
+	f := newFixture(t)
+	allow := rules(t, policy.Allow, policy.SourceProjectLocal, "bash(gh *) +net")
+
+	t.Run("the rule still does its job", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin(), allow)
+		for _, cmd := range []string{"gh pr list", "gh issue view 3", "gh pr create --title x"} {
+			if v := e.Evaluate(f.bash(cmd)); v.Decision != policy.Allow {
+				t.Errorf("%s: decision = %v, want Allow (%s)", cmd, v.Decision, v.Reason)
+			}
+		}
+	})
+
+	t.Run("but never past the floor", func(t *testing.T) {
+		for _, mode := range []policy.Mode{policy.ModeDefault, policy.ModeAutoEdit, policy.ModeBypass} {
+			e := policy.New(f.ws, mode, policy.Builtin(), allow)
+			for _, cmd := range []string{
+				"gh repo delete o/r --yes",
+				"gh api -X DELETE repos/o/r",
+				"gh auth token",
+				"gh secret set NAME",
+			} {
+				v := e.Evaluate(f.bash(cmd))
+				if v.Decision != policy.Deny {
+					t.Errorf("%s in %s: decision = %v, want Deny (%s)", cmd, mode, v.Decision, v.Reason)
+				}
+			}
+		}
+	})
+
+	// A deletion that is not on the floor still asks rather than being
+	// silently covered — no rule is ever offered for it, and the prompt
+	// focuses deny.
+	t.Run("other deletions are destructive, and say they need the network", func(t *testing.T) {
+		e := policy.New(f.ws, policy.ModeDefault, policy.Builtin())
+		v := e.Evaluate(f.bash("gh release delete v1"))
+		if v.Decision != policy.Ask {
+			t.Errorf("decision = %v, want Ask (%s)", v.Decision, v.Reason)
+		}
+		if len(v.Offers) != 0 {
+			t.Errorf("offers = %v, want none for a destructive command", v.Offers)
+		}
+	})
+}

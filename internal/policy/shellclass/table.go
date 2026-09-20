@@ -114,6 +114,24 @@ func destructive(reason string) result {
 	return result{class: Destructive, reason: reason}
 }
 
+// destructiveNet is destructive over the network. The network flag is not
+// decoration: NeedsNetwork decides what an approval grants and what the
+// audit log records, and a command that deletes something on a *service*
+// plainly needs it. Leaving it off is how `gh repo delete` came to be
+// recorded as needing no network.
+func destructiveNet(reason string) result {
+	r := destructive(reason)
+	r.network = true
+	return r
+}
+
+// hardDenyNet refuses a networked command in every mode. Unlike
+// privilegeDenyNet it keeps the Destructive class, so the reason a reader
+// sees is what the command destroys rather than a claim about privilege.
+func hardDenyNet(reason string) result {
+	return result{class: Destructive, reason: reason, hardDeny: reason, network: true}
+}
+
 // installer is a command that downloads software and writes it outside the
 // workspace (brew install, go install, npm install -g…). Approving one is
 // what makes the tool prefixes writable for that single call, so the verb

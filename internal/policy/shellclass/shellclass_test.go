@@ -868,3 +868,82 @@ func TestProgramIsThePeeledCommand(t *testing.T) {
 		})
 	}
 }
+
+// TestGhIsClassifiedByVerb pins the GitHub CLI. It replaced substring tests
+// over the joined positionals, which were wrong in both directions: a write
+// whose flag happened to contain "delete" read as a deletion, and a deletion
+// was recorded as needing no network.
+func TestGhIsClassifiedByVerb(t *testing.T) {
+	tests := []struct {
+		name     string
+		cmd      string
+		class    shellclass.Class
+		hardDeny bool
+		// every gh command talks to a service, so this is true for all of
+		// them; it is asserted per row because getting it wrong on the
+		// destructive path is the bug being fixed.
+		network bool
+	}{
+		// Reads.
+		{name: "list pull requests", cmd: "gh pr list", class: shellclass.Network, network: true},
+		{name: "view an issue", cmd: "gh issue view 12", class: shellclass.Network, network: true},
+		{name: "watch a run", cmd: "gh run watch", class: shellclass.Network, network: true},
+		{name: "auth status is a read", cmd: "gh auth status", class: shellclass.Network, network: true},
+		{name: "a global flag before the noun", cmd: "gh --repo o/r pr list", class: shellclass.Network, network: true},
+
+		// Writes.
+		{name: "open a pull request", cmd: "gh pr create --title x", class: shellclass.Network, network: true},
+		{name: "merge", cmd: "gh pr merge 3", class: shellclass.Network, network: true},
+		// The case the substring matcher escaped by luck: an *option*
+		// containing "delete" on a command that creates something.
+		{name: "create with --delete-branch is not a deletion", cmd: "gh pr create --delete-branch", class: shellclass.Network, network: true},
+
+		// Deletions of things that are not in the workspace.
+		{name: "delete a release", cmd: "gh release delete v1", class: shellclass.Destructive, network: true},
+		{name: "delete a gist", cmd: "gh gist delete abc", class: shellclass.Destructive, network: true},
+		{name: "cancel a run", cmd: "gh run cancel 9", class: shellclass.Destructive, network: true},
+
+		// The floor.
+		{name: "delete a repository", cmd: "gh repo delete o/r --yes", class: shellclass.Destructive, hardDeny: true, network: true},
+		{name: "print a token", cmd: "gh auth token", class: shellclass.Privilege, hardDeny: true, network: true},
+		{name: "log in", cmd: "gh auth login", class: shellclass.Privilege, hardDeny: true, network: true},
+		{name: "write a secret", cmd: "gh secret set NAME", class: shellclass.Privilege, hardDeny: true, network: true},
+		{name: "add an ssh key", cmd: "gh ssh-key add k.pub", class: shellclass.Privilege, hardDeny: true, network: true},
+		{name: "an alias is a shell command", cmd: "gh alias set x '!rm -rf .'", class: shellclass.Privilege, hardDeny: true, network: true},
+		{name: "an extension is third-party code", cmd: "gh extension install evil/x", class: shellclass.Privilege, hardDeny: true, network: true},
+		{name: "a remote shell", cmd: "gh codespace ssh", class: shellclass.Privilege, hardDeny: true, network: true},
+
+		// gh api: the method decides.
+		{name: "api reads by default", cmd: "gh api repos/o/r", class: shellclass.Network, network: true},
+		{name: "api POST writes", cmd: "gh api -X POST repos/o/r/issues", class: shellclass.Network, network: true},
+		{name: "api DELETE is on the floor", cmd: "gh api -X DELETE repos/o/r", class: shellclass.Destructive, hardDeny: true, network: true},
+		{name: "api --method DELETE too", cmd: "gh api --method DELETE repos/o/r", class: shellclass.Destructive, hardDeny: true, network: true},
+
+		// Drift costs a prompt, never a silent allow.
+		{name: "an unknown noun", cmd: "gh frobnicate --all", class: shellclass.Network, network: true},
+		{name: "no subcommand at all", cmd: "gh --version", class: shellclass.Network, network: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := shellclass.Analyze(tt.cmd, fakeWS{})
+			if got.Class != tt.class {
+				t.Errorf("Class = %v, want %v (%s)", got.Class, tt.class, got.Summary())
+			}
+			if (got.HardDeny != "") != tt.hardDeny {
+				t.Errorf("HardDeny = %q, want hardDeny=%v", got.HardDeny, tt.hardDeny)
+			}
+			if got.NeedsNetwork != tt.network {
+				t.Errorf("NeedsNetwork = %v, want %v — an approval and the audit record both read this", got.NeedsNetwork, tt.network)
+			}
+		})
+	}
+}
+
+// A dynamic method is the one place gh api cannot be read: the value decides
+// between a read and a deletion, so not knowing it makes the script opaque.
+func TestGhAPIWithADynamicMethodIsOpaque(t *testing.T) {
+	got := shellclass.Analyze("gh api -X $METHOD repos/o/r", fakeWS{})
+	if !got.Unknown {
+		t.Errorf("Unknown = false for a dynamic gh api method (%s)", got.Summary())
+	}
+}

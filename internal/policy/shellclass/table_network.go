@@ -86,22 +86,6 @@ func handleSSH(a *analyzer, name string, args []word) result {
 	return r
 }
 
-// handleGh: gh/glab always reach the network; `auth token` prints a
-// credential and is hard-denied, deletions are destructive.
-func handleGh(a *analyzer, name string, args []word) result {
-	nf := texts(nonFlags(args))
-	joined := " " + strings.Join(nf, " ") + " "
-	switch {
-	case strings.Contains(joined, " auth token "), strings.Contains(joined, " auth login "), strings.Contains(joined, " auth refresh "), strings.Contains(joined, " auth setup-git "):
-		return privilegeDenyNet(name + " auth touches stored credentials")
-	case strings.Contains(joined, " delete "), strings.Contains(joined, " repo delete "):
-		return destructive(name + " delete")
-	case strings.Contains(joined, " secret set "), strings.Contains(joined, " secret list "):
-		return privilegeDenyNet(name + " secret access")
-	}
-	return network(name + " " + first(args))
-}
-
 func handleSSHAgentLike(a *analyzer, name string, args []word) result {
 	return privilegeDeny(name + " manages key agents")
 }
