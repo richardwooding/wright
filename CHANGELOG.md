@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-20
+
+A session you are sitting in is now a session you can read. v0.2.1 made it
+exist from the moment it starts; this makes its transcript arrive as the run
+produces it, rather than when the run is over.
+
 ### Changed
 
 - **A session's transcript is now written as the run happens**, one completed
