@@ -25,6 +25,9 @@ type Engine struct {
 	hardDenials int
 	parent      *Engine
 	depth       int
+	// trusted is the workspace-trust baseline: the user accepted this
+	// directory at startup, so ordinary edits inside it stop prompting.
+	trusted bool
 }
 
 // New builds an engine over the workspace with the given mode and rule
@@ -67,6 +70,24 @@ func (e *Engine) SetMode(m Mode) error {
 	return nil
 }
 
+// TrustWorkspace records that the user accepted this workspace at startup.
+// It is one-way and has exactly one effect: a write tool call that reaches
+// the mode table in default mode, writing a file inside the workspace, is
+// allowed instead of asked (modeWrite). It is deliberately *not* an allow
+// rule — see run and modeWrite for why, and what still fires.
+func (e *Engine) TrustWorkspace() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.trusted = true
+}
+
+// WorkspaceTrusted reports whether the workspace-trust baseline applies.
+func (e *Engine) WorkspaceTrusted() bool {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.trusted
+}
+
 // HardDenials returns how many hard-deny verdicts this engine (and its
 // children) has issued; the run is cancelled after three.
 func (e *Engine) HardDenials() int {
@@ -95,6 +116,10 @@ func (e *Engine) Child(depth int) *Engine {
 		grants: slices.Clone(e.grants),
 		parent: e,
 		depth:  depth,
+		// The baseline is inherited: the user trusted the directory, and a
+		// sub-agent writes into the same one under the same rules. It
+		// widens nothing a parent call could not already do.
+		trusted: e.trusted,
 	}
 }
 
@@ -143,23 +168,24 @@ func (e *Engine) noteHardDenial() {
 }
 
 // snapshot copies the mutable state so evaluation runs without the lock.
-func (e *Engine) snapshot() (Mode, []Rule) {
+func (e *Engine) snapshot() (Mode, []Rule, bool) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	all := make([]Rule, 0, len(e.rules)+len(e.grants))
 	all = append(all, e.rules...)
 	all = append(all, e.grants...)
-	return e.mode, all
+	return e.mode, all, e.trusted
 }
 
 // eval carries one evaluation.
 type eval struct {
-	e     *Engine
-	mode  Mode
-	rules []Rule
-	req   Request
-	kind  reqKind
-	v     Verdict
+	e       *Engine
+	mode    Mode
+	rules   []Rule
+	trusted bool
+	req     Request
+	kind    reqKind
+	v       Verdict
 }
 
 // reqKind buckets tools for the mode table.
@@ -204,8 +230,8 @@ func kindOf(tool string) reqKind {
 
 // Evaluate runs the lattice for req.
 func (e *Engine) Evaluate(req Request) Verdict {
-	mode, rules := e.snapshot()
-	ev := &eval{e: e, mode: mode, rules: rules, req: req, kind: kindOf(req.Tool)}
+	mode, rules, trusted := e.snapshot()
+	ev := &eval{e: e, mode: mode, rules: rules, trusted: trusted, req: req, kind: kindOf(req.Tool)}
 	ev.v.Class = ev.class()
 	ev.run()
 	if ev.v.HardDeny {
@@ -283,11 +309,48 @@ func (ev *eval) run() {
 	if ev.mode != ModePlan && ev.allowed() {
 		return
 	}
+	// The builtin ask rules superseded by workspace trust are skipped inside
+	// matchDecision, so a trusted write reaches the mode table, which is
+	// where the baseline is applied. See supersededByTrust and modeWrite.
 	if ev.matchDecision(Ask, true) && ev.mode != ModeBypass {
 		ev.finishAsk()
 		return
 	}
 	ev.modeTable()
+}
+
+// workspaceAll is the path glob meaning "every path inside the workspace".
+const workspaceAll = "$WORKSPACE/**"
+
+// supersededByTrust reports whether a rule is one the workspace-trust
+// baseline replaces: the builtin write-tool ask over the whole workspace
+// ("write_file($WORKSPACE/**)", "edit_file($WORKSPACE/**)"), which is the
+// mode table's default for edits written as a rule. Those rules sit one step
+// above the mode table, so leaving them in place would make the baseline
+// unreachable — and an allow rule, which *is* consulted before them, is not
+// an option (see modeWriteDefault).
+//
+// It is deliberately narrow in both directions. A builtin ask rule for a
+// subset of the workspace — one added later for, say, edit_file(**/*.sql) —
+// is not the default and still decides. And skipping the default loses
+// nothing: modeWrite re-derives the same ask for every path the baseline
+// does not cover.
+func (ev *eval) supersededByTrust(r *Rule) bool {
+	return r.Decision == Ask && r.Source == SourceBuiltin &&
+		writeTools[r.Tool] && r.Pattern == workspaceAll && ev.trustBaseline()
+}
+
+// trustBaseline reports whether the workspace-trust baseline is in play for
+// this request. It is narrow on purpose: an accepted workspace, a write tool
+// with at least one declared write, and the default mode. Plan mode keeps
+// its refusal, auto-edit its own branch, and bypass is already decided.
+//
+// It gates two steps that both have to agree, because neither is sufficient
+// alone: the builtin ask rules are skipped above so the request reaches the
+// mode table at all, and modeWrite's default branch grants it *after* the
+// outside-the-workspace, sensitive-file and ignored-file checks have run.
+func (ev *eval) trustBaseline() bool {
+	return ev.trusted && ev.kind == kindWrite && ev.mode == ModeDefault && len(ev.req.Writes) > 0
 }
 
 // hardDeny applies the set that no mode overrides.
@@ -356,6 +419,9 @@ func (ev *eval) matchDecision(d Decision, builtin bool) bool {
 			continue
 		}
 		if d == Ask && (r.Source == SourceBuiltin) != builtin {
+			continue
+		}
+		if ev.supersededByTrust(r) {
 			continue
 		}
 		if what, ok := ev.ruleHits(r); ok {
@@ -602,20 +668,55 @@ func (ev *eval) modeWrite() {
 			ev.decide(Ask, ask, nil)
 			return
 		}
-		for _, p := range ev.req.Writes {
-			if ev.e.ws.Ignored(p) {
-				ev.decide(Ask, "auto-edit does not cover ignored file "+ev.e.ws.Rel(p), nil)
-				return
-			}
+		if rel := ev.firstIgnoredWrite(); rel != "" {
+			ev.decide(Ask, "auto-edit does not cover ignored file "+rel, nil)
+			return
 		}
 		ev.decide(Allow, "auto-edit mode: edits inside the workspace", nil)
 	default:
-		if ask != "" {
-			ev.decide(Ask, ask, nil)
-			return
-		}
-		ev.decide(Ask, "edits need approval in default mode", nil)
+		ev.modeWriteDefault(ask)
 	}
+}
+
+// modeWriteDefault is the default mode's write rule: edits ask, unless the
+// user accepted this workspace at startup, in which case an ordinary edit
+// inside it runs without a prompt.
+//
+// The baseline is applied here, in the mode table, and must never be
+// "simplified" into an allow rule: allow rules are consulted *before* this
+// point, so one would return with the sensitive-file and ignored-file asks
+// never evaluated — they are derived here, because containment() drops the
+// ask half for the write tools. Everything above still decides first: the
+// hard-deny set, .wrightignore, deny rules from any layer, explicit
+// user/project/flag ask rules, the containment deny, and the outside /
+// sensitive check whose answer arrives as ask.
+func (ev *eval) modeWriteDefault(ask string) {
+	if ask != "" {
+		ev.decide(Ask, ask, nil)
+		return
+	}
+	if !ev.trustBaseline() {
+		ev.decide(Ask, "edits need approval in default mode", nil)
+		return
+	}
+	if rel := ev.firstIgnoredWrite(); rel != "" {
+		ev.decide(Ask, "workspace trust does not cover ignored file "+rel, nil)
+		return
+	}
+	ev.decide(Allow, fmt.Sprintf("edits inside the workspace you accepted [%s]", SourceTrust), nil)
+}
+
+// firstIgnoredWrite names the first write to an ignored file, relative to
+// the workspace, or "" when there is none. A file git ignores is outside
+// what the user reviews in a diff, so neither auto-edit nor workspace trust
+// covers it.
+func (ev *eval) firstIgnoredWrite() string {
+	for _, p := range ev.req.Writes {
+		if ev.e.ws.Ignored(p) {
+			return ev.e.ws.Rel(p)
+		}
+	}
+	return ""
 }
 
 // modeBash applies the shell class table, after checking that declared

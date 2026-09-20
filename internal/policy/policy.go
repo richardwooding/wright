@@ -106,6 +106,11 @@ const (
 	SourceProjectLocal Source = "project.local"
 	SourceFlag         Source = "flag"
 	SourceSession      Source = "session"
+	// SourceTrust is not a rule source: no rule ever carries it. It names
+	// the workspace-trust baseline in a verdict's Reason so the approval
+	// prompt and the audit log can say which decision stopped the prompt —
+	// see Engine.TrustWorkspace.
+	SourceTrust Source = "workspace-trust"
 )
 
 // Scope says how long a granted rule lives.

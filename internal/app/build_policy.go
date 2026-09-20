@@ -18,7 +18,17 @@ var (
 	ErrBypassAsRoot      = errors.New("app: --bypass-permissions is refused as root outside a container")
 	ErrBypassUnsandboxed = errors.New("app: --bypass-permissions needs an OS sandbox; pass --allow-unsandboxed-bypass to accept unconfined commands")
 	ErrBypassNeedsFlag   = errors.New("app: mode \"bypass\" can only be enabled with --bypass-permissions")
+	// ErrWorkspaceNotTrusted ends a run the user declined at the startup
+	// trust prompt. It is never returned for a headless run, which is never
+	// asked in the first place.
+	ErrWorkspaceNotTrusted = errors.New("app: this directory was not trusted")
 )
+
+// ExitTrustDeclined is the process exit code for a session the user ended by
+// declining to trust the workspace. It has its own code because "you said
+// no" is not a failure, and a wrapper script needs to tell it apart from
+// one. cli re-exports it beside the other exit codes.
+const ExitTrustDeclined = 5
 
 // permissions resolves the mode and builds the policy engine from the rule
 // layers, each tagged with its source so approval prompts and the audit log
@@ -34,6 +44,13 @@ func (b *builder) permissions() error {
 		return err
 	}
 	b.pol = policy.New(b.ws, mode, layers...)
+	// The workspace baseline is not a rule layer: it is applied inside the
+	// policy mode table, after every floor, so that an ordinary edit inside
+	// an accepted directory stops prompting while a sensitive file, an
+	// ignored file, a path outside and the hard-deny set still do not.
+	if b.workspaceTrusted {
+		b.pol.TrustWorkspace()
+	}
 	l := b.layered
 	b.pol.SetPersist(func(r policy.Rule) error {
 		if err := l.SaveProjectLocal(func(s *config.Settings) { appendRule(&s.Permissions, r) }); err != nil {

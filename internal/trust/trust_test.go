@@ -115,6 +115,130 @@ func TestProjectSpellingDoesNotDecideTrust(t *testing.T) {
 	}
 }
 
+// TestWorkspaceAndSettingsTrustAreIndependent pins the two propositions
+// apart: the directory is trusted as a place to work in, the settings as a
+// set of bytes the user read. Editing .wright/settings.json must not revoke
+// the workspace, and accepting the workspace must not make an unread
+// settings file apply — a mistake either way silently widens the permission
+// model.
+func TestWorkspaceAndSettingsTrustAreIndependent(t *testing.T) {
+	s := newStore(t)
+	if s.WorkspaceTrusted("/w") {
+		t.Fatal("empty store trusts a workspace")
+	}
+	// Accepting the settings must not trust the directory.
+	if err := s.AcceptProject("/w", "h1"); err != nil {
+		t.Fatal(err)
+	}
+	if s.WorkspaceTrusted("/w") {
+		t.Error("AcceptProject trusted the workspace")
+	}
+	// Accepting the workspace must not vouch for any settings, and must not
+	// disturb an acceptance that is already there.
+	if err := s.AcceptWorkspace("/w"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.WorkspaceTrusted("/w") {
+		t.Error("AcceptWorkspace did not trust the workspace")
+	}
+	if !s.ProjectTrusted("/w", "h1") {
+		t.Error("AcceptWorkspace dropped the settings hash")
+	}
+	if s.ProjectTrusted("/w", "h2") {
+		t.Error("AcceptWorkspace vouched for settings the user never read")
+	}
+	// A settings change re-prompts for the settings and leaves the
+	// workspace alone.
+	if err := s.AcceptProject("/w", "h2"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.WorkspaceTrusted("/w") {
+		t.Error("re-accepting the settings revoked workspace trust")
+	}
+	if !s.ProjectTrusted("/w", "h2") || s.ProjectTrusted("/w", "h1") {
+		t.Error("the settings hash was not replaced")
+	}
+	// A workspace with no settings at all is a record of its own.
+	if err := s.AcceptWorkspace("/only"); err != nil {
+		t.Fatal(err)
+	}
+	r, ok := s.Project("/only")
+	if !ok || r.SettingsHash != "" || r.WorkspaceAccepted.IsZero() {
+		t.Errorf("Project(/only) = %+v, %v", r, ok)
+	}
+	// Forgetting revokes both.
+	if err := s.ForgetProject("/w"); err != nil {
+		t.Fatal(err)
+	}
+	if s.WorkspaceTrusted("/w") || s.ProjectTrusted("/w", "h2") {
+		t.Error("ForgetProject left an acceptance behind")
+	}
+	if got := s.Projects(); len(got) != 1 || got[0].Root != "/only" {
+		t.Errorf("Projects = %+v", got)
+	}
+}
+
+// TestWorkspaceTrustIsBackwardCompatible pins that a trust.json written
+// before workspace trust existed reads as "never asked" rather than as
+// "trusted": an upgrade must not silently grant the new baseline.
+func TestWorkspaceTrustIsBackwardCompatible(t *testing.T) {
+	s := newStore(t)
+	if err := os.MkdirAll(filepath.Dir(s.Path()), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	old := `{"version":1,"projects":{"/w":{"root":"/w","settingsHash":"h1","accepted":"2024-01-01T00:00:00Z"}}}`
+	if err := os.WriteFile(s.Path(), []byte(old), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !s.ProjectTrusted("/w", "h1") {
+		t.Fatal("an old record must still trust its settings")
+	}
+	if s.WorkspaceTrusted("/w") {
+		t.Error("an old record must not read as a trusted workspace")
+	}
+	if err := s.AcceptWorkspace("/w"); err != nil {
+		t.Fatal(err)
+	}
+	if !s.WorkspaceTrusted("/w") || !s.ProjectTrusted("/w", "h1") {
+		t.Error("upgrading the record lost one of the acceptances")
+	}
+}
+
+// TestWorkspaceTrustFollowsTheNormalisedPath pins that the directory, not
+// the spelling, is what was accepted — the same property TestProjectSpelling
+// DoesNotDecideTrust pins for settings.
+func TestWorkspaceTrustFollowsTheNormalisedPath(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink semantics differ on windows")
+	}
+	base := t.TempDir()
+	linked := filepath.Join(base, "link")
+	real := filepath.Join(base, "real")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(real, linked); err != nil {
+		t.Fatal(err)
+	}
+	resolved, err := filepath.EvalSymlinks(linked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := newStore(t)
+	if err := s.AcceptWorkspace(linked); err != nil {
+		t.Fatal(err)
+	}
+	if !s.WorkspaceTrusted(resolved) || !s.WorkspaceTrusted(linked) {
+		t.Error("the workspace must be trusted through either spelling")
+	}
+	if err := s.ForgetProject(resolved); err != nil {
+		t.Fatal(err)
+	}
+	if s.WorkspaceTrusted(linked) {
+		t.Error("forgetting through one spelling left the other trusted")
+	}
+}
+
 func TestServers(t *testing.T) {
 	s := newStore(t)
 	rec := trust.ServerRecord{Name: "github", Transport: "stdio", CommandSHA256: trust.HashStrings("npx"), ArgsSHA256: trust.HashStrings("-y", "@x/server"), ToolsSHA256: trust.HashStrings("a", "b")}

@@ -1,8 +1,15 @@
-// Package trust remembers what the user has accepted: a project's settings
-// (by hash, so a changed .wright/settings.json prompts again) and MCP
-// servers (by command, arguments, URL and tool list). The file lives in the
-// user's config directory, never in the project, so a repository cannot
-// vouch for itself.
+// Package trust remembers what the user has accepted: a workspace (the
+// directory itself), a project's settings (by hash, so a changed
+// .wright/settings.json prompts again) and MCP servers (by command,
+// arguments, URL and tool list). The file lives in the user's config
+// directory, never in the project, so a repository cannot vouch for itself.
+//
+// A project's two acceptances are independent propositions and are stored in
+// separate fields. "I trust this directory" says nothing about the settings
+// the repository happens to ship, and accepting a settings file says nothing
+// about the directory — so editing .wright/settings.json must not revoke the
+// workspace, and trusting the workspace must not make an unread settings
+// file apply.
 package trust
 
 import (
@@ -18,11 +25,23 @@ import (
 	"time"
 )
 
-// Record is an accepted project.
+// Record is an accepted project. The two acceptances it carries are
+// independent: SettingsHash/Accepted record which bytes of the project's
+// settings files the user read, and WorkspaceAccepted records that the user
+// trusts the directory itself. A record written before workspace trust
+// existed has a zero WorkspaceAccepted, which reads as "never asked" — the
+// right answer on upgrade.
 type Record struct {
 	Root         string    `json:"root"`
 	SettingsHash string    `json:"settingsHash"`
 	Accepted     time.Time `json:"accepted"`
+	// WorkspaceAccepted is when the user accepted the directory itself. It
+	// survives a settings change, because the settings were never what it
+	// vouched for.
+	// omitzero, not omitempty: a struct is never "empty", so omitempty
+	// would write a null-looking zero time for every record that has only
+	// ever accepted settings.
+	WorkspaceAccepted time.Time `json:"workspaceAccepted,omitzero"`
 }
 
 // ServerRecord is an accepted MCP server. The hashes pin exactly what was
@@ -147,22 +166,59 @@ func (s *Store) ProjectTrusted(root, settingsHash string) bool {
 	return ok && r.SettingsHash == settingsHash
 }
 
+// WorkspaceTrusted reports whether the user accepted the directory itself.
+// It deliberately ignores SettingsHash: a workspace is trusted as a place to
+// work in, not as a set of settings, so editing .wright/settings.json does
+// not revoke it (and never vouches for those settings either — see
+// ProjectTrusted, which is the question about them).
+func (s *Store) WorkspaceTrusted(root string) bool {
+	r, ok := s.Project(root)
+	return ok && !r.WorkspaceAccepted.IsZero()
+}
+
 // AcceptProject records root's settings hash as accepted, under the
 // normalised path so the next lookup agrees however it spells the project.
+// Any workspace acceptance on the record is preserved.
 func (s *Store) AcceptProject(root, settingsHash string) error {
+	return s.update(root, func(r *Record) {
+		r.SettingsHash, r.Accepted = settingsHash, time.Now().UTC()
+	})
+}
+
+// AcceptWorkspace records the directory itself as trusted, preserving any
+// settings acceptance on the record.
+func (s *Store) AcceptWorkspace(root string) error {
+	return s.update(root, func(r *Record) { r.WorkspaceAccepted = time.Now().UTC() })
+}
+
+// update applies apply to root's record (an empty one when there is none)
+// and saves it under the normalised key. A record found under the
+// un-normalised spelling is migrated onto that key rather than left beside
+// it, so one ForgetProject really removes the project.
+func (s *Store) update(root string, apply func(*Record)) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	f, err := s.load()
 	if err != nil {
 		return err
 	}
-	root = normalizeRoot(root)
-	f.Projects[root] = Record{Root: root, SettingsHash: settingsHash, Accepted: time.Now().UTC()}
+	key := normalizeRoot(root)
+	rec, ok := f.Projects[key]
+	if !ok {
+		if rec, ok = f.Projects[root]; ok {
+			delete(f.Projects, root)
+		}
+	}
+	rec.Root = key
+	apply(&rec)
+	f.Projects[key] = rec
 	return s.save(f)
 }
 
 // ForgetProject removes root's record, in either spelling: forgetting a
-// project must not depend on how the caller wrote its path.
+// project must not depend on how the caller wrote its path. It revokes both
+// acceptances — the settings and the workspace — because it deletes the
+// record that holds them.
 func (s *Store) ForgetProject(root string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -173,6 +229,31 @@ func (s *Store) ForgetProject(root string) error {
 	delete(f.Projects, normalizeRoot(root))
 	delete(f.Projects, root)
 	return s.save(f)
+}
+
+// Projects lists the accepted project records, sorted by key, so `wright
+// trust list` can show what has been accepted and where.
+func (s *Store) Projects() []Record {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, err := s.load()
+	if err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(f.Projects))
+	for k := range f.Projects {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	out := make([]Record, 0, len(keys))
+	for _, k := range keys {
+		r := f.Projects[k]
+		if r.Root == "" {
+			r.Root = k
+		}
+		out = append(out, r)
+	}
+	return out
 }
 
 // Server returns the accepted record for an MCP server name, if any.

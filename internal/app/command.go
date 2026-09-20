@@ -142,9 +142,31 @@ func (b *Built) redaction(args []string) (string, error) {
 	return fmt.Sprintf("secret redaction is %s; changing it at runtime is not supported yet — set \"redaction\": %v in .wright/settings.local.json and restart", state, args[0] == "on"), nil
 }
 
-// trustProject accepts the current project settings file. The layers were
-// built before the acceptance, so the effect starts with the next session.
+// trustProject is /trust: it accepts the project's settings files and
+// reports the workspace's own, separate trust state. The two are different
+// questions — the settings are bytes the user reads, the workspace is a
+// directory the user works in — so this command answers only the one it
+// showed, and names the command that answers the other.
 func (b *Built) trustProject() (string, error) {
+	out, err := b.trustSettings()
+	if err != nil {
+		return "", err
+	}
+	return out + "\n\n" + b.workspaceTrustStatus(), nil
+}
+
+// workspaceTrustStatus says whether edits in this directory still prompt.
+func (b *Built) workspaceTrustStatus() string {
+	if b.WorkspaceTrusted {
+		return b.WS.Root() + " is a trusted workspace: edits to files inside it do not ask (shell commands still do)."
+	}
+	return b.WS.Root() + " is not a trusted workspace: every edit asks." +
+		" Run `wright trust accept` or start wright with --trust; it takes effect next session."
+}
+
+// trustSettings accepts the current project settings files. The layers were
+// built before the acceptance, so the effect starts with the next session.
+func (b *Built) trustSettings() (string, error) {
 	path := b.Layered.Paths.ProjectSettingsFile()
 	// Both project layers are trusted as a unit, so the hash covers
 	// settings.local.json too.
