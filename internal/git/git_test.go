@@ -2,9 +2,11 @@ package git_test
 
 import (
 	"context"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -199,5 +201,80 @@ func TestWhoAmIAndEnv(t *testing.T) {
 		if !keys[want] {
 			t.Errorf("%s is not neutralised; a hostile repository could name a program", want)
 		}
+	}
+}
+
+// TestCredentialHelperKeys pins the one narrow exception to the neutralised
+// block. Every other key must stay blank — core.sshCommand above all, since
+// that is the one a reader will worry about — and the block's bookkeeping
+// must survive the overlay: only a value changes, never the count.
+func TestCredentialHelperKeys(t *testing.T) {
+	const helper = `!'/usr/bin/gh' auth git-credential`
+	base := git.Identity{Name: "Ada", Email: "ada@example.test"}.Env()
+
+	got := git.CredentialHelperKeys(helper)
+	if len(got) != 2 {
+		t.Fatalf("CredentialHelperKeys returned %d entries, want exactly the key and the value: %v", len(got), got)
+	}
+
+	// Overlay it the way the caller does.
+	merged := map[string]string{}
+	maps.Copy(merged, base)
+	maps.Copy(merged, got)
+
+	if merged["GIT_CONFIG_COUNT"] != base["GIT_CONFIG_COUNT"] {
+		t.Errorf("GIT_CONFIG_COUNT changed from %q to %q; the block's bookkeeping must not move",
+			base["GIT_CONFIG_COUNT"], merged["GIT_CONFIG_COUNT"])
+	}
+	n, err := strconv.Atoi(merged["GIT_CONFIG_COUNT"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sawHelper bool
+	for i := range n {
+		key := merged["GIT_CONFIG_KEY_"+strconv.Itoa(i)]
+		val := merged["GIT_CONFIG_VALUE_"+strconv.Itoa(i)]
+		if key == "credential.helper" {
+			sawHelper = true
+			if val != helper {
+				t.Errorf("credential.helper = %q, want %q", val, helper)
+			}
+			continue
+		}
+		if val != "" {
+			t.Errorf("%s was un-blanked to %q by the helper overlay", key, val)
+		}
+	}
+	if !sawHelper {
+		t.Fatal("credential.helper is not in the block at all")
+	}
+	// The index is found, not written down: the helper must land on the key
+	// it names even if the list is reordered.
+	i := slices.IndexFunc(slices.Collect(maps.Keys(got)), func(k string) bool { return strings.HasPrefix(k, "GIT_CONFIG_KEY_") })
+	if i < 0 {
+		t.Fatal("no GIT_CONFIG_KEY_ entry")
+	}
+}
+
+// The keys added because a credential can now be produced: a proxy decides
+// who receives an authenticated request, and askpass runs when no helper
+// answered. Both were harmless while nothing could authenticate.
+func TestNeutralisedCoversCredentialAdjacentKeys(t *testing.T) {
+	env := git.Identity{}.Env()
+	n, err := strconv.Atoi(env["GIT_CONFIG_COUNT"])
+	if err != nil {
+		t.Fatal(err)
+	}
+	keys := map[string]bool{}
+	for i := range n {
+		keys[env["GIT_CONFIG_KEY_"+strconv.Itoa(i)]] = true
+	}
+	for _, want := range []string{"core.askpass", "http.proxy", "core.gitproxy"} {
+		if !keys[want] {
+			t.Errorf("%s is not neutralised", want)
+		}
+	}
+	if env["GIT_TERMINAL_PROMPT"] != "0" {
+		t.Errorf("GIT_TERMINAL_PROMPT = %q, want 0 so a credential prompt fails instead of hanging", env["GIT_TERMINAL_PROMPT"])
 	}
 }

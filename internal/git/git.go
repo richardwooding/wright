@@ -8,6 +8,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -178,6 +179,41 @@ var neutralised = []string{
 	"credential.helper",
 	"sequence.editor",
 	"core.editor",
+	"core.askpass", // runs when no helper produced a credential
+	// The proxy keys are not programs: they decide who *receives* an
+	// authenticated request. They were harmless while no credential could be
+	// produced inside the sandbox; once one can, a cloned repository's own
+	// http.proxy is a way to be handed the request that carries it. Empty
+	// means "no proxy", so blanking them changes nothing for anyone who is
+	// not behind one — and someone who is cannot reach the network from the
+	// sandbox without --allow-network anyway.
+	"http.proxy",
+	"core.gitproxy",
+}
+
+// credentialHelperKey is credential.helper's position in neutralised, found
+// rather than written down: reordering the list above must not silently
+// blank a different key than the one a caller meant to replace.
+func credentialHelperKey() int { return slices.Index(neutralised, "credential.helper") }
+
+// CredentialHelperKeys re-points git's credential helper at one program
+// wright chose, replacing the blank that Env installs.
+//
+// Only the *value* changes: the key name and GIT_CONFIG_COUNT are the ones
+// Env already emitted, so the two maps overlay without disturbing the
+// block's bookkeeping. Every other neutralised key stays blank — in
+// particular core.sshCommand, which is the one a reader will worry about.
+//
+// helper is a git credential.helper value; a leading "!" makes git run it as
+// a shell command rather than looking for git-credential-<name>. Pass an
+// absolute, quoted path: without one git resolves the program through the
+// sandbox's PATH, and a script can put its own directory first.
+func CredentialHelperKeys(helper string) map[string]string {
+	i := strconv.Itoa(credentialHelperKey())
+	return map[string]string{
+		"GIT_CONFIG_KEY_" + i:   "credential.helper",
+		"GIT_CONFIG_VALUE_" + i: helper,
+	}
 }
 
 // Env returns the environment entries wright adds to a sandboxed git: the
@@ -193,6 +229,10 @@ func (id Identity) Env() map[string]string {
 		"GIT_CONFIG_GLOBAL": os.DevNull,
 		"GIT_CONFIG_SYSTEM": os.DevNull,
 		"GIT_CONFIG_COUNT":  strconv.Itoa(len(neutralised)),
+		// With credential.helper blank, a push that needs a credential would
+		// otherwise block on git's terminal prompt inside a sandbox where
+		// nobody can answer it. Failing immediately is the honest outcome.
+		"GIT_TERMINAL_PROMPT": "0",
 	}
 	for i, key := range neutralised {
 		env["GIT_CONFIG_KEY_"+strconv.Itoa(i)] = key
