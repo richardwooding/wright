@@ -341,6 +341,13 @@ client to HTTP MCP transports).
   `ErrTruncated`, `ErrForged` and `ErrNoAnchor` as different things. Never
   put the anchor beside the log, and never treat a missing anchor as
   success — deleting it is the first step of the attack.
+  A `decision` line records what *happened*, which is not the verdict: on
+  both user branches of `Engine.ask` the verdict is still `Ask` (Ask is what
+  raised the prompt), so `auditDecision` takes the outcome from the user's
+  answer, and `granted_network`/`granted_writable` record what allowing that
+  one call handed it — `grant` is a *saved rule*, a different thing.
+  `Summary.Asked` therefore counts `by: "user"` lines rather than the `ask`
+  outcome, so it still means "prompts shown".
 - **Config lists accumulate.** `config.Merge` appends+dedupes `allow/ask/deny`
   (and other slices) and overrides scalars only when non-zero; booleans that
   default to true are `*bool` so a later layer can turn them off.
@@ -428,6 +435,20 @@ client to HTTP MCP transports).
   subdirectories), so `<id>.meta.json` beside the transcript would be parsed
   as a legacy session. `Delete` also removes `snapshots/<id>` and
   `audit/<id>.jsonl`; IDs go through `ValidID` before touching any path.
+- **Tool call IDs are not session-unique.** llmkit synthesises `call_1`,
+  `call_2` … per response for Ollama and Gemini, so the same ID comes back
+  every turn. Anything joining the transcript to another record — today
+  `ExportMarkdown` against the audit log — must walk both forward together
+  (both are append-only and chronological) and consume each entry at most
+  once, matching on `(call ID, tool name)`. A map keyed by call ID gives
+  every turn's `call_1` the first turn's decision. That join also drops
+  `Depth > 0` decisions: a sub-agent's calls are not in this transcript and
+  its synthesised IDs collide with the main agent's, so a sub-agent decision
+  left in the stream is handed to the next real call. And the audit log is
+  evidence *about* a session, not part of it — it can be absent
+  (`Options.Audit` was nil, `Delete` removed it) or stop at a malformed line,
+  since `audit.Read` yields the error and ends — so the export keeps what it
+  read, says so in a note, and never fails because of it.
 - **Model names are provider-qualified when needed.** `llmkit.ParseModel`
   routes `org/model` names to Hugging Face and unknown bare names to Ollama,
   so `model.Best`/`Fast` emit `groq/openai/gpt-oss-120b`, `openrouter/…` via

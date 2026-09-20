@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- Exported transcripts (`wright sessions export`, `/export`) now show the
+  approval decision between each tool call and its result: who decided, the
+  outcome, the rule and its source, the reason, and what allowing granted
+  (network, and any writable paths). A policy allow renders as a single line
+  so an auto-allowed `read_file` stays out of the way; a user's answer and
+  every denial get a full block. Sub-agent decisions are left out — their
+  calls are not in the transcript — and a session with no readable audit log
+  still exports, with a note saying decisions are unavailable.
 - `web_search` is wired to a configurable provider (`search.provider`, Brave
   today) and is finally callable. With no provider named the tool is not
   registered and no query is ever sent anywhere; the API key comes from the
@@ -17,6 +25,20 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Exporting a session that does not exist wrote a transcript header for it
+  claiming "unknown model" instead of reporting that there is no such
+  session.
+- The audit log could not say whether the user allowed or denied a call. Both
+  answers were recorded as the verdict that raised the prompt (`ask`, by
+  `user`), so an allow and a deny read identically and the end-of-run summary
+  counted a denial as merely asked. The recorded outcome is now the user's
+  answer; `Summary.Asked` still counts prompts shown, and `wright audit show`
+  names who answered.
+- The audit log never recorded what an approval handed the call. A decision
+  now carries `granted_network` and `granted_writable`, so the log can show
+  that a command was allowed but ran *without* the network — the fact a
+  confusing session could not explain. Logs written before this read as
+  nothing granted.
 - The system prompt described `web_fetch`, `web_search`, `todo_write` and
   `ask_user` whether or not they were registered. A model told a tool exists
   calls it and reads "unknown tool"; the guidance is now filtered to the

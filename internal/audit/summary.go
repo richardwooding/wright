@@ -81,6 +81,13 @@ func (s *Summary) add(ev Event, seen map[string]bool) {
 }
 
 func (s *Summary) addDecision(d *Decision) {
+	// A decision made by the user was preceded by a prompt, and its recorded
+	// outcome is the user's answer rather than the Ask verdict that raised
+	// that prompt. Counting it here keeps Asked meaning "prompts shown" now
+	// that an answered prompt lands in Allowed or Denied.
+	if d.By == "user" {
+		s.Asked++
+	}
 	switch d.Outcome {
 	case "allow":
 		s.Allowed++

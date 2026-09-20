@@ -97,6 +97,16 @@ type Decision struct {
 	Grant       string `json:"grant,omitempty"`
 	HardDeny    bool   `json:"hard_deny,omitempty"`
 	Reason      string `json:"reason,omitempty"`
+
+	// GrantedNetwork and GrantedWritable are what allowing this one call
+	// handed it, as opposed to Grant, which names a rule that was saved.
+	// Without them the log says a command was allowed but not that it ran
+	// with no network, which is the difference between a record that
+	// explains a session and one that does not. Old lines lack both, which
+	// reads as "nothing granted" — the right answer for a log written
+	// before an approval could grant anything.
+	GrantedNetwork  bool     `json:"granted_network,omitempty"`
+	GrantedWritable []string `json:"granted_writable,omitempty"`
 }
 
 // Result summarises a tool result.
