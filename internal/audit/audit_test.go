@@ -235,6 +235,10 @@ func TestSummarize(t *testing.T) {
 		{TS: ts, Kind: audit.KindDecision, Decision: &audit.Decision{Outcome: "allow"}},
 		{TS: ts, Kind: audit.KindDecision, Decision: &audit.Decision{Outcome: "ask"}},
 		{TS: ts, Kind: audit.KindDecision, Decision: &audit.Decision{Outcome: "deny", HardDeny: true}},
+		// A prompt the user answered: the outcome is the answer, and the
+		// prompt itself still counts as asked.
+		{TS: ts, Kind: audit.KindDecision, Decision: &audit.Decision{Outcome: "allow", By: "user"}},
+		{TS: ts, Kind: audit.KindDecision, Decision: &audit.Decision{Outcome: "deny", By: "user", Reason: "not today"}},
 		{TS: ts, Kind: audit.KindToolResult, Result: &audit.Result{Redactions: 2, Injection: true}},
 		{TS: ts, Kind: audit.KindModelCall, Model: &audit.Model{Name: "m", InputTokens: 12000, OutputTokens: 800, CostUSD: 0.30}},
 		{TS: ts, Kind: audit.KindModelCall, Model: &audit.Model{Name: "m", InputTokens: 300, OutputTokens: 300, CostUSD: 0.08}},
@@ -251,7 +255,7 @@ func TestSummarize(t *testing.T) {
 	}
 	want := audit.Summary{
 		Files: 3, Added: 41, Removed: 7, ChangedPaths: []string{"a.go", "b.go", "c.go"},
-		Commands: 4, Failed: 1, Allowed: 1, Asked: 1, Denied: 1, HardDenied: 1,
+		Commands: 4, Failed: 1, Allowed: 2, Asked: 3, Denied: 2, HardDenied: 1,
 		Redactions: 2, Injections: 1, InputTokens: 12300, OutputTokens: 1100, CostUSD: 0.38, Errors: 1,
 	}
 	if s.Files != want.Files || s.Added != want.Added || s.Removed != want.Removed || strings.Join(s.ChangedPaths, ",") != strings.Join(want.ChangedPaths, ",") ||
@@ -262,7 +266,7 @@ func TestSummarize(t *testing.T) {
 	if s.CostUSD < 0.379 || s.CostUSD > 0.381 {
 		t.Errorf("CostUSD = %v", s.CostUSD)
 	}
-	const wantStr = "Changed 3 files (+41 −7) · Ran 4 commands (1 failed) · Denied 1 (1 hard) · Redacted 2 · Injection signals 1 · 12.3k in / 1.1k out tokens · $0.38 · 1 error"
+	const wantStr = "Changed 3 files (+41 −7) · Ran 4 commands (1 failed) · Denied 2 (1 hard) · Redacted 2 · Injection signals 1 · 12.3k in / 1.1k out tokens · $0.38 · 1 error"
 	if got := s.String(); got != wantStr {
 		t.Errorf("String =\n  %s\nwant\n  %s", got, wantStr)
 	}

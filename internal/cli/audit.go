@@ -69,6 +69,11 @@ func eventLine(ev audit.Event) string {
 	}
 	if d := ev.Decision; d != nil {
 		s := d.Outcome
+		// The outcome of a prompt is the user's answer, so the line has to
+		// say whose answer it was: a bare "allow" reads as a policy allow.
+		if d.By != "" && d.By != "policy" {
+			s += " (" + d.By + ")"
+		}
 		if d.Rule != "" {
 			s += " by " + d.Rule
 		}

@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The audit log could not say whether the user allowed or denied a call. Both
+  answers were recorded as the verdict that raised the prompt (`ask`, by
+  `user`), so an allow and a deny read identically and the end-of-run summary
+  counted a denial as merely asked. The recorded outcome is now the user's
+  answer; `Summary.Asked` still counts prompts shown, and `wright audit show`
+  names who answered.
+
 ## [0.1.3] - 2026-09-20
 
 From a user's session log: the sandbox's own restrictions were invisible to

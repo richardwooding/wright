@@ -288,7 +288,7 @@ func (e *Engine) countHardDeny(ctx context.Context) {
 }
 
 func (e *Engine) auditDecision(c agentkit.Call, v policy.Verdict, by string, d *Decision) {
-	rec := &audit.Decision{Outcome: strings.ToLower(v.Decision.String()), Class: v.Class.String(), Mode: e.Mode().String(), By: by, OffersShown: len(v.Offers), HardDeny: v.HardDeny, Reason: v.Reason}
+	rec := &audit.Decision{Outcome: outcomeOf(v, d), Class: v.Class.String(), Mode: e.Mode().String(), By: by, OffersShown: len(v.Offers), HardDeny: v.HardDeny, Reason: v.Reason}
 	if v.Rule != nil {
 		rec.Rule = v.Rule.String()
 		rec.Source = string(v.Rule.Source)
@@ -297,6 +297,20 @@ func (e *Engine) auditDecision(c agentkit.Call, v policy.Verdict, by string, d *
 		rec.Grant = d.Grant.Rule.String() + " (" + d.Grant.Scope.String() + ")"
 	}
 	e.audit(audit.Event{Kind: audit.KindDecision, Run: c.RunID, Depth: c.Depth, Tool: &audit.Tool{Name: c.Call.Name, CallID: c.Call.ID, Args: string(c.Call.Arguments)}, Decision: rec})
+}
+
+// outcomeOf is what happened to the call, which is not always the verdict. A
+// verdict the user answered is still Ask — Ask is what raised the prompt —
+// so recording it leaves an allow and a deny indistinguishable in the log and
+// counts a denial as "asked" in the summary. The user's answer is the outcome.
+func outcomeOf(v policy.Verdict, d *Decision) string {
+	if d == nil {
+		return strings.ToLower(v.Decision.String())
+	}
+	if d.Allow {
+		return strings.ToLower(policy.Allow.String())
+	}
+	return strings.ToLower(policy.Deny.String())
 }
 
 func denialText(v policy.Verdict) string {
