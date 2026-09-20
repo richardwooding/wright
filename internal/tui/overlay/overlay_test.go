@@ -529,3 +529,30 @@ func TestApprovalGrantMarking(t *testing.T) {
 		}
 	})
 }
+
+// TestApprovalOffersEveryProjectScopeLast pins the third scope's placement.
+// It writes to the user's config and so applies to every workspace, which is
+// worth one deliberate press rather than a reflex: it is last and never
+// focused, and its label names the file it writes.
+func TestApprovalOffersEveryProjectScopeLast(t *testing.T) {
+	offers := []policy.GrantOffer{
+		offer(t, "bash(gh pr *)", policy.ScopeSession),
+		offer(t, "bash(gh pr *)", policy.ScopeProjectLocal),
+		offer(t, "bash(gh pr *)", policy.ScopeUser),
+	}
+	var got *engine.Decision
+	var o overlay.Overlay = overlay.NewApproval(approval(t, engine.SeverityCaution, offers...), th, func(d engine.Decision) { got = &d })
+	o, _ = press(o, "a")
+	view := plain(o.View(90, 30))
+	if !strings.Contains(view, "scope every project") {
+		t.Errorf("the widest scope is not shown:\n%s", view)
+	}
+	// Focus starts on the first row, so enter alone can never take it.
+	if i := strings.Index(view, "›"); i < 0 || strings.Contains(view[i:i+60], "every project") {
+		t.Errorf("the every-project row is focused by default:\n%s", view)
+	}
+	_, done := press(o, "3")
+	if !done || got == nil || len(got.Grants) != 1 || got.Grants[0].Scope != policy.ScopeUser {
+		t.Fatalf("done=%v decision=%+v", done, got)
+	}
+}

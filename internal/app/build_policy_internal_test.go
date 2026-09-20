@@ -62,3 +62,40 @@ func TestAcceptingTheSameGrantTwiceSavesItOnce(t *testing.T) {
 		t.Errorf("ask = %v, want the same text recorded under its own decision", got)
 	}
 }
+
+// A rule accepted "for every project" lands in the user's own config, which
+// applies to every workspace and is not gated by any project's trust.
+func TestAUserScopedGrantIsWrittenToTheUserConfig(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("WRIGHT_CONFIG_DIR", cfg)
+	ws := t.TempDir()
+	l, err := config.Load(ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := policy.ParseRule("bash(gh pr *) +net", policy.SourceUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.Decision = policy.Allow
+	save := func() {
+		t.Helper()
+		if err := l.SaveUser(func(s *config.Settings) { appendRule(&s.Permissions, r) }); err != nil {
+			t.Fatal(err)
+		}
+	}
+	save()
+	save() // accepting twice must not write it twice
+
+	raw, err := os.ReadFile(l.Paths.UserConfigFile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(raw), `"bash(gh pr *) +net"`); n != 1 {
+		t.Errorf("the rule appears %d times, want 1:\n%s", n, raw)
+	}
+	// And nothing was written into the workspace.
+	if _, err := os.Stat(filepath.Join(ws, ".wright", "settings.local.json")); !os.IsNotExist(err) {
+		t.Errorf("a user-scoped grant touched the project (%v)", err)
+	}
+}

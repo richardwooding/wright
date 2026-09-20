@@ -59,6 +59,11 @@ func (b *builder) permissions() error {
 		}
 		return b.retrustLocal()
 	})
+	// The user's own config needs no re-trust: it is not part of any
+	// project's hashed unit, and it was never gated in the first place.
+	b.pol.SetPersistUser(func(r policy.Rule) error {
+		return l.SaveUser(func(s *config.Settings) { appendRule(&s.Permissions, r) })
+	})
 	return nil
 }
 

@@ -117,10 +117,16 @@ const (
 type Scope int
 
 // Grant scopes.
+// The order is *breadth*, not layer precedence: dedupeOffers keeps the widest
+// scope when one rule is accepted at several, and a rule written to the
+// user's own config covers every project. (In the layer order the user layer
+// still sits below the project ones, which is a different question and
+// unchanged.)
 const (
 	ScopeOnce         Scope = iota // this call only; nothing is recorded
 	ScopeSession                   // until the process exits
 	ScopeProjectLocal              // written to .wright/settings.local.json
+	ScopeUser                      // written to the user's config: every project
 )
 
 // String returns a short label for the scope.
@@ -132,6 +138,8 @@ func (s Scope) String() string {
 		return "session"
 	case ScopeProjectLocal:
 		return "project"
+	case ScopeUser:
+		return "every project"
 	}
 	return fmt.Sprintf("scope(%d)", int(s))
 }

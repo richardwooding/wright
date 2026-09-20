@@ -524,3 +524,45 @@ func TestOneAnswerCanSaveSeveralRules(t *testing.T) {
 		}
 	})
 }
+
+// Accepting one rule at both project and user scope must save it once, at
+// the wider of the two — and "wider" here means breadth, not layer
+// precedence: a rule in the user's own config applies to every project.
+func TestUserScopeIsTheWiderOfTheTwo(t *testing.T) {
+	r, err := policy.ParseRule("bash(gh pr *) +net", policy.SourceSession)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.CallResp("c1", "edit_file", `{"path":"a.go"}`),
+		enginetest.TextResp("done"),
+	}}
+	var saved []policy.Rule
+	f, path := auditFixture(t, client, func(o *engine.Options) {
+		pol := policy.New(o.WS, o.Mode, policy.Builtin())
+		pol.SetPersist(func(policy.Rule) error { t.Error("the project hook ran for a user-scoped grant"); return nil })
+		pol.SetPersistUser(func(rule policy.Rule) error { saved = append(saved, rule); return nil })
+		o.Policy = pol
+	})
+	if err := f.eng.Submit("edit a.go"); err != nil {
+		t.Fatal(err)
+	}
+	f.collect(t, func(ev engine.Event) {
+		if ev.Kind == engine.KindApprovalRequest {
+			f.eng.Reply(ev.Approval.ID, engine.Decision{Allow: true, Grants: []policy.GrantOffer{
+				{Rule: r, Scope: policy.ScopeProjectLocal},
+				{Rule: r, Scope: policy.ScopeUser},
+			}})
+		}
+	})
+	if len(saved) != 1 {
+		t.Fatalf("user hook ran %d times, want once", len(saved))
+	}
+	if saved[0].Source != policy.SourceUser {
+		t.Errorf("saved with source %q, want %q", saved[0].Source, policy.SourceUser)
+	}
+	decs := auditedDecisions(t, path)
+	if got := decs[0].SavedRules(); len(got) != 1 || !strings.Contains(got[0], "every project") {
+		t.Errorf("audited rules = %v, want one at the every-project scope", got)
+	}
+}

@@ -22,6 +22,7 @@ type Engine struct {
 	rules       []Rule // every configured rule, all layers flattened
 	grants      []Rule // session grants (and persisted ones applied live)
 	persist     func(Rule) error
+	persistUser func(Rule) error
 	hardDenials int
 	parent      *Engine
 	depth       int
@@ -45,6 +46,14 @@ func (e *Engine) SetPersist(fn func(Rule) error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	e.persist = fn
+}
+
+// SetPersistUser installs the callback that records grants in the user's own
+// config, where they apply to every project.
+func (e *Engine) SetPersistUser(fn func(Rule) error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.persistUser = fn
 }
 
 // Mode returns the current mode.
@@ -144,6 +153,14 @@ func (e *Engine) Grant(offer GrantOffer) error {
 		}
 		rule.Source = SourceProjectLocal
 		if err := e.persist(rule); err != nil {
+			return err
+		}
+	case ScopeUser:
+		if e.persistUser == nil {
+			return ErrNoPersist
+		}
+		rule.Source = SourceUser
+		if err := e.persistUser(rule); err != nil {
 			return err
 		}
 	}
@@ -936,11 +953,12 @@ func (e *Engine) Suggest(req Request) []GrantOffer {
 			rules = append(rules, r)
 		}
 	}
-	offers := make([]GrantOffer, 0, len(rules)*2)
+	offers := make([]GrantOffer, 0, len(rules)*3)
 	for _, r := range rules {
 		offers = append(offers,
 			GrantOffer{Rule: r, Scope: ScopeSession, Label: "allow " + r.String() + " for this session"},
 			GrantOffer{Rule: r, Scope: ScopeProjectLocal, Label: "allow " + r.String() + " for this project (.wright/settings.local.json)"},
+			GrantOffer{Rule: r, Scope: ScopeUser, Label: "allow " + r.String() + " for every project (your user config)"},
 		)
 	}
 	return offers
