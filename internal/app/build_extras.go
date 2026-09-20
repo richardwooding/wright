@@ -154,10 +154,15 @@ func (b *builder) readOnlyTools() []string {
 }
 
 // toolDocs is the "when to use" guidance in the system prompt: the built-in
-// tools plus one line per sub-agent. MCP tools and skills describe
-// themselves (the server's descriptions and the skill catalog).
-func (b *builder) toolDocs() []prompt.ToolDoc {
-	docs := tools.Docs()
+// tools that were actually registered, plus one line per sub-agent. MCP tools
+// and skills describe themselves (the server's descriptions and the skill
+// catalog).
+//
+// base is the built-in toolset, so a tool the app had no dependency for —
+// web_search with no provider, ask_user when headless — is not described to
+// the model as something it can call.
+func (b *builder) toolDocs(base agentkit.Toolset) []prompt.ToolDoc {
+	docs := tools.DocsFor(base)
 	out := make([]prompt.ToolDoc, 0, len(docs)+len(b.agentDefs)+1)
 	for _, d := range docs {
 		out = append(out, prompt.ToolDoc{Name: d.Name, When: d.When})

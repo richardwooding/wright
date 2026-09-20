@@ -15,6 +15,13 @@ All notable changes to this project are documented here. The format follows
   named by an untrusted project's settings is ignored, because a search
   discloses the query to a third party.
 
+### Fixed
+
+- The system prompt described `web_fetch`, `web_search`, `todo_write` and
+  `ask_user` whether or not they were registered. A model told a tool exists
+  calls it and reads "unknown tool"; the guidance is now filtered to the
+  toolset it was built beside.
+
 ### Internal
 
 - `config.Merge` is a hand-written field list, so a field added to `Settings`

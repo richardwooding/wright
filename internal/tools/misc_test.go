@@ -158,6 +158,38 @@ func TestNamesAndFilters(t *testing.T) {
 	}
 }
 
+// TestDocsForMatchTheRegisteredSet pins that the system-prompt guidance
+// describes only tools that exist. Four tools are conditional on a dependency
+// (web_fetch, web_search, todo_write, ask_user), and a model told about a tool
+// it cannot call will spend a turn discovering that.
+func TestDocsForMatchTheRegisteredSet(t *testing.T) {
+	full := newFixture(t, func(d *tools.Deps) {
+		d.Todos = &tools.TodoList{}
+		d.Asker = &fakeAsker{}
+		d.Search = &fakeSearch{}
+		d.Fetch = &http.Client{}
+	})
+	var names []string
+	for _, d := range tools.DocsFor(full.ts) {
+		names = append(names, d.Name)
+	}
+	if !slices.Equal(names, tools.Names()) {
+		t.Errorf("full set documented %v, want %v", names, tools.Names())
+	}
+
+	// No search provider, no fetch client, no asker: the bare set.
+	bare := newFixture(t, func(d *tools.Deps) { d.Todos = &tools.TodoList{} })
+	for _, d := range tools.DocsFor(bare.ts) {
+		switch d.Name {
+		case tools.NameWebSearch, tools.NameWebFetch, tools.NameAskUser:
+			t.Errorf("%s is documented but was never registered", d.Name)
+		}
+	}
+	if got, want := len(tools.DocsFor(bare.ts)), len(bare.ts); got != want {
+		t.Errorf("documented %d of %d registered tools", got, want)
+	}
+}
+
 func TestOnRedacted(t *testing.T) {
 	var seen []string
 	f := newFixture(t, func(d *tools.Deps) {

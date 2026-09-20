@@ -312,6 +312,28 @@ func Docs() []ToolDoc {
 	}
 }
 
+// DocsFor is Docs filtered to the tools actually present in ts.
+//
+// Several tools are conditional on a dependency the app may not have
+// (web_fetch, web_search, todo_write, ask_user), so the unfiltered list
+// describes tools that were never registered. A model told a tool exists will
+// call it, read "unknown tool", and spend a turn recovering — the prompt has
+// to agree with the toolset it was built beside.
+func DocsFor(ts agentkit.Toolset) []ToolDoc {
+	have := make(map[string]bool, len(ts))
+	for _, t := range ts {
+		have[t.Definition().Name] = true
+	}
+	all := Docs()
+	out := make([]ToolDoc, 0, len(all))
+	for _, d := range all {
+		if have[d.Name] {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // resolve turns p into an absolute, symlink-resolved path and reports
 // whether it lies inside the workspace.
 func (d *Deps) resolve(p string) (abs string, inside bool, err error) {

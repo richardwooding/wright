@@ -86,7 +86,7 @@ func (b *builder) toolsAndEngine() error {
 		Describe:      describeFunc(base, b.mcp),
 		Extra:         b.engineExtras(skillSet),
 		Instructions:  instructions,
-		ToolDocs:      b.toolDocs(),
+		ToolDocs:      b.toolDocs(base),
 		Store:         b.store,
 		SessionID:     b.sessionID,
 		Audit:         b.auditLog,
