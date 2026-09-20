@@ -42,9 +42,7 @@ func (b *builder) githubAuth() error {
 		// Absolute and quoted: resolving "gh" through the sandbox PATH would
 		// let a script put its own directory first and be handed the token
 		// on stdin.
-		for k, v := range git.CredentialHelperKeys("!'" + res.GhPath + "' auth git-credential") {
-			b.githubEnv[k] = v
-		}
+		maps.Copy(b.githubEnv, git.CredentialHelperKeys("!'"+res.GhPath+"' auth git-credential"))
 		b.githubGhDir = filepath.Dir(res.GhPath)
 	}
 	b.gitHub.Enable(b.githubEnv, b.githubSource)

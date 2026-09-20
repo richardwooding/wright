@@ -24,6 +24,18 @@ var (
 		"read-only file system",
 		"erofs",
 	}
+	// A path wright bind-mounts read-only reports EBUSY rather than EROFS:
+	// the mount cannot be replaced, and git writes a config by renaming a
+	// temporary file over it. "Device or resource busy" on .git/config is an
+	// unreadable way to say "wright mounts this read-only".
+	busySignatures = []string{
+		"device or resource busy",
+		"resource busy", // macOS
+	}
+	// protectedNames are the paths ProtectedIn binds. A write to one of them
+	// is refused for the life of the session, so the model must be told to
+	// stop rather than to try another spelling.
+	protectedNames = []string{".git/config", ".git/config.worktree", ".git/hooks", ".wright"}
 )
 
 // sandboxHints explains a failure the sandbox caused, so the model is told
@@ -41,12 +53,33 @@ func sandboxHints(out string, spec sandbox.Spec, backend string) []string {
 			"Ask for it: the approval prompt grants the network when you say the command needs it, "+
 			"and a saved rule needs the +net suffix. Do not try to route around it.")
 	}
+	if p, ok := protectedBusy(low); ok {
+		notes = append(notes, "writing "+p+" failed because wright mounts it read-only inside the sandbox, "+
+			"for the whole session: a hook or a config key written here would run *outside* it, on the user's next git command. "+
+			"\"Device or resource busy\" is what that looks like from in here. This cannot be worked around from inside — "+
+			"do not retry it another way. Say what you needed and why, and let the user run it themselves if they want it. "+
+			"Note that `git push <url> <refspec>` needs no remote, so it does not need this file.")
+	}
 	if containsAny(low, readOnlySignatures) {
 		notes = append(notes, fmt.Sprintf("a write hit a read-only mount: inside the sandbox only %s %s writable. "+
 			"Approving an install makes that tool's prefix writable for the call; nothing else here is.",
 			writableList(spec), isAre(len(spec.ReadWrite))))
 	}
 	return notes
+}
+
+// protectedBusy reports the protected path a command failed to write, when
+// the failure is the shape a bind-mounted file produces.
+func protectedBusy(low string) (string, bool) {
+	if !containsAny(low, busySignatures) {
+		return "", false
+	}
+	for _, name := range protectedNames {
+		if strings.Contains(low, name) {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 func containsAny(low string, needles []string) bool {

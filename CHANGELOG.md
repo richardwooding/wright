@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **`git remote add` failed with "Device or resource busy" and no explanation.**
+  wright bind-mounts `.git/config`, `.git/hooks` and `.wright` read-only for
+  the whole session — a hook or config key written inside would run *outside*
+  it, on the user's next git command — and a bind-mounted file reports EBUSY
+  rather than EROFS, so none of the existing read-only detection caught it.
+  bash now recognises it and says what happened, that it cannot be worked
+  around from inside, and that `git push <url> <refspec>` needs no remote.
+- **The model is told the git rules up front**, in the bash tool's
+  system-prompt guidance: which paths are read-only, and that it must never
+  pass `-c credential.helper` or set `GH_TOKEN` itself, because a session with
+  GitHub authentication already gives networked calls both — and a `-c` that
+  names a program is refused by the policy engine. Both halves were learned
+  the expensive way in a real session, which spent two turns and a denied call
+  rediscovering them.
+
 ## [0.5.0] - 2026-09-20
 
 git and the GitHub CLI, made to work. Both were *allowed and then broken*

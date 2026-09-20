@@ -48,3 +48,40 @@ func TestBashTimeoutIsStatedWhereverTheModelReads(t *testing.T) {
 		}
 	}
 }
+
+// TestGitSandboxNoteReachesTheModel pins the guidance that would have saved a
+// real session two wrong turns: `git remote add` failing on a read-only
+// .git/config, and a hand-rolled -c credential.helper that wright had already
+// configured and the policy engine refuses.
+func TestGitSandboxNoteReachesTheModel(t *testing.T) {
+	var docs string
+	for _, d := range Docs() {
+		if d.Name == NameBash {
+			docs = d.When
+		}
+	}
+	if docs == "" {
+		t.Fatal("bash has no system-prompt guidance at all")
+	}
+	for _, want := range []string{
+		".git/config",    // the file that cannot be written
+		"read-only",      // and why it fails
+		"git push <url>", // the way round it that needs no remote
+		"credential.helper",
+	} {
+		if !strings.Contains(docs, want) {
+			t.Errorf("the guidance does not mention %q:\n%s", want, docs)
+		}
+	}
+	// The paths named here are the ones the sandbox actually protects, and
+	// the ones the failure note recognises. If either list moves, this says
+	// so rather than leaving the model with stale advice.
+	for _, p := range protectedNames {
+		if p == ".git/config.worktree" {
+			continue // the rare spelling; the note names the common ones
+		}
+		if !strings.Contains(docs, p) {
+			t.Errorf("the sandbox protects %s but the guidance does not mention it", p)
+		}
+	}
+}
