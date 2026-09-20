@@ -6,7 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Exported transcripts (`wright sessions export`, `/export`) now show the
+  approval decision between each tool call and its result: who decided, the
+  outcome, the rule and its source, the reason, and what allowing granted
+  (network, and any writable paths). A policy allow renders as a single line
+  so an auto-allowed `read_file` stays out of the way; a user's answer and
+  every denial get a full block. Sub-agent decisions are left out — their
+  calls are not in the transcript — and a session with no readable audit log
+  still exports, with a note saying decisions are unavailable.
+
 ### Fixed
+
+- Exporting a session that does not exist wrote a transcript header for it
+  claiming "unknown model" instead of reporting that there is no such
+  session.
 
 - The audit log could not say whether the user allowed or denied a call. Both
   answers were recorded as the verdict that raised the prompt (`ask`, by

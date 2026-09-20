@@ -14,6 +14,7 @@ import (
 
 	"github.com/richardwooding/llmkit/core"
 
+	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/session"
 	"github.com/richardwooding/wright/internal/workspace"
 )
@@ -320,8 +321,191 @@ func TestExportMarkdown(t *testing.T) {
 		t.Errorf("ExportMarkdown(../x) err = %v", err)
 	}
 	buf.Reset()
-	if err := f.store.ExportMarkdown(ctx, "nope", &buf); err != nil || !strings.Contains(buf.String(), "unknown model") {
+	// Exporting a session that does not exist used to emit a header for it,
+	// claiming "unknown model", because Get's found result was discarded.
+	if err := f.store.ExportMarkdown(ctx, "nope", &buf); !errors.Is(err, session.ErrNoSession) {
 		t.Errorf("unknown session export = %v, %q", err, buf.String())
+	}
+}
+
+// writeAuditLog writes decision events to the session's own audit log, the
+// file ExportMarkdown joins the transcript against.
+func writeAuditLog(t *testing.T, f fixture, id string, events ...audit.Event) {
+	t.Helper()
+	l, err := audit.Open(f.store.AuditPath(id), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if err := l.Close(); err != nil {
+			t.Error(err)
+		}
+	}()
+	for _, ev := range events {
+		if err := l.Write(ev); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func decisionEvent(callID, name string, d audit.Decision) audit.Event {
+	return audit.Event{Kind: audit.KindDecision, Tool: &audit.Tool{Name: name, CallID: callID}, Decision: &d}
+}
+
+func exported(t *testing.T, f fixture, id string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	if err := f.store.ExportMarkdown(context.Background(), id, &buf); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// TestExportMarkdownDecisions is the point of the join: a transcript that
+// shows a call and its result but not the approval cannot explain the
+// session — a reader cannot see that a command was allowed *without* the
+// network.
+func TestExportMarkdownDecisions(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	msgs := []core.Message{
+		core.UserText("install it"),
+		core.Assistant(core.ToolCall{ID: "c1", Name: "bash", Arguments: json.RawMessage(`{"command":"brew install fpc"}`)}),
+		core.ToolResults(core.ToolResultText("c1", "bash", "installed")),
+		core.Assistant(core.ToolCall{ID: "c2", Name: "web_fetch", Arguments: json.RawMessage(`{"url":"https://x.test"}`)}),
+		core.Assistant(core.ToolCall{ID: "c3", Name: "read_file", Arguments: json.RawMessage(`{"path":"a.go"}`)}),
+		core.ToolResults(core.ToolResultText("c3", "read_file", "package main")),
+	}
+	if err := f.store.Append(ctx, "d", msgs...); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Touch(ctx, session.Meta{ID: "d", Model: "fake"}); err != nil {
+		t.Fatal(err)
+	}
+	writeAuditLog(t, f, "d",
+		decisionEvent("c1", "bash", audit.Decision{
+			Outcome: "allow", By: "user", Class: "Install",
+			GrantedNetwork: true, GrantedWritable: []string{"/opt/homebrew", "/usr/local"},
+		}),
+		decisionEvent("c2", "web_fetch", audit.Decision{Outcome: "deny", By: "user", Reason: "not this time"}),
+		// A sub-agent's decision covers a call made inside a tool call, which
+		// is not in this transcript — and it carries a synthesised call ID
+		// that collides with the main agent's, so leaving it in the stream
+		// would hand the next real call the sub-agent's answer.
+		func() audit.Event {
+			ev := decisionEvent("c3", "read_file", audit.Decision{Outcome: "allow", By: "user", Reason: "sub-agent write"})
+			ev.Depth = 1
+			return ev
+		}(),
+		decisionEvent("c3", "read_file", audit.Decision{Outcome: "allow", By: "policy", Rule: "read_file(**)", Source: "builtin"}),
+	)
+	out := exported(t, f, "d")
+	want := []string{
+		"**Decision: allow** — by user",
+		"granted: network",
+		"granted writable: `/opt/homebrew`, `/usr/local`",
+		"**Decision: deny** — by user",
+		"reason: not this time",
+		"*Allowed by policy — rule `read_file(**)` (builtin).*",
+	}
+	for _, w := range want {
+		if !strings.Contains(out, w) {
+			t.Errorf("export missing %q\n%s", w, out)
+		}
+	}
+	if strings.Contains(out, "sub-agent write") {
+		t.Error("a sub-agent decision (Depth > 0) has no call in this transcript and must not be rendered")
+	}
+	if n := strings.Count(out, "**Decision:"); n != 2 {
+		t.Errorf("full decision blocks = %d, want 2 (a policy allow is one line)", n)
+	}
+	if strings.Contains(out, "Result: web_fetch") {
+		t.Error("the denied call has no result")
+	}
+	// The decision belongs between the call and its result.
+	call, dec, res := strings.Index(out, "Tool call: bash"), strings.Index(out, "**Decision: allow**"), strings.Index(out, "Result: bash")
+	if call >= dec || dec >= res {
+		t.Errorf("decision is not between the call and its result: call=%d decision=%d result=%d", call, dec, res)
+	}
+}
+
+// TestExportMarkdownRepeatedCallIDs pins the join rule. Call IDs are not
+// session-unique: llmkit synthesises call_1, call_2 … per response for Ollama
+// and Gemini, so every turn repeats them. A map keyed by call ID would give
+// the second turn the first turn's decision.
+func TestExportMarkdownRepeatedCallIDs(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	msgs := []core.Message{
+		core.UserText("twice"),
+		core.Assistant(core.ToolCall{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)}),
+		core.ToolResults(core.ToolResultText("call_1", "bash", "a.go")),
+		core.UserText("again"),
+		core.Assistant(core.ToolCall{ID: "call_1", Name: "bash", Arguments: json.RawMessage(`{"command":"rm -rf x"}`)}),
+		core.ToolResults(core.ToolResultText("call_1", "bash", "denied")),
+	}
+	if err := f.store.Append(ctx, "r", msgs...); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Touch(ctx, session.Meta{ID: "r", Model: "fake"}); err != nil {
+		t.Fatal(err)
+	}
+	writeAuditLog(t, f, "r",
+		decisionEvent("call_1", "bash", audit.Decision{Outcome: "allow", By: "user", Reason: "first turn"}),
+		decisionEvent("call_1", "bash", audit.Decision{Outcome: "deny", By: "user", Reason: "second turn"}),
+	)
+	out := exported(t, f, "r")
+	first, second := strings.Index(out, "first turn"), strings.Index(out, "second turn")
+	if first < 0 || second < 0 {
+		t.Fatalf("each turn's own decision must appear: first=%d second=%d\n%s", first, second, out)
+	}
+	if first > second {
+		t.Errorf("decisions are out of order: first=%d second=%d", first, second)
+	}
+	if strings.Count(out, "**Decision:") != 2 {
+		t.Errorf("want one decision per call\n%s", out)
+	}
+}
+
+// TestExportMarkdownWithoutDecisions covers the degraded cases: the audit log
+// is evidence about a session, not part of it, so an export never fails
+// because of it.
+func TestExportMarkdownWithoutDecisions(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	msgs := []core.Message{
+		core.UserText("hello"),
+		core.Assistant(core.ToolCall{ID: "c1", Name: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)}),
+		core.ToolResults(core.ToolResultText("c1", "bash", "a.go")),
+	}
+	if err := f.store.Append(ctx, "n", msgs...); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Touch(ctx, session.Meta{ID: "n", Model: "fake"}); err != nil {
+		t.Fatal(err)
+	}
+	out := exported(t, f, "n")
+	if !strings.Contains(out, "no audit log") || !strings.Contains(out, "Tool call: bash") {
+		t.Errorf("a session with no audit log must export with a note\n%s", out)
+	}
+	if strings.Contains(out, "**Decision:") {
+		t.Error("no decisions to render")
+	}
+	// A log that stops being readable keeps what was read and says so.
+	writeAuditLog(t, f, "n", decisionEvent("c1", "bash", audit.Decision{Outcome: "allow", By: "user", Reason: "fine"}))
+	log, err := os.OpenFile(f.store.AuditPath("n"), os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := log.WriteString("{not json\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := log.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out = exported(t, f, "n")
+	if !strings.Contains(out, "could not be read to the end") || !strings.Contains(out, "reason: fine") {
+		t.Errorf("a malformed log must degrade, not fail\n%s", out)
 	}
 }
 
