@@ -75,21 +75,19 @@ func commandHelp() []overlay.Entry {
 	return out
 }
 
-// keyHelp is the /help key table.
+// keyHelp is the /help key table. Related keys share a row: the overlay is
+// as tall as the transcript, so the table has to earn its rows.
 var keyHelp = []overlay.Entry{
 	{Name: "enter", Desc: "send (queued while a run is active)"},
 	{Name: "shift+enter / alt+enter / ctrl+j", Desc: "newline"},
 	{Name: "esc", Desc: "cancel the run · close an overlay (deny)"},
-	{Name: "ctrl+c ctrl+c", Desc: "quit (twice within 1.5 s)"},
-	{Name: "ctrl+d", Desc: "quit when the box is empty"},
+	{Name: "ctrl+c ctrl+c / ctrl+d", Desc: "quit (twice within 1.5 s) · quit on an empty box"},
 	{Name: "ctrl+o", Desc: "expand / collapse all tool cards"},
 	{Name: "ctrl+t", Desc: "todos"},
 	{Name: "shift+tab", Desc: "cycle mode default → auto-edit → plan"},
-	{Name: "pgup / pgdn / wheel", Desc: "scroll the transcript"},
-	{Name: "ctrl+u", Desc: "clear the box"},
-	{Name: "ctrl+l", Desc: "redraw"},
-	{Name: "@", Desc: "file completion"},
-	{Name: "/", Desc: "command completion"},
+	{Name: "pgup / pgdn", Desc: "scroll the transcript"},
+	{Name: "ctrl+u / ctrl+l", Desc: "clear the box · redraw"},
+	{Name: "@ / /", Desc: "file · command completion"},
 }
 
 // runCommand parses "/name args…" and dispatches it.

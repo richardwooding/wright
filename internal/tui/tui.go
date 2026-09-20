@@ -234,8 +234,9 @@ func (m Model) ExitSummary() string {
 	return strings.Join(parts, "\n")
 }
 
-// View composes transcript (or overlay), queued strip, composer and status
-// bar, and places the terminal cursor in the composer.
+// View composes transcript (or overlay), queued strip, the rule-wrapped
+// composer and the status bar, and places the terminal cursor in the
+// composer.
 func (m Model) View() tea.View {
 	if m.width == 0 {
 		v := tea.NewView("starting…")
@@ -247,24 +248,39 @@ func (m Model) View() tea.View {
 	body := m.vp.View()
 	if m.ov != nil {
 		box := m.ov.View(max(m.width-2, 1), vpH)
-		body = lipgloss.Place(m.width, vpH, lipgloss.Center, lipgloss.Center, box)
+		// An overlay has a minimum size (border, title) and Place does not
+		// truncate, so on a short terminal the box can be taller than the
+		// space it was given; without the clamp it pushes the composer and
+		// the status bar off the screen.
+		body = clampRows(lipgloss.Place(m.width, vpH, lipgloss.Center, lipgloss.Center, box), vpH)
 	}
 	parts := []string{body}
 	if stripH > 0 {
 		parts = append(parts, m.queuedStrip())
 	}
-	parts = append(parts, m.comp.View(), m.statusBar())
+	rule := m.rule()
+	parts = append(parts, rule, m.comp.View(), rule, m.statusBar())
 	v := tea.NewView(strings.Join(parts, "\n"))
 	v.AltScreen = !m.opts.Plain
 	v.MouseMode = tea.MouseModeCellMotion
 	v.WindowTitle = m.windowTitle()
 	if m.ov == nil {
 		if c := m.comp.Cursor(); c != nil {
-			c.Y += vpH + stripH
+			// vpH + stripH rows above the composer, plus its own rule.
+			c.Y += vpH + stripH + 1
 			v.Cursor = c
 		}
 	}
 	return v
+}
+
+// clampRows keeps at most n rows of a rendered block.
+func clampRows(s string, n int) string {
+	lines := strings.Split(s, "\n")
+	if len(lines) <= n {
+		return s
+	}
+	return strings.Join(lines[:n], "\n")
 }
 
 // windowTitle names the workspace and marks a run in progress, so a wright
@@ -277,13 +293,21 @@ func (m Model) windowTitle() string {
 	return title
 }
 
+// rule is the divider drawn above and below the composer. U+2500 is one
+// cell wide, so the rule is exactly the terminal's width — a lipgloss
+// bordered box would add side columns the composer does not have.
+func (m Model) rule() string {
+	return m.th.Rule.Render(strings.Repeat("─", max(m.width, 1)))
+}
+
 // viewportHeight is the transcript height after the fixed rows, and the
-// queued strip's height (0 or 1).
+// queued strip's height (0 or 1). The fixed rows are the status bar and the
+// two rules around the composer, which reports its own height.
 func (m Model) viewportHeight() (vpH, stripH int) {
 	if m.queued > 0 || len(m.pending) > 0 {
 		stripH = 1
 	}
-	vpH = max(m.height-1-m.comp.Height()-stripH, 1)
+	vpH = max(m.height-3-m.comp.Height()-stripH, 1)
 	return vpH, stripH
 }
 
