@@ -31,17 +31,17 @@ const bashTool = "bash"
 func (e *Engine) Approve(ctx context.Context, c agentkit.Call) (agentkit.Decision, error) {
 	req, preview, err := e.describe(c)
 	if err != nil {
-		e.auditDecision(c, policy.Verdict{Decision: policy.Deny, Reason: err.Error()}, "policy", nil)
+		e.auditDecision(c, policy.Verdict{Decision: policy.Deny, Reason: err.Error()}, "policy", nil, CallGrant{})
 		return agentkit.Deny("could not evaluate this call: " + err.Error()), nil
 	}
 	req.Depth = c.Depth
 	verdict := e.policyFor(c.Depth).Evaluate(req)
 	switch verdict.Decision {
 	case policy.Allow:
-		e.auditDecision(c, verdict, "policy", nil)
+		e.auditDecision(c, verdict, "policy", nil, CallGrant{})
 		return e.allowed(c, verdict, nil), nil
 	case policy.Deny:
-		e.auditDecision(c, verdict, "policy", nil)
+		e.auditDecision(c, verdict, "policy", nil, CallGrant{})
 		if verdict.HardDeny {
 			e.countHardDeny(ctx)
 		}
@@ -82,7 +82,7 @@ func (e *Engine) describe(c agentkit.Call) (policy.Request, Preview, error) {
 func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, verdict policy.Verdict, preview Preview) (agentkit.Decision, error) {
 	if e.opts.Headless {
 		verdict.Reason = headlessReason(c, verdict)
-		e.auditDecision(c, verdict, "headless", nil)
+		e.auditDecision(c, verdict, "headless", nil, CallGrant{})
 		return agentkit.Deny(verdict.Reason), nil
 	}
 	e.mu.Lock()
@@ -112,7 +112,7 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 			if verdict.Reason == "" {
 				verdict.Reason = "the user declined this call"
 			}
-			e.auditDecision(c, verdict, "user", &d)
+			e.auditDecision(c, verdict, "user", &d, CallGrant{})
 			return agentkit.Deny(verdict.Reason), nil
 		}
 		if d.Grant != nil {
@@ -125,7 +125,7 @@ func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, v
 		// without the network only produces a call that fails after the
 		// user said yes — `brew info fpc` did exactly that.
 		verdict.Network = verdict.Network || d.Network || grant.Network
-		e.auditDecision(c, verdict, "user", &d)
+		e.auditDecision(c, verdict, "user", &d, grant)
 		return e.allowedWithGrant(c, verdict, d.Args, grant), nil
 	}
 }
@@ -287,14 +287,24 @@ func (e *Engine) countHardDeny(ctx context.Context) {
 	}
 }
 
-func (e *Engine) auditDecision(c agentkit.Call, v policy.Verdict, by string, d *Decision) {
-	rec := &audit.Decision{Outcome: outcomeOf(v, d), Class: v.Class.String(), Mode: e.Mode().String(), By: by, OffersShown: len(v.Offers), HardDeny: v.HardDeny, Reason: v.Reason}
+// auditDecision records one decision. grant is what allowing this call hands
+// it; it is recorded only for an allow, because a call that did not run was
+// given nothing.
+func (e *Engine) auditDecision(c agentkit.Call, v policy.Verdict, by string, d *Decision, grant CallGrant) {
+	outcome := outcomeOf(v, d)
+	rec := &audit.Decision{Outcome: outcome, Class: v.Class.String(), Mode: e.Mode().String(), By: by, OffersShown: len(v.Offers), HardDeny: v.HardDeny, Reason: v.Reason}
 	if v.Rule != nil {
 		rec.Rule = v.Rule.String()
 		rec.Source = string(v.Rule.Source)
 	}
 	if d != nil && d.Grant != nil {
 		rec.Grant = d.Grant.Rule.String() + " (" + d.Grant.Scope.String() + ")"
+	}
+	if outcome == strings.ToLower(policy.Allow.String()) {
+		// v.Network is the value Engine.allowed pins into the call's
+		// arguments, so it is the network the call really gets.
+		rec.GrantedNetwork = grant.Network || v.Network
+		rec.GrantedWritable = grant.Writable
 	}
 	e.audit(audit.Event{Kind: audit.KindDecision, Run: c.RunID, Depth: c.Depth, Tool: &audit.Tool{Name: c.Call.Name, CallID: c.Call.ID, Args: string(c.Call.Arguments)}, Decision: rec})
 }

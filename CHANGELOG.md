@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
   counted a denial as merely asked. The recorded outcome is now the user's
   answer; `Summary.Asked` still counts prompts shown, and `wright audit show`
   names who answered.
+- The audit log never recorded what an approval handed the call. A decision
+  now carries `granted_network` and `granted_writable`, so the log can show
+  that a command was allowed but ran *without* the network — the fact a
+  confusing session could not explain. Logs written before this read as
+  nothing granted.
 
 ## [0.1.3] - 2026-09-20
 
