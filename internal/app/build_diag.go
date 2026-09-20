@@ -43,7 +43,8 @@ func (b *builder) diagnostics() error {
 		// exposes this process's stacks and a CPU profiler to anything
 		// running as this user, so it is a state the user must not be able
 		// to forget about.
-		b.warn("debug endpoint is serving on %s — it exposes this session's state and pprof to anything running as you on this machine", url)
+		b.warn("debug endpoint is serving on %s — it exposes this session's state and pprof to anything running as you on this machine."+
+			" It only reads; `/debug inject on` would also let it put prompts into this session", url)
 	}
 	return nil
 }

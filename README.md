@@ -647,7 +647,10 @@ rewritten. `/redaction off` turns it off for the session.
 | `ctrl+o` | expand / collapse all tool cards |
 | `ctrl+t` | todos |
 | `shift+tab` | cycle mode default → auto-edit → plan |
+| `↑` / `↓` | scroll the transcript (they move the cursor inside a multi-line message) |
 | `pgup` / `pgdn` | scroll the transcript a page |
+| `home` / `end` | jump to the top · back to following the newest output |
+| `ctrl+p` / `ctrl+n` | previous / next message you sent |
 | `shift+up` / `shift+down` | scroll the transcript a line |
 | `alt+m` (or `/mouse`) | wheel scrolling — off by default, so your terminal can select and copy text |
 | `ctrl+u` | clear the box · `ctrl+l` redraw |
@@ -715,12 +718,21 @@ credential path into the sandbox, by design.
 
 ```sh
 wright --github-auth          # for this session
-/github on                    # or from inside a running session
+/github on                    # or from inside a running session, which then
+                              # asks: this session, this project, every project
 ```
 ```jsonc
-// ~/.config/wright/config.json — for every project
-{ "github": { "auth": true } }
+// ~/.config/wright/config.json
+{ "github": {
+    "auth": true,                                  // every project
+    "authProjects": ["/home/you/src/thing"]        // or just these
+} }
 ```
+
+Both live in *your* config, never a project's. `.wright/settings.json` is
+committed, so `github.auth` there would be asking everyone who clones the
+repository to hand over their own credential — wright ignores it from a
+project layer for exactly that reason, trusted or not.
 
 With it on, wright takes a token from `GH_TOKEN`/`GITHUB_TOKEN`, or asks
 `gh auth token` on the host, and gives it — with git's credential helper
@@ -770,6 +782,35 @@ deleting the session deletes its dumps; `/debug` inside the TUI prints the
 endpoint, the pid to signal and where the dumps go, and `/debug dump` writes
 one on the spot. Both carry the same redaction as tool output.
 
+Once a session is running you can also **send it a prompt** from another
+terminal, if you arm that first:
+
+```
+/debug inject on                 # in the session; asks you to type a word
+```
+```sh
+curl -sS -X POST http://127.0.0.1:6060/debug/input \
+     -H 'Content-Type: application/json' \
+     -H 'X-Wright-Debug-Token: <the token /debug prints>' \
+     -d '{"prompt":"summarise what you just did"}'
+```
+
+The prompt enters the session exactly where a typed one would, marked **via
+the debug endpoint** in the transcript, prefixed in the text the model sees,
+and recorded in the audit log. It is off by default, it ends with the session,
+and it is never written to a settings file. `/debug inject off` stops it and
+kills the token.
+
+What that is actually protected by, since "loopback only" is *not* enough on
+its own: a web page you have open can POST cross-origin to 127.0.0.1 without
+asking anyone. So `Content-Type: application/json` is required — not one of
+the three types a page can send without a CORS preflight, which this endpoint
+never answers — a request carrying browser headers is refused, the `Host` must
+be the loopback address being served (a page whose DNS rebinds would otherwise
+look local), and the token is minted when you arm and dies when you disarm.
+The token is **not** a boundary against code already running as you: anything
+that can read this process's memory can read it.
+
 The endpoint is **off unless you ask for it**, and `--debug-addr` is a flag
 and nothing else — no environment variable, no settings key — so a repository
 cannot open a port on the machine of anyone who runs wright in it. Only a
@@ -802,7 +843,8 @@ What leaves your machine:
 
 Nothing else. The diagnostics endpoint above is the one part of wright that
 opens a socket, and it *listens* rather than dialling: it answers your own
-browser, on your own machine, only when you passed `--debug-addr`.
+machine, only when you passed `--debug-addr`. Arming its input lets a prompt
+come *in*; nothing goes out either way.
 
 That is the whole list, and a test in `internal/app` (`TestNoUnexpectedNetwork`)
 enforces it at the import level. There is no telemetry, no crash reporting, no

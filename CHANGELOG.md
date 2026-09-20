@@ -6,6 +6,59 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The transcript scrolls.** Bare up/down now move it at the composer's
+  edges, which is also what makes the **mouse wheel** work: on a VTE terminal
+  the wheel in the alternate screen *is* those keys, and the composer was
+  eating them for prompt history. History moves to `ctrl+p`/`ctrl+n`; `home`
+  and `end` jump to the top and back to following; the status bar says when
+  you are scrolled back, because otherwise new output silently stops
+  appearing. An approval arriving mid-run no longer yanks you to the bottom —
+  mid-run is exactly when you are reading back, and the prompt is modal
+  anyway.
+- **The window title animates while a run is in progress.** It said "running"
+  with a dot that never moved, because nothing recomputed it between state
+  changes.
+- **`/github on` asks how long**, instead of printing a snippet to paste: this
+  session, this project, or every project. Both persistent answers are written
+  to *your* config, never the project's — `.wright/settings.json` is
+  committed, so a project-scoped `github.auth` would be asking everyone who
+  clones the repository to hand over their own credential.
+- **The diagnostics endpoint can take a prompt**, once `/debug inject on` arms
+  it with a typed confirmation. `POST /debug/input` with the token it prints,
+  and the prompt enters the session — marked "via the debug endpoint" in the
+  transcript, prefixed in the text the model sees, and recorded in the audit
+  log. It is off by default, ends with the session, and is never written to a
+  file. The handler never blocks on the session: a full buffer is a 503 you
+  can see rather than a wait you cannot.
+
+### Fixed
+
+- **A web page could read your session's diagnostics.** The endpoint had no
+  `Host` check, so a page whose DNS rebinds to 127.0.0.1 became same-origin
+  and could fetch `/debug/state` — goroutine stacks and the commands the
+  session had run. The Host must now be the loopback address being served, and
+  requests carrying browser headers (`Origin`, a cross-site `Sec-Fetch-*`) are
+  refused outright. This affects any session run with `--debug-addr`; there is
+  no configuration to change.
+- Every endpoint route accepted any method, because they were registered as
+  bare paths. They are method-qualified now (`pprof/symbol` keeps the POST it
+  documents).
+- A settings file written before v0.3.4 can hold duplicate rules that nothing
+  would ever have removed. Saving a grant now cleans them, preserving order.
+
+### Security
+
+- Arming the endpoint's input is a real capability: anything that can reach
+  the port *and* present the session's token can drive the agent. The defences
+  are that it is off unless a human typed a word at the terminal, that
+  `application/json` is required (which forces a CORS preflight this endpoint
+  never answers, and rules out a `<form>` outright), that the token is minted
+  per arming and dies when you disarm, and that every prompt is visible and
+  audited. The token is not a boundary against code already running as you —
+  same-user code can read this process's memory — and the docs say so.
+
 ## [0.5.1] - 2026-09-20
 
 ### Fixed

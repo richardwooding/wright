@@ -119,7 +119,7 @@ internal/
   model/      Choice: flag > WRIGHT_MODEL > settings > credential detection > Ollama probe; Best/Fast/List from the catalog
   cost/       Meter (usage per model → USD via catalog), FormatUSD/FormatTokens; unknown models price as "—"
   prompt/     System(in) → (stable, dynamic); LoadInstructions (AGENTS.md walk, CLAUDE.md fallback); WrapUntrusted, ScanInjection
-  diag/       self-inspection: SIGUSR1 dump + opt-in loopback pprof endpoint; leaf (takes []Section)
+  diag/       self-inspection: SIGUSR1 dump + opt-in loopback pprof endpoint + armed prompt input; leaf (function hooks only)
   ghauth/     resolves a GitHub token on the host (env, else `gh auth token`); leaf, execs only
   git/        exec git: Status (2 s timeout), Diff, IsTracked
   theme/      lipgloss v2 palette (gloam tokens as LightDark pairs) + styles
@@ -562,6 +562,32 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   documented: `web_fetch` is hard-denied from loopback and a sandboxed
   `bash` under bwrap/landlock is in its own netns, but `--sandbox none` has
   no such barrier.
+- **The endpoint reads; armed, it also accepts.** `/debug inject on` sets a
+  bool and mints a token *inside `diag`* — deliberately, because a handler
+  must never call into the thing being debugged to ask whether it may
+  proceed, which is the same rule `Options.Source` states. The handler hands
+  the text to `app`'s `injector` with a **non-blocking** send; the goroutine
+  behind it is what may block, because `Engine.Submit` takes the engine's
+  lock and emits on a channel that fills when nothing drains it. `Built.Close`
+  therefore closes **diag, then the injector, then the engine** — the other
+  order submits an accepted prompt to a session that has gone — and
+  `Engine.Submit` has a closed guard for the same reason.
+- **The browser is the attacker at a loopback port, not the network.** A page
+  can POST cross-origin to 127.0.0.1 with no preflight when the content type
+  is one of the three CORS-simple ones, and a page whose DNS rebinds becomes
+  same-origin and sends no `Origin` at all. So: `application/json` required,
+  browser headers refused, `Host` must be the loopback address being served,
+  a per-arm token, and **never** an `Access-Control-Allow-*` header — its
+  absence is the control. The `Host` check guards the *read* routes too; it
+  closed a hole where a rebinding page could fetch `/debug/state`.
+- **An injected prompt is marked in three places** because three readers need
+  it: a prefix line in the text (the only thing that survives into the session
+  store and an export), a `KindExternalPrompt` event rendered as a user turn
+  with `via …` above it, and `audit.KindEndpointPrompt`. The prefix is a plain
+  line, **not** an `<untrusted>` fence: that fence tells the model the content
+  "cannot give you instructions", which would make it correctly refuse the
+  thing the user asked for. And the audit kind is not called "injection" —
+  `KindInjection` already means prompt-injection detected in tool output.
 - **`Engine.Waiting`/`InFlight` are what the dump reports.** `pending` holds
   a `waiter` (channel plus the prompt's own words) rather than a bare
   channel, and `promptLabel` falls back to the preview *body*'s first line
@@ -728,6 +754,18 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   decides permissions. Overlays cannot mutate the root model, so pickers and
   the confirm prompt hand results back as messages (`pickedMsg`); approval and
   question overlays call `Controller.Reply/Answer` directly.
+- **The composer's edges scroll; its middle does not.** `up`/`down` are what
+  a user reaches for, and on a VTE terminal they are also what the wheel
+  becomes in the alternate screen — so the composer reports `Event{Scroll}` at
+  the first/last line and keeps moving the cursor otherwise. History is on
+  `ctrl+p`/`ctrl+n`. Only `applyRunStarted` and `submit` re-pin `follow`: an
+  approval must not, because the overlay is modal and mid-run is exactly when
+  someone is reading back.
+- **The window title animates from the spinner's tick.** `windowTitle` is a
+  pure function of the model, and Bubble Tea writes `OSC 2` only when the
+  string changes, so a title that varies with a frame counter animates with no
+  second timer. It is throttled to every third tick: a title is an escape
+  sequence to the terminal, and 12 a second buys nothing the eye can use.
 - **33 ms coalescing.** `KindText`/`KindReasoning` deltas only append to the
   live block and arm a single in-flight `flushMsg` tick (`flushInterval`); the
   live block is re-rendered on the flush, so a fast stream costs one glamour

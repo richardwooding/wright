@@ -14,6 +14,12 @@
 // it can hold an http import in a project whose claim is "no telemetry, no
 // phone-home": a server bound to loopback at the user's explicit request
 // sends nothing anywhere.
+//
+// It only *reads*, until a human at the session's terminal arms its input
+// (`/debug inject on`); from then until that session ends it will also accept
+// a prompt to hand to the agent. Even armed it sends nothing anywhere — the
+// direction that changes is inward. Everything about who may do that lives in
+// guard.go and input.go, and is worth reading before changing either.
 package diag
 
 import (
