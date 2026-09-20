@@ -288,6 +288,9 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "trusted still denies a hidden path", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.write("secrets/token"), want: policy.Deny, reason: "hidden", trusted: true},
 		{name: "trusted still obeys a deny rule", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Deny, policy.SourceProject, "edit_file($WORKSPACE/internal/**)")}, req: f.write("internal/x.go"), want: policy.Deny, reason: "deny rule", trusted: true},
 		{name: "trusted still obeys an explicit ask rule", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Ask, policy.SourceUser, "edit_file(**)")}, req: f.write("main.go"), want: policy.Ask, reason: "ask rule", trusted: true},
+		// A builtin ask rule that is *not* the whole-workspace default is
+		// not the mode table written as a rule, so trust does not replace it.
+		{name: "trusted still obeys a narrower builtin ask rule", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, rules(t, policy.Ask, policy.SourceBuiltin, "edit_file($WORKSPACE/internal/**)")}, req: f.write("internal/x.go"), want: policy.Ask, reason: "ask rule", trusted: true},
 		{name: "trusted plan mode still denies edits", mode: policy.ModePlan, layers: [][]policy.Rule{builtin}, req: f.write("main.go"), want: policy.Deny, reason: "plan mode", trusted: true},
 		// Trust is about writing files, not about running programs: every
 		// shell command is still approved one at a time.

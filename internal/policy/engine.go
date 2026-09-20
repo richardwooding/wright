@@ -309,18 +309,35 @@ func (ev *eval) run() {
 	if ev.mode != ModePlan && ev.allowed() {
 		return
 	}
-	// The workspace-trust baseline is applied by the mode table, not here,
-	// so the builtin ask rules for the write tools must not decide first:
-	// write_file($WORKSPACE/**) and edit_file($WORKSPACE/**) are the mode
-	// table's default written as rules, and letting them answer would make
-	// the baseline unreachable. Skipping them changes nothing on its own —
-	// modeWrite re-derives the same ask for everything the baseline does
-	// not cover (see trustBaseline).
-	if !ev.trustBaseline() && ev.matchDecision(Ask, true) && ev.mode != ModeBypass {
+	// The builtin ask rules superseded by workspace trust are skipped inside
+	// matchDecision, so a trusted write reaches the mode table, which is
+	// where the baseline is applied. See supersededByTrust and modeWrite.
+	if ev.matchDecision(Ask, true) && ev.mode != ModeBypass {
 		ev.finishAsk()
 		return
 	}
 	ev.modeTable()
+}
+
+// workspaceAll is the path glob meaning "every path inside the workspace".
+const workspaceAll = "$WORKSPACE/**"
+
+// supersededByTrust reports whether a rule is one the workspace-trust
+// baseline replaces: the builtin write-tool ask over the whole workspace
+// ("write_file($WORKSPACE/**)", "edit_file($WORKSPACE/**)"), which is the
+// mode table's default for edits written as a rule. Those rules sit one step
+// above the mode table, so leaving them in place would make the baseline
+// unreachable — and an allow rule, which *is* consulted before them, is not
+// an option (see modeWriteDefault).
+//
+// It is deliberately narrow in both directions. A builtin ask rule for a
+// subset of the workspace — one added later for, say, edit_file(**/*.sql) —
+// is not the default and still decides. And skipping the default loses
+// nothing: modeWrite re-derives the same ask for every path the baseline
+// does not cover.
+func (ev *eval) supersededByTrust(r *Rule) bool {
+	return r.Decision == Ask && r.Source == SourceBuiltin &&
+		writeTools[r.Tool] && r.Pattern == workspaceAll && ev.trustBaseline()
 }
 
 // trustBaseline reports whether the workspace-trust baseline is in play for
@@ -402,6 +419,9 @@ func (ev *eval) matchDecision(d Decision, builtin bool) bool {
 			continue
 		}
 		if d == Ask && (r.Source == SourceBuiltin) != builtin {
+			continue
+		}
+		if ev.supersededByTrust(r) {
 			continue
 		}
 		if what, ok := ev.ruleHits(r); ok {

@@ -192,9 +192,13 @@ client to HTTP MCP transports).
   (`*.tfvars`) and ignored-file asks never evaluated. The mode-table grant
   alone is not enough either: the builtin ask rules
   `write_file($WORKSPACE/**)`/`edit_file($WORKSPACE/**)` answer one step
-  earlier, so `run` skips *exactly those* for a request `trustBaseline()`
-  covers (a trusted workspace, a write tool with at least one declared write,
-  default mode). Both halves are load-bearing; reverting either one fails
+  earlier, so `matchDecision` skips *exactly those* for a request
+  `trustBaseline()` covers (a trusted workspace, a write tool with at least
+  one declared write, default mode). `supersededByTrust` recognises them by
+  `Source == SourceBuiltin`, a write tool and `Pattern == "$WORKSPACE/**"` —
+  the mode table's default written as a rule — so a *narrower* builtin ask
+  rule added later still decides, and a changed default pattern makes trust
+  stop granting rather than start over-granting. Both halves are load-bearing; reverting either one fails
   `TestEvaluateTable`. `multi_edit` is in `writeTools` with no builtin ask
   rule, so it reaches `modeWrite` by the other route and is pinned
   separately. The verdict names `policy.SourceTrust` in its `Reason` so the
