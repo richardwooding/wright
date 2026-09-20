@@ -38,6 +38,18 @@ const (
 	waitDelay = 2 * time.Second
 )
 
+// bashTimeoutNote is what the model is told about the bound every call
+// already has. It existed from the start — 120 s by default, 600 s at most,
+// the whole process group killed — but only as a JSON-schema property
+// description, so the agent hand-rolled `timeout 120 …` around its commands
+// and the rule offered for such a call named the wrapper. It is built from
+// the constants because a number stated in prose drifts from the one enforced
+// in code, and it is used in both places the model reads: this tool's
+// description and the Docs() line that reaches the system prompt.
+var bashTimeoutNote = fmt.Sprintf(
+	"Every call is bounded already: it is killed, with its whole process group, after %d seconds, or after the timeout argument (at most %d) — so write the command plainly rather than wrapping it in timeout yourself.",
+	int(defaultBashTimeout.Seconds()), int(maxBashTimeout.Seconds()))
+
 type bashArgs struct {
 	Command     string `json:"command" jsonschema:"bash script to run"`
 	Timeout     int    `json:"timeout,omitempty" jsonschema:"seconds before the command is killed (default 120, max 600)"`
@@ -49,7 +61,9 @@ type bashArgs struct {
 func (d *Deps) bash() agentkit.Tool {
 	return &tool{
 		Tool: agentkit.Func(NameBash,
-			"Run a bash script in the sandbox. stdout and stderr are merged; the working directory persists across calls; no network unless network is set and granted. Set background for a long-running command (a dev server, a watcher): it returns a job id at once and the job tool reads its output.",
+			"Run a bash script in the sandbox. stdout and stderr are merged; the working directory persists across calls; no network unless network is set and granted. "+
+				bashTimeoutNote+
+				" Set background for a long-running command (a dev server, a watcher): it returns a job id at once and the job tool reads its output.",
 			d.runBash),
 		describe:   d.describeBash,
 		sequential: true,
