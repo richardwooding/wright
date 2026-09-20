@@ -151,6 +151,16 @@ func New(ctx context.Context, o Options) (*Engine, error) {
 	if e.meta.ID == "" {
 		e.meta = session.Meta{ID: o.SessionID, Model: o.Model.Model, Workspace: o.WS.Roots[0], Created: e.now()}
 	}
+	// Record the session before the first run rather than after it. The
+	// sidecar (and the transcript) were both written only when a run ended,
+	// so for the whole of the first run the session the status bar was
+	// naming did not exist as far as `/sessions` and `/export` were
+	// concerned: one listed nothing and the other reported "no such
+	// session" for the id on screen. A session exists once it has been
+	// started.
+	if err := e.touch(ctx); err != nil {
+		e.emit(Event{Kind: KindNotice, Text: "session metadata: " + err.Error()})
+	}
 	e.audit(audit.Event{Kind: audit.KindSessionStart, Text: "model " + o.Model.Model + " mode " + o.Mode.String() + " sandbox " + o.Sandbox})
 	for _, w := range o.Warnings {
 		e.emit(Event{Kind: KindNotice, Text: w})

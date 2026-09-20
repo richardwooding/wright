@@ -84,7 +84,7 @@ func (e *Engine) describe(c agentkit.Call) (policy.Request, Preview, error) {
 
 func (e *Engine) ask(ctx context.Context, c agentkit.Call, req policy.Request, verdict policy.Verdict, preview Preview) (agentkit.Decision, error) {
 	if e.opts.Headless {
-		verdict.Reason = headlessReason(c, verdict)
+		verdict.Reason = headlessReason(c, verdict, e.Mode())
 		// Headless never prompts: this call is denied, now. Recording the Ask
 		// verdict that would have raised a prompt leaves a CI run's log
 		// claiming nothing was denied, which is the same untruth outcomeOf
@@ -361,8 +361,14 @@ func denialText(v policy.Verdict) string {
 // (exit 3) rather than a plain tool failure.
 const HeadlessDenialMarker = "requires interactive approval in headless mode"
 
-func headlessReason(c agentkit.Call, v policy.Verdict) string {
+func headlessReason(c agentkit.Call, v policy.Verdict, mode policy.Mode) string {
 	hint := "re-run interactively"
+	// Plan mode never consults allow rules, so it is offered none (see
+	// policy.Suggest) and pointing at --allow here would send the user after
+	// a flag that cannot work.
+	if mode == policy.ModePlan {
+		hint = "plan mode ignores allow rules: approve it interactively, or leave plan mode"
+	}
 	if len(v.Offers) > 0 {
 		flags := make([]string, 0, len(v.Offers))
 		for _, o := range v.Offers {

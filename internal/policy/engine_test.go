@@ -5,11 +5,13 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/policy/shellclass"
+	"github.com/richardwooding/wright/internal/tools"
 	"github.com/richardwooding/wright/internal/workspace"
 )
 
@@ -699,4 +701,72 @@ func containsAny(list []string, sub string) bool {
 		}
 	}
 	return false
+}
+
+// TestPlanModeKeepsEveryToolItCanPermit is the invariant that would have
+// caught web_fetch. Plan mode filters the toolset down to a list, and the
+// system prompt describes tools regardless, so a tool the policy permits but
+// the list omits comes back to the model as `tool not found` — which is
+// exactly what web_fetch, web_search, bash, todo_write, ask_user and job did.
+// The policy is the authority: whatever plan mode does not always deny, plan
+// mode must still offer.
+func TestPlanModeKeepsEveryToolItCanPermit(t *testing.T) {
+	f := newFixture(t)
+	e := policy.New(f.ws, policy.ModePlan, policy.Builtin())
+	// One representative request per built-in tool, chosen to be the most
+	// permissive thing that tool can ask for.
+	reqs := map[string]policy.Request{
+		"read_file":  f.read("main.go"),
+		"glob":       {Tool: "glob", Paths: []string{f.abs("main.go")}},
+		"grep":       {Tool: "grep", Paths: []string{f.abs("main.go")}},
+		"list_dir":   {Tool: "list_dir", Paths: []string{f.abs(".")}},
+		"bash":       f.bash("git log"),
+		"web_fetch":  fetch("https://example.com/x"),
+		"web_search": {Tool: "web_search"},
+		"todo_write": {Tool: "todo_write"},
+		"ask_user":   {Tool: "ask_user"},
+		"job":        {Tool: "job"},
+		"write_file": f.writeWith("write_file", "main.go"),
+		"edit_file":  f.write("main.go"),
+		"multi_edit": f.writeWith("multi_edit", "main.go"),
+	}
+	kept := tools.PlanNames()
+	for _, name := range tools.Names() {
+		req, ok := reqs[name]
+		if !ok {
+			t.Fatalf("no representative request for %s; add one when adding a tool", name)
+		}
+		permitted := e.Evaluate(req).Decision != policy.Deny
+		if permitted && !slices.Contains(kept, name) {
+			t.Errorf("plan mode permits %s but drops it from the toolset: the model is told it exists and gets \"tool not found\"", name)
+		}
+		if !permitted && slices.Contains(kept, name) {
+			t.Errorf("plan mode always denies %s, so keeping it in the toolset only wastes a turn", name)
+		}
+	}
+}
+
+// TestPlanModeOffersNothing pins that plan mode proposes no saved rule.
+// It never consults allow rules, so an offer there cannot take effect: the
+// approval overlay would invite "always allow" and then keep asking, and a
+// headless denial would name a --allow flag that changes nothing.
+func TestPlanModeOffersNothing(t *testing.T) {
+	f := newFixture(t)
+	for _, mode := range []policy.Mode{policy.ModePlan, policy.ModeDefault} {
+		e := policy.New(f.ws, mode, policy.Builtin())
+		v := e.Evaluate(fetch("https://example.com/x"))
+		if v.Decision != policy.Ask {
+			t.Fatalf("%v: decision = %v, want Ask", mode, v.Decision)
+		}
+		switch mode {
+		case policy.ModePlan:
+			if len(v.Offers) != 0 {
+				t.Errorf("plan mode offered %v, which no rule there can honour", v.Offers)
+			}
+		default:
+			if len(v.Offers) == 0 {
+				t.Error("default mode must still offer a rule that would work")
+			}
+		}
+	}
 }

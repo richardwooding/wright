@@ -152,11 +152,13 @@ func openClient(name string) (core.Chatter, error) {
 	return a.Client(), nil
 }
 
-// readOnlyTools is the set plan mode keeps: wright's read-only tools, the
-// skill tools (which only produce text), the MCP tools their server
-// annotates read-only, and the read-only sub-agents.
+// readOnlyTools is the set plan mode keeps: the tools plan mode's policy can
+// permit (tools.PlanNames), the skill tools (which only produce text), the
+// MCP tools their server annotates read-only, and the read-only sub-agents.
+// A tool the mode removes but the prompt still describes comes back as
+// "tool not found", so this list has to track what the policy allows.
 func (b *builder) readOnlyTools() []string {
-	out := tools.ReadOnlyNames()
+	out := tools.PlanNames()
 	if b.skills.Len() > 0 {
 		out = append(out, akskills.ToolName, akskills.FileToolName)
 	}

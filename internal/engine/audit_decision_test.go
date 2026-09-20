@@ -1,6 +1,8 @@
 package engine_test
 
 import (
+	"bytes"
+	"context"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -12,9 +14,12 @@ import (
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/engine"
 	"github.com/richardwooding/wright/internal/enginetest"
+	"github.com/richardwooding/wright/internal/model"
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/sandbox"
+	"github.com/richardwooding/wright/internal/session"
 	"github.com/richardwooding/wright/internal/tools"
+	"github.com/richardwooding/wright/internal/workspace"
 )
 
 // auditFixture is newFixture plus an audit log, and returns the log's path so
@@ -189,5 +194,57 @@ func TestAuditRecordsAHeadlessDenialAsADenial(t *testing.T) {
 	}
 	if sum.Denied != 1 || sum.Asked != 0 {
 		t.Errorf("summary denied=%d asked=%d, want 1 and 0", sum.Denied, sum.Asked)
+	}
+}
+
+// TestSessionIsVisibleBeforeTheFirstRunEnds pins that a session exists as
+// soon as it is started. The sidecar and the transcript were both written
+// only when a run *ended*, so for the whole of the first run the session the
+// status bar was naming did not exist: /sessions listed nothing and /export
+// reported "no such session" for the id on screen.
+func TestSessionIsVisibleBeforeTheFirstRunEnds(t *testing.T) {
+	dir := t.TempDir()
+	ws, err := workspace.Open(dir, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := session.Open(filepath.Join(dir, ".data"), ws)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng, err := engine.New(context.Background(), engine.Options{
+		Model:     model.Choice{Model: "fake-model", Provider: "fake"},
+		Client:    &enginetest.Scripted{},
+		WS:        ws,
+		Cwd:       dir,
+		Mode:      policy.ModeDefault,
+		Store:     store,
+		SessionID: "20260920-100000-abcd",
+		Sandbox:   "none",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = eng.Close() }()
+
+	// No run has happened yet.
+	list, err := store.List(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list) != 1 || list[0].ID != "20260920-100000-abcd" {
+		t.Fatalf("List before the first run = %+v, want the new session", list)
+	}
+	if _, ok, err := store.Get(context.Background(), "20260920-100000-abcd"); err != nil || !ok {
+		t.Fatalf("Get before the first run: ok=%v err=%v", ok, err)
+	}
+	// And it can be exported, which is what /export does on the session you
+	// are sitting in.
+	var buf bytes.Buffer
+	if err := store.ExportMarkdown(context.Background(), "20260920-100000-abcd", &buf); err != nil {
+		t.Fatalf("export before the first run: %v", err)
+	}
+	if !strings.Contains(buf.String(), "20260920-100000-abcd") {
+		t.Errorf("export = %q, want the session id", buf.String())
 	}
 }

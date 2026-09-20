@@ -275,10 +275,30 @@ func Names() []string {
 	}
 }
 
-// ReadOnlyNames lists the tools that cannot change anything: the set plan
-// mode and the explore sub-agent get.
+// ReadOnlyNames lists the tools that cannot change anything by themselves:
+// the set the explore sub-agent gets. It is deliberately narrower than
+// PlanNames — explore runs unattended on the fast model, so it gets no shell
+// and no network.
 func ReadOnlyNames() []string {
 	return []string{NameReadFile, NameGlob, NameGrep, NameListDir}
+}
+
+// PlanNames lists the tools plan mode keeps.
+//
+// It must contain every tool plan mode's *policy* can permit, or the model is
+// told about a tool the mode then removes and the call comes back
+// "tool not found" — which is what plan mode did to web_fetch, web_search,
+// bash, todo_write, ask_user and job. The policy is the authority here:
+// plan mode allows read-only shell commands (modeBashPlan), asks for web
+// access (planMayAsk), and allows the tools with no side effects of their own
+// (modeOther). Withholding those tools does not make plan mode safer — every
+// call is still evaluated, and a mutating command is still denied — it only
+// makes it broken.
+func PlanNames() []string {
+	return []string{
+		NameReadFile, NameGlob, NameGrep, NameListDir,
+		NameBash, NameJob, NameWebFetch, NameWebSearch, NameTodoWrite, NameAskUser,
+	}
 }
 
 // ReadOnly filters ts down to ReadOnlyNames.

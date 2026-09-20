@@ -887,7 +887,17 @@ func (ev *eval) modeOther() {
 // Suggest proposes grants that would allow this request in future. Nothing
 // is offered for destructive or opaque requests, and bash offers never widen
 // beyond two argv words.
+//
+// Plan mode is offered nothing at all. It never consults allow rules (see
+// run), so a saved rule cannot take effect there — and an offer that cannot
+// take effect is worse than none: the approval overlay would invite the user
+// to "always allow" something that then keeps asking, and the headless
+// denial would name a --allow flag that changes nothing. A one-off approval
+// still works in plan mode; that is what the prompt is for.
 func (e *Engine) Suggest(req Request) []GrantOffer {
+	if e.Mode() == ModePlan {
+		return nil
+	}
 	var rules []Rule
 	switch kindOf(req.Tool) {
 	case kindBash:

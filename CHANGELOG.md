@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Plan mode removed tools the model was told it had.** The toolset plan
+  mode keeps was the *explore sub-agent's* read-only list, so `web_fetch`,
+  `web_search`, `bash`, `todo_write`, `ask_user` and `job` were dropped —
+  while the system prompt still described them. Calling one came straight
+  back as `tool not found`, with no approval prompt and no explanation. The
+  policy was never the problem: plan mode allows read-only shell commands
+  and asks for web access. Plan mode now keeps every tool its own policy can
+  permit, and a test pins the two lists together.
+- **Plan mode suggested rules that cannot work there.** It never consults
+  allow rules, but it still offered them: the approval overlay invited
+  "always allow", which then kept asking, and a headless denial named a
+  `--allow` flag that changed nothing. Plan mode now offers no saved rule and
+  says what would actually help.
+- **A session did not exist until its first run finished.** Both the sidecar
+  and the transcript were written only at the end of a run, so during the
+  first one `/sessions` listed nothing and `/export` failed with "no such
+  session" — naming the very id in the status bar. The session is recorded
+  when it starts.
+
 ## [0.2.0] - 2026-09-20
 
 Trust, and what a grant is allowed to hide. wright now asks whether you trust
