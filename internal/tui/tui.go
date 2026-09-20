@@ -147,6 +147,7 @@ type Model struct {
 
 	flushArmed bool
 	follow     bool // keep the viewport at the bottom
+	mouse      bool // cell-motion tracking: off so the terminal keeps selection
 
 	lastCtrlC   time.Time
 	hint        string
@@ -262,7 +263,13 @@ func (m Model) View() tea.View {
 	parts = append(parts, rule, m.comp.View(), rule, m.statusBar())
 	v := tea.NewView(strings.Join(parts, "\n"))
 	v.AltScreen = !m.opts.Plain
-	v.MouseMode = tea.MouseModeCellMotion
+	// Cell-motion tracking hands every click and drag to the program, which
+	// is what stops the terminal's own text selection and copy. It buys one
+	// thing — wheel-scrolling the transcript — so it is opt-in (alt+m or
+	// /mouse) and shift+up/shift+down scroll without it.
+	if m.mouse {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	v.WindowTitle = m.windowTitle()
 	if m.ov == nil {
 		if c := m.comp.Cursor(); c != nil {

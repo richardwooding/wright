@@ -154,10 +154,25 @@ func (m Model) onGlobalKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		return true, m, nil
 	case "ctrl+l":
 		return true, m, tea.ClearScreen
-	case "pgup", "pgdown":
+	case "alt+m":
+		m.toggleMouse()
+		return true, m, nil
+	case "pgup", "pgdown", "shift+up", "shift+down":
 		return true, m.scroll(msg.String()), nil
 	}
 	return false, m, nil
+}
+
+// toggleMouse turns cell-motion tracking on or off and says which way, since
+// the cost (no terminal selection) and the benefit (wheel scroll) are both
+// invisible in the frame itself.
+func (m *Model) toggleMouse() {
+	m.mouse = !m.mouse
+	if m.mouse {
+		m.notice("mouse on: wheel scrolls the transcript, but the terminal's own text selection is disabled", transcript.LevelInfo)
+		return
+	}
+	m.notice("mouse off: select and copy with the terminal; scroll with shift+up/shift+down or pgup/pgdn", transcript.LevelInfo)
 }
 
 // onCtrlC quits on the second press within the window; the first press only
@@ -174,13 +189,18 @@ func (m Model) onCtrlC() (tea.Model, tea.Cmd) {
 }
 
 // scroll moves the transcript and stops following the tail until the user
-// scrolls back to the bottom.
+// scrolls back to the bottom. shift+up/shift+down are the line-granularity
+// pair that replaces the wheel when the mouse is off (the default).
 func (m Model) scroll(key string) Model {
 	switch key {
 	case "pgup":
 		m.vp.PageUp()
 	case "pgdown":
 		m.vp.PageDown()
+	case "shift+up":
+		m.vp.ScrollUp(1)
+	case "shift+down":
+		m.vp.ScrollDown(1)
 	}
 	m.follow = m.vp.AtBottom()
 	return m

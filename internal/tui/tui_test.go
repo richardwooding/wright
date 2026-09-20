@@ -173,6 +173,16 @@ func key(s string) tea.KeyPressMsg {
 		return tea.KeyPressMsg{Code: 't', Mod: tea.ModCtrl}
 	case "ctrl+j":
 		return tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl}
+	case "alt+m":
+		return tea.KeyPressMsg{Code: 'm', Mod: tea.ModAlt}
+	case "pgup":
+		return tea.KeyPressMsg{Code: tea.KeyPgUp}
+	case "pgdown":
+		return tea.KeyPressMsg{Code: tea.KeyPgDown}
+	case "shift+up":
+		return tea.KeyPressMsg{Code: tea.KeyUp, Mod: tea.ModShift}
+	case "shift+down":
+		return tea.KeyPressMsg{Code: tea.KeyDown, Mod: tea.ModShift}
 	}
 	r := []rune(s)
 	return tea.KeyPressMsg{Code: r[0], Text: s}
@@ -688,6 +698,67 @@ func TestWindowTitleSaysWhenWorking(t *testing.T) {
 	m = event(m, engine.Event{Kind: engine.KindRunFinished, Finish: &engine.Finish{Steps: 1}})
 	if title := m.View().WindowTitle; title != "wright — wright" {
 		t.Errorf("title after the run = %q", title)
+	}
+}
+
+func TestMouseOffByDefaultAndToggles(t *testing.T) {
+	m := newModel(t, &fakeController{}, 80, 24)
+	if mode := m.View().MouseMode; mode != tea.MouseModeNone {
+		t.Fatalf("mouse mode %v at start: tracking the mouse disables the terminal's own selection", mode)
+	}
+	m = update(m, key("alt+m"))
+	if mode := m.View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("alt+m left the mouse mode at %v", mode)
+	}
+	if v := content(m); !strings.Contains(v, "mouse on") {
+		t.Errorf("no notice for the toggle:\n%s", v)
+	}
+	m = update(m, key("alt+m"))
+	if mode := m.View().MouseMode; mode != tea.MouseModeNone {
+		t.Fatalf("alt+m did not turn the mouse back off: %v", mode)
+	}
+	m = typeText(m, "/mouse")
+	m = update(m, key("enter"))
+	if mode := m.View().MouseMode; mode != tea.MouseModeCellMotion {
+		t.Fatalf("/mouse left the mouse mode at %v", mode)
+	}
+}
+
+// TestShiftArrowsScrollByLine covers the keyboard replacement for the wheel:
+// the mouse is off by default, and pgup/pgdn only move whole pages.
+func TestShiftArrowsScrollByLine(t *testing.T) {
+	const width = 60
+	m := newModel(t, &fakeController{}, width, 12)
+	for i := range 40 {
+		m = event(m, engine.Event{Kind: engine.KindNotice, Text: "notice " + strconv.Itoa(i)})
+	}
+	// Everything above the upper rule is the transcript; scrolling a line
+	// shifts every row of it.
+	transcript := func(m tui.Model) string {
+		lines := strings.Split(content(m), "\n")
+		rows := ruleRows(lines, width)
+		if len(rows) == 0 {
+			t.Fatal("no rule row to find the transcript by")
+		}
+		return strings.Join(lines[:rows[0]], "\n")
+	}
+	bottom := transcript(m)
+	m = update(m, key("shift+up"))
+	up := transcript(m)
+	if up == bottom {
+		t.Fatalf("shift+up did not scroll:\n%s", bottom)
+	}
+	m = update(m, key("shift+up"))
+	if transcript(m) == up {
+		t.Fatal("the second shift+up did not scroll")
+	}
+	m = update(m, key("shift+down"))
+	if got := transcript(m); got != up {
+		t.Fatalf("shift+down did not go one line back:\n%s\nwant:\n%s", got, up)
+	}
+	m = update(m, key("shift+down"))
+	if got := transcript(m); got != bottom {
+		t.Fatalf("not back at the tail:\n%s\nwant:\n%s", got, bottom)
 	}
 }
 
