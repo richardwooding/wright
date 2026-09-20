@@ -1,9 +1,11 @@
 package audit_test
 
 import (
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -289,5 +291,32 @@ func TestSummarizeStopsOnError(t *testing.T) {
 	}
 	if s.Commands != 1 {
 		t.Errorf("partial summary lost: %+v", s)
+	}
+}
+
+// TestSavedRulesReadsAnOlderLog pins the compatibility the plural field owes
+// the singular one it replaced. A log is evidence about a session and is kept
+// long after the wright that wrote it: an export of a session recorded before
+// one prompt could accept several rules must still say what was saved.
+func TestSavedRulesReadsAnOlderLog(t *testing.T) {
+	tests := []struct {
+		name string
+		line string
+		want []string
+	}{
+		{"older log", `{"grant":"bash(fpc *) (project)"}`, []string{"bash(fpc *) (project)"}},
+		{"current log", `{"grants":["bash(fpc *) (session)","bash(go *) (project)"]}`, []string{"bash(fpc *) (session)", "bash(go *) (project)"}},
+		{"nothing saved", `{"outcome":"allow"}`, nil},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var d audit.Decision
+			if err := json.Unmarshal([]byte(tt.line), &d); err != nil {
+				t.Fatal(err)
+			}
+			if got := d.SavedRules(); !slices.Equal(got, tt.want) {
+				t.Errorf("SavedRules() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

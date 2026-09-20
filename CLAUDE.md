@@ -161,6 +161,31 @@ client to HTTP MCP transports).
   hand either because `coverBash` bails too. A new reason to give up on
   analysis belongs in `Unknown`; only `classify.go`'s "unknown command" case
   is `Unrecognised`.
+- **A dynamic argument hides a script only where it could be acted on.**
+  Any word depending on runtime expansion used to set `Command.Dynamic`, and
+  that sets `Analysis.Unknown` for the whole script, so the idiom the agent
+  writes constantly — `echo "exit=$?"` — made an entire build un-allowable:
+  the same command offered two rules ending `| tail -60` and none ending
+  `| tail -70; echo "exit=$?"`. Inertness is **declared by the handler**
+  (`noFiles` sets `result.inert`), never inferred from an empty result: a
+  reader such as `ls $(…)` takes file operands and simply cannot *declare*
+  the read when the word is dynamic, which is exactly when the script must
+  stay opaque. Redirects are attached after classification, so `walkCall`
+  revisits the decision (`Command.dynamicArgs`) once `Writes`/`Reads` are
+  known — `echo "$X"` is legible, `echo "$X" > f` is not. A dynamic command
+  *name* is a different question and `commandName` already answers it.
+- **A rule should name the program, not the wrapper.** `wrapTimeout`/`env`
+  peel for classification but `Argv` keeps the words as written, so the offer
+  for `timeout 120 ./bin/t --all` was `bash(timeout 120 *)`: too broad, and
+  useless the moment the model picked a different duration.
+  `result.argv` records the peeled command (every wrapper returns
+  `a.inner(...)`, so it propagates for free) and surfaces as
+  `Command.Program`. `offerWords` names `Program`; `matchesCommand` matches a
+  rule against `Argv` **or** `Program`, because an offer that could never
+  take effect is the failure this whole thing is about, and because a rule
+  someone already saved for the outer form must keep working. This widens
+  what a rule covers (`bash(rm *)` now also covers `timeout 5 rm …`); the
+  floors still run first.
 - **A command that needs no rule is skipped when covering a script.**
   `coverBash` requires *every* command in a script to match an allow rule, and
   the model writes `cd dir && tool … | grep …`, so a saved rule for `tool` was
@@ -195,6 +220,20 @@ client to HTTP MCP transports).
   value outside the workspace is opaque. The global options taint the
   subcommand's result instead of replacing it — returning early there would
   drop the hard deny `git push --force origin main` raises.
+- **One approval can accept several rules.** `engine.Decision.Grants` is a
+  list: a script needs a rule per command, and a prompt that could accept one
+  meant being asked again on the very next call. `Engine.ask` dedupes by rule
+  text keeping the **wider** scope (`ScopeProjectLocal` adds to `e.grants` as
+  well as persisting, so it subsumes `ScopeSession`) and reports a rule it
+  could not record by name without dropping the others. The grants overlay is
+  multi-select (`list.marks`, `space`/`enter`), a digit still answers at once,
+  and `--plain` takes `2,4`. `audit.Decision.Grants` is the plural field;
+  `Grant` is never written and exists so an older log still exports —
+  `SavedRules()` is the only thing that should read either.
+- **`appendRule` must not append a rule that is already there.** Accepting
+  the same offer twice is ordinary, and appending unconditionally put three
+  copies of `bash(fpc *)` in one user's settings. `config.Merge` dedupes
+  across layers; this is the within-one-file case.
 - **The hard-deny set is a floor, not a rule.** It is checked before rules and
   before the mode table, including in bypass mode, and it counts
   (`Engine.HardDenials`; the run is cancelled after three). Add new entries in
@@ -380,6 +419,16 @@ client to HTTP MCP transports).
   against that directory. Anything that classifies a command has to use the
   same base the command will use, or the verdict and the approval preview
   describe a different file from the one that is opened.
+- **A bound the model is not told about is one it will re-implement.** Every
+  bash call is killed with its process group after 120 s (600 s via the
+  `timeout` argument), but that lived only in a JSON-schema property
+  description, so the agent wrote `timeout 120 …` itself — which is how a
+  saved rule came to name the wrapper. `bashTimeoutNote` is built from the
+  constants and used both in the tool description and in the `Docs()` line
+  that reaches the system prompt; the struct tag cannot be derived from them,
+  so a test pins it. The gap that remains: the bound is per call, so one
+  command inside `a && b | c` cannot be bounded on its own, and a harness
+  timeout reports exit code -1, not 124.
 - **Sandboxed commands are `bash -c`.** Never `-lc`: a login shell sources
   `/etc/profile`, `/etc/profile.d/*` and the user's `~/.bash_profile` (real
   on the `none` backend), which can undo the filtered environment. The
@@ -623,7 +672,8 @@ client to HTTP MCP transports).
   deny for `SeverityDestructive`, says in the "allow" label *and* in the facts
   what allowing hands over (`Approval.Grants`: network, and the exact
   directories an install will be able to write), offers "allow…" only when the
-  engine produced `Offers`, shows each offer's exact rule text and scope, validates
+  engine produced `Offers`, shows each offer's exact rule text and scope, marks
+  the rules to be remembered with `[x]`/`[ ]` rather than by colour, validates
   edited arguments with `json.Valid`, and `esc` is deny. Bypass is reachable
   only through the typed-word confirm and still goes through
   `Controller.SetMode`, which the policy engine refuses without the flag.

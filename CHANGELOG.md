@@ -6,6 +6,65 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-09-20
+
+The other three ways the approval prompt defeated itself, from the same
+Pascal session: a trailing `echo "exit=$?"` made a whole script un-allowable,
+the rule offered named the `timeout` wrapper instead of the program, and one
+prompt could only ever accept one rule.
+
+### Fixed
+
+- **`echo "exit=$?"` made an entire script impossible to allow.** Any word
+  that depends on runtime expansion marked the script *opaque*, and no allow
+  rule may match an opaque script — so the same build asked for approval with
+  two rules offered when it ended `… | tail -60`, and with **none** when it
+  ended `… | tail -70; echo "exit=$?"`. The agent writes that idiom
+  constantly; every one of them cost a rule.
+
+  A dynamic *argument* now only hides the script when the command could act on
+  the value. Inertness is declared by the command's own handler — `echo`,
+  `printf`, `true`, `pwd` take no file operands at all — never inferred, and a
+  redirect disqualifies: `echo "$X"` is legible, `echo "$X" > f` is not.
+  Everything else is unchanged: `rm $X`, `cat $F`, `$TOOL`, `sh -c "$CMD"`,
+  `timeout $N cmd`, `export PATH=$X` and `GOFLAGS=$F go build` all stay
+  opaque.
+- **The rule you were offered named the wrapper, not the program.** For
+  `timeout 120 ./bin/llmkittests --all` the offer was `bash(timeout 120 *)` —
+  at once too broad (any command under that exact wrapper) and too narrow
+  (`timeout 30 …` never matched it), and the binary's own rule was never
+  proposed. An offer now names the program a wrapper peels down to, and a rule
+  matches a command by either spelling, so `bash(./bin/llmkittests *)` covers
+  every duration and a rule already saved for the outer form keeps working.
+  Every floor still runs first: `timeout 120 rm -rf ~` is hard-denied with a
+  rule for `bash(rm *)` present.
+- **Accepting the same rule twice saved it twice.** One user's
+  `settings.local.json` held three copies of `bash(fpc *)`.
+
+### Added
+
+- **One prompt can now accept several rules.** A script routinely needs a rule
+  per command — `cd X && fpc … && ./bin/t --all` wants two — and accepting one
+  meant being asked again on the very next call. On the "allow…" page, space
+  marks a rule and enter applies everything marked; enter with nothing marked
+  still applies the focused row and a number still applies that one row
+  immediately, so the single-rule case costs exactly what it did before. Rows
+  show `[x]`/`[ ]` rather than relying on colour, and `--plain` takes a
+  comma-separated answer (`2,4`). Marking both scopes of one rule saves it
+  once, at the wider scope.
+- The bash tool now tells the model it already has a timeout — 120 seconds by
+  default, 600 at most, the whole process group killed — in its description
+  and in the system prompt, so the agent stops wrapping commands in `timeout`
+  itself. The sentence is built from the constants that enforce it. The bound
+  is per call, so there is still no way to bound one command inside
+  `a && b | c`, and a harness timeout reports exit code -1, not 124.
+
+### Changed
+
+- Audit `decision` lines record `grants` (a list) instead of `grant`; an
+  export of a session recorded by an earlier wright still shows what was
+  saved.
+
 ## [0.3.3] - 2026-09-20
 
 "Always allow" now works for programs wright has never heard of. Reported from

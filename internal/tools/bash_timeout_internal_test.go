@@ -37,7 +37,7 @@ func TestBashTimeoutIsStatedWhereverTheModelReads(t *testing.T) {
 		t.Errorf("the system-prompt guidance for bash does not carry the note:\n%s", docs)
 	}
 
-	f, ok := reflect.TypeOf(bashArgs{}).FieldByName("Timeout")
+	f, ok := reflect.TypeFor[bashArgs]().FieldByName("Timeout")
 	if !ok {
 		t.Fatal("bashArgs has no Timeout field")
 	}

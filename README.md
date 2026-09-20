@@ -208,7 +208,15 @@ declaring no paths, such as the `cd` and `grep` around a build command). A
 program wright has no description of still asks, but a rule naming it —
 `bash(fpc *)` — covers it, so "always allow" works for tools outside the
 builtin set. A script the analyser cannot read at all (`eval`, `sh -c "$VAR"`,
-a dynamic command name) matches no allow rule, ever, and is offered none.
+a dynamic command name) matches no allow rule, ever, and is offered none. A
+value the analyser cannot see hides the script only where the command could
+act on it: `echo "exit=$?"` is readable — nothing `echo` is handed can become
+a path or a command — while `cat $F`, `rm $X`, `echo "$X" > f` and
+`timeout $N cmd` are not.
+
+A rule names the program, not the wrapper in front of it. `timeout 120 ./bin/t
+--all` is offered as `bash(./bin/t *)`, which covers it whatever duration the
+model picks; a rule written against the outer form still matches it too.
 
 `+net` and `+install` are bash-only suffixes. `+net` allows the command *and*
 grants the sandbox network for it. `+install` grants the network **and** makes
@@ -220,7 +228,11 @@ can actually be written down. A saved rule for an installing command needs
 running and failing on a read-only file system. A script is allowed by rules only when **every** command in it
 matches an allow rule and nothing in it is opaque. `*` is refused in allow
 lists. An "always allow" offer in the approval prompt is never made for
-destructive or opaque commands and never widens beyond two argv words.
+destructive or opaque commands and never widens beyond two argv words. One
+prompt can accept several of them: on the "allow…" page, **space** marks a
+rule and **enter** applies everything marked (enter with nothing marked
+applies the focused row, and a number still applies that one row at once).
+`--plain` takes a comma-separated answer.
 
 The builtin defaults (`internal/policy/builtin.go`, mirrored byte-for-byte in
 the embedded `internal/config/defaults.json`) are:
@@ -340,6 +352,12 @@ calls `bash`, where the permission engine and the sandbox apply as usual.
 is reported without costing you the others.
 
 ## Background jobs
+
+Every `bash` call is bounded: it is killed, with its whole process group,
+after 120 seconds, or after the `timeout` argument, which may raise that to
+600. The bound is per call, so a single command inside `a && b | c` cannot be
+bounded separately, and a harness timeout reports exit code -1 rather than
+124.
 
 A `bash` call with `background` set starts the command and returns a job id at
 once, for anything you would otherwise wait on — a dev server, a watcher, a
@@ -704,7 +722,7 @@ bodies.
 
 ## Status
 
-wright is pre-1.0. v0.3.3 is the current release. Working end to end
+wright is pre-1.0. v0.3.4 is the current release. Working end to end
 today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,
