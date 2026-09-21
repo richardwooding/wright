@@ -21,6 +21,7 @@ import (
 
 	"github.com/richardwooding/wright/internal/engine"
 	"github.com/richardwooding/wright/internal/policy"
+	"github.com/richardwooding/wright/internal/prompt"
 	"github.com/richardwooding/wright/internal/theme"
 	"github.com/richardwooding/wright/internal/tui"
 )
@@ -696,6 +697,33 @@ func TestViewFitsTerminalHeight(t *testing.T) {
 			m = update(m, key("ctrl+j"))
 			return typeText(m, "two")
 		}},
+		// A collapsed card is no longer always one row: a small edit shows a
+		// short diff and a failure shows why. The viewport still has to clamp.
+		{"collapsed cards with diffs", func(m tui.Model) tui.Model {
+			m = event(m, engine.Event{Kind: engine.KindRunStarted})
+			for i := range 12 {
+				id := "e" + strconv.Itoa(i)
+				m = event(m, engine.Event{Kind: engine.KindToolCall, Call: call(id, "edit_file", `{"path":"a.go"}`)})
+				m = event(m, engine.Event{
+					Kind: engine.KindToolResult, Call: call(id, "edit_file", ""),
+					Result:  &core.ToolResult{Content: []core.Part{core.Text("Edited a.go: replaced 1 occurrence at line 3")}},
+					Preview: &engine.Preview{Diff: "--- a/a.go\n+++ b/a.go\n@@ -1,2 +1,3 @@\n ctx\n-old\n+new\n+more\n"},
+				})
+			}
+			return m
+		}},
+		{"collapsed failures", func(m tui.Model) tui.Model {
+			m = event(m, engine.Event{Kind: engine.KindRunStarted})
+			for i := range 10 {
+				id := "b" + strconv.Itoa(i)
+				m = event(m, engine.Event{Kind: engine.KindToolCall, Call: call(id, "bash", `{"command":"go build ./..."}`)})
+				m = event(m, engine.Event{
+					Kind: engine.KindToolResult, Call: call(id, "bash", ""),
+					Result: &core.ToolResult{IsError: true, Content: []core.Part{core.Text("x.go:1:1: a\nx.go:2:1: b\nx.go:3:1: c\n[exit code 2, 1s]")}},
+				})
+			}
+			return m
+		}},
 	}
 	for _, height := range []int{8, 12, 24, 50} {
 		for _, st := range stages {
@@ -1254,4 +1282,47 @@ func TestScrollingTheTranscript(t *testing.T) {
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimRight(s, "\n "), "\n")
 	return lines[len(lines)-1]
+}
+
+// expandCards opens every tool card, so a test can assert on a body rather
+// than on the one-line collapsed form.
+func expandCards(m tui.Model) tui.Model {
+	return update(m, tea.KeyPressMsg{Code: 'o', Mod: tea.ModCtrl})
+}
+
+// TestTranscriptHidesTheUntrustedFence asserts the reader sees the tool's
+// output and not the envelope the model was handed. The fence is addressed to
+// the model; the human already knows tool output is tool output.
+func TestTranscriptHidesTheUntrustedFence(t *testing.T) {
+	m := newModel(t, &fakeController{}, 100, 30)
+	m = event(m, engine.Event{Kind: engine.KindToolCall, Call: call("c1", "bash", `{"command":"ls"}`)})
+	m = event(m, engine.Event{
+		Kind: engine.KindToolResult, Call: call("c1", "bash", ""),
+		Result: &core.ToolResult{Content: []core.Part{core.Text(prompt.WrapUntrusted("bash", "a.go\nb.go"))}},
+	})
+	out := content(expandCards(m))
+	if strings.Contains(out, "untrusted") {
+		t.Errorf("the fence reached the screen:\n%s", out)
+	}
+	if !strings.Contains(out, "a.go") {
+		t.Errorf("the output did not:\n%s", out)
+	}
+}
+
+// TestBashDiffOutputIsColoured is the second half of stripping the fence: the
+// fence was the string's prefix, so diffview.IsDiff could never match a
+// successful result and `git diff` through bash has never been coloured.
+func TestBashDiffOutputIsColoured(t *testing.T) {
+	diff := "diff --git a/x.go b/x.go\n--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,2 @@\n-old\n+new\n"
+	m := newModel(t, &fakeController{}, 100, 30)
+	m = event(m, engine.Event{Kind: engine.KindToolCall, Call: call("c1", "bash", `{"command":"git diff"}`)})
+	m = event(m, engine.Event{
+		Kind: engine.KindToolResult, Call: call("c1", "bash", ""),
+		Result: &core.ToolResult{Content: []core.Part{core.Text(prompt.WrapUntrusted("bash", diff))}},
+	})
+	out := content(expandCards(m))
+	// +1 −1 in the headline is what only the diff path can produce.
+	if !strings.Contains(out, "+1") || !strings.Contains(out, "−1") {
+		t.Errorf("bash diff output was not recognised as a diff:\n%s", out)
+	}
 }

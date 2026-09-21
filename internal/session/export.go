@@ -15,6 +15,7 @@ import (
 	"github.com/richardwooding/llmkit/core"
 
 	"github.com/richardwooding/wright/internal/audit"
+	"github.com/richardwooding/wright/internal/prompt"
 )
 
 // exportResultLimit caps a tool result in the export; the transcript keeps
@@ -241,7 +242,14 @@ func writeResult(w *bufio.Writer, res core.ToolResult) {
 	if res.IsError {
 		label = "Error"
 	}
-	text := truncate(res.Text(), exportResultLimit)
+	// Strip the model's <untrusted> fence before truncating, not after: the
+	// fence is ~40 characters of the budget, and unwrapping a string that has
+	// already been cut would leave a dangling opener with no closer.
+	text := res.Text()
+	if _, body, ok := prompt.Unwrap(text); ok {
+		text = body
+	}
+	text = truncate(text, exportResultLimit)
 	fmt.Fprintf(w, "<details><summary>%s: %s</summary>\n\n```\n%s\n```\n\n</details>\n\n", label, res.Name, text)
 }
 

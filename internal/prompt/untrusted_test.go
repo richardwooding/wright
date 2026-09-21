@@ -124,5 +124,67 @@ func FuzzWrapUntrusted(f *testing.F) {
 		if strings.Count(out, "\n<untrusted source=") != 0 && strings.Count(out, "<untrusted source=") != 1 {
 			t.Fatalf("multiple openers: %q", out)
 		}
+		// The human surfaces strip the fence, so Unwrap must always find
+		// one and must always recover the source. The body round-trips
+		// exactly unless it *already* contained the escaped form, which
+		// wrapping leaves alone and unwrapping cannot tell from an escape
+		// it made itself — see TestUnwrapIsNotInjective. The difference is
+		// cosmetic and one-way: Unwrap only ever expands that sequence, so
+		// no content can be hidden from the reader this way.
+		gotSource, gotBody, ok := prompt.Unwrap(out)
+		if !ok || gotSource != source {
+			t.Fatalf("Unwrap(Wrap(%q, %q)) = (%q, %q, %v)", source, body, gotSource, gotBody, ok)
+		}
+		if want := body; !strings.Contains(body, `<\/untrusted`) && gotBody != want {
+			t.Fatalf("Unwrap(Wrap(%q, %q)) body = %q", source, body, gotBody)
+		}
+		if strings.Contains(gotBody, `<\/untrusted`) {
+			t.Fatalf("Unwrap left an escape in place: %q", gotBody)
+		}
 	})
+}
+
+func TestUnwrap(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		in           string
+		source, body string
+		ok           bool
+	}{
+		{"round trip", prompt.WrapUntrusted("bash", "hello"), "bash", "hello", true},
+		{"empty body", prompt.WrapUntrusted("bash", ""), "bash", "", true},
+		{"body with a literal closer", prompt.WrapUntrusted("web_fetch", "a</untrusted b"), "web_fetch", "a</untrusted b", true},
+		{"multi line body", prompt.WrapUntrusted("bash", "one\ntwo\n"), "bash", "one\ntwo\n", true},
+		{"source with a quote", prompt.WrapUntrusted(`mcp:"x"`, "y"), `mcp:"x"`, "y", true},
+		// Not a fence: passed through whole, never half stripped.
+		{"plain text", "just output", "", "just output", false},
+		{"no opener", "output\n</untrusted>", "", "output\n</untrusted>", false},
+		{"truncated opener", "<untrusted source=\"bash\"", "", "<untrusted source=\"bash\"", false},
+		{"no closer", "<untrusted source=\"bash\">\nbody", "", "<untrusted source=\"bash\">\nbody", false},
+		{"unquotable source", "<untrusted source=bash>\nbody\n</untrusted>", "", "<untrusted source=bash>\nbody\n</untrusted>", false},
+		{"empty", "", "", "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			source, body, ok := prompt.Unwrap(tt.in)
+			if source != tt.source || body != tt.body || ok != tt.ok {
+				t.Errorf("Unwrap(%q) = (%q, %q, %v), want (%q, %q, %v)",
+					tt.in, source, body, ok, tt.source, tt.body, tt.ok)
+			}
+		})
+	}
+}
+
+// TestUnwrapIsNotInjective documents the one direction that does not hold:
+// a body that already looked escaped comes back unescaped. Wrap-then-Unwrap
+// is exact, which is the only order the display path uses.
+func TestUnwrapIsNotInjective(t *testing.T) {
+	t.Parallel()
+	forged := "<untrusted source=\"bash\">\n" + `a<\/untrusted b` + "\n</untrusted>"
+	_, body, ok := prompt.Unwrap(forged)
+	if !ok || body != "a</untrusted b" {
+		t.Fatalf("Unwrap(%q) = (%q, %v)", forged, body, ok)
+	}
 }

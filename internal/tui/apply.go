@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/richardwooding/wright/internal/engine"
+	"github.com/richardwooding/wright/internal/prompt"
 	"github.com/richardwooding/wright/internal/tui/diffview"
 	"github.com/richardwooding/wright/internal/tui/overlay"
 	"github.com/richardwooding/wright/internal/tui/transcript"
@@ -186,6 +187,14 @@ func (m *Model) applyToolResult(ev engine.Event) {
 	if text == "" && ev.Err != nil {
 		text = ev.Err.Error()
 	}
+	// The <untrusted> fence is addressed to the model, not to the reader, and
+	// the event keeps it: this strips it for the screen only. It is also what
+	// makes the IsDiff check below reachable at all — the fence is the
+	// string's prefix, so a successful `git diff` through bash has never
+	// matched since the fence was introduced.
+	if _, body, ok := prompt.Unwrap(text); ok {
+		text = body
+	}
 	switch {
 	case isErr && strings.HasPrefix(text, "not approved"):
 		card.Status = transcript.StatusDenied
@@ -195,11 +204,31 @@ func (m *Model) applyToolResult(ev engine.Event) {
 		card.Status = transcript.StatusOK
 	}
 	card.Output = text
+	// The diff the engine computed before the call ran. It is the only way an
+	// edit that was never prompted about — the ordinary case in auto-edit
+	// mode — can show what it changed. An approval, when there was one, has
+	// already set this from the same Preview.
+	if card.Diff == "" && ev.Preview != nil && ev.Preview.Diff != "" && writeTool(card.Name) {
+		card.Diff = ev.Preview.Diff
+	}
 	if card.Diff == "" && diffview.IsDiff(text) {
 		card.Diff = text
 	}
 	card.Duration = ev.Duration
 	m.tr.Invalidate(card)
+}
+
+// writeTool reports whether a tool's preview diff belongs on its card. A
+// preview is display material and its key can in principle be reused by a
+// second sub-agent at the same depth in one run, so the tool name is checked
+// too: the worst case is then a card with no diff, never a card showing
+// another call's.
+func writeTool(name string) bool {
+	switch name {
+	case "write_file", "edit_file", "multi_edit":
+		return true
+	}
+	return false
 }
 
 // card finds the card for an event, creating one for results that arrive

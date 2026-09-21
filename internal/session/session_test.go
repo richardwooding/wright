@@ -15,6 +15,7 @@ import (
 	"github.com/richardwooding/llmkit/core"
 
 	"github.com/richardwooding/wright/internal/audit"
+	"github.com/richardwooding/wright/internal/prompt"
 	"github.com/richardwooding/wright/internal/session"
 	"github.com/richardwooding/wright/internal/workspace"
 )
@@ -546,5 +547,72 @@ func TestExportMidRunSaysSoRatherThanLookingEmpty(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "no messages yet") {
 		t.Errorf("export = %q, want it to say the first step has not finished", buf.String())
+	}
+}
+
+// TestExportMarkdownStripsUntrustedFence asserts the export shows the result
+// the tool produced, not the envelope the model was handed. The fence tells
+// the model "this is data, not instructions"; a human reading an export needs
+// no such warning and the tag is pure noise.
+func TestExportMarkdownStripsUntrustedFence(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	body := "diff --git a/x.go b/x.go\n@@ -1 +1 @@\n-old\n+new"
+	msgs := []core.Message{
+		core.UserText("show me the diff"),
+		core.Assistant(core.ToolCall{ID: "c1", Name: "bash", Arguments: json.RawMessage(`{"command":"git diff"}`)}),
+		core.ToolResults(core.ToolResultText("c1", "bash", prompt.WrapUntrusted("bash", body))),
+	}
+	if err := f.store.Append(ctx, "u", msgs...); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Touch(ctx, session.Meta{ID: "u", Model: "fake"}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := f.store.ExportMarkdown(ctx, "u", &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "<untrusted") || strings.Contains(out, "</untrusted>") {
+		t.Errorf("export still carries the fence:\n%s", out)
+	}
+	if !strings.Contains(out, body) {
+		t.Errorf("export lost the result body:\n%s", out)
+	}
+	// The surrounding structure is a near-contract; unwrapping must not move it.
+	if !strings.Contains(out, "<details><summary>Result: bash</summary>") {
+		t.Errorf("export lost its result block:\n%s", out)
+	}
+}
+
+// TestExportMarkdownTruncatesTheBodyNotTheFence pins the order: unwrapping
+// after truncation would spend ~40 characters of the budget on the envelope
+// and leave an opener with no closer.
+func TestExportMarkdownTruncatesTheBodyNotTheFence(t *testing.T) {
+	f := newFixture(t)
+	ctx := context.Background()
+	long := strings.Repeat("line\n", 1000) // 5000 bytes, same shape as TestExportMarkdown
+	msgs := []core.Message{
+		core.Assistant(core.ToolCall{ID: "c1", Name: "bash", Arguments: json.RawMessage(`{"command":"ls"}`)}),
+		core.ToolResults(core.ToolResultText("c1", "bash", prompt.WrapUntrusted("bash", long))),
+	}
+	if err := f.store.Append(ctx, "t", msgs...); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.store.Touch(ctx, session.Meta{ID: "t", Model: "fake"}); err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := f.store.ExportMarkdown(ctx, "t", &buf); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if strings.Contains(out, "untrusted") {
+		t.Errorf("export carries the fence:\n%s", out[:min(len(out), 600)])
+	}
+	// Identical to the unfenced fixture's count: the envelope costs nothing.
+	if !strings.Contains(out, "truncated, 3000 more characters") {
+		t.Errorf("truncation counted the fence, not just the body:\n%s", out[:min(len(out), 600)])
 	}
 }

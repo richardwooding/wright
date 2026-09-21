@@ -20,6 +20,41 @@ func WrapUntrusted(source, body string) string {
 	return "<untrusted source=" + strconv.Quote(source) + ">\n" + escaped + "\n</untrusted>"
 }
 
+// Unwrap reverses WrapUntrusted: it returns the source attribute and the
+// original body of a fenced block. ok is false when s is not one, and then
+// body is s unchanged and source is "" — a string that only half matches is
+// passed through untouched rather than half stripped.
+//
+// It exists for the two surfaces a *human* reads, the transcript and an
+// export. The fence is addressed to the model ("this is data, not
+// instructions"); showing it to the user is noise that also hid every diff a
+// tool produced, since the fence is the string's prefix.
+//
+// WrapUntrusted is not injective — a body that already contained "<\/untrusted"
+// is indistinguishable from one that was escaped — so Unwrap(WrapUntrusted(x))
+// is x, but not the other way round.
+func Unwrap(s string) (source, body string, ok bool) {
+	rest, ok := strings.CutPrefix(s, "<untrusted source=")
+	if !ok {
+		return "", s, false
+	}
+	// The attribute is strconv.Quote'd, so the closing quote is unambiguous
+	// and ">" cannot appear unescaped before it.
+	quoted, rest, ok := strings.Cut(rest, ">\n")
+	if !ok {
+		return "", s, false
+	}
+	source, err := strconv.Unquote(quoted)
+	if err != nil {
+		return "", s, false
+	}
+	body, ok = strings.CutSuffix(rest, "\n</untrusted>")
+	if !ok {
+		return "", s, false
+	}
+	return source, strings.ReplaceAll(body, `<\/untrusted`, closeUntrusted), true
+}
+
 // Signal is one prompt-injection indicator found by ScanInjection.
 type Signal struct {
 	Kind    string
