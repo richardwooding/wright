@@ -93,6 +93,7 @@ type Engine struct {
 	githubAuth bool
 	answers    map[string]chan Answer
 	grants     map[string]CallGrant
+	previews   map[string]Preview
 	seq        int
 	ctxWin     int
 	hardDeny   int
@@ -134,6 +135,7 @@ func New(ctx context.Context, o Options) (*Engine, error) {
 		inflight: map[int]InFlight{},
 		answers:  map[string]chan Answer{},
 		grants:   map[string]CallGrant{},
+		previews: map[string]Preview{},
 		events:   make(chan Event, 256),
 		closed:   make(chan struct{}),
 		now:      o.Now,

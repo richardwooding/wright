@@ -257,3 +257,68 @@ func TestParseFormat(t *testing.T) {
 		t.Error("yaml should be rejected")
 	}
 }
+
+// TestStreamJSONTypesAreTheDocumentedSet guards the schema documented in the
+// README against events added for the terminal's benefit. The `type` values
+// are machine-read, so growing the vocabulary is a breaking change — which is
+// why display material (a tool call's preview and its diff) travels as a
+// *field* on an existing event rather than as a kind of its own.
+func TestStreamJSONTypesAreTheDocumentedSet(t *testing.T) {
+	// Exactly the list at README "--output stream-json emits one JSON object
+	// per line", plus the terminating "result" line that replaces
+	// run_finished. Adding a row here means adding one there.
+	documented := map[string]bool{
+		"run_started": true, "step": true, "text": true, "reasoning": true,
+		"tool_call": true, "tool_progress": true, "tool_result": true,
+		"usage": true, "approval_request": true, "approval_decided": true,
+		"question": true, "todos": true, "queued": true, "notice": true,
+		"error": true, "retry": true, "compact": true, "redacted": true,
+		"injection": true, "external_prompt": true, "result": true,
+	}
+	// Every kind the engine can name must be accounted for, so a kind added
+	// later fails here rather than reaching a consumer undocumented. This is
+	// the half that would have caught the five types the README was missing.
+	for k := engine.Kind(1); k.String() != "unknown"; k++ {
+		if name := k.String(); !documented[name] && name != "run_finished" {
+			t.Errorf("engine kind %q can reach stream-json but is not in the README's type list", name)
+		}
+	}
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.CallResp("c1", "read_file", `{"path":"a.go"}`),
+		enginetest.CallResp("c2", "edit_file", `{"path":"a.go"}`), // asks, so denied headlessly
+		enginetest.TextResp("all good"),
+	}}
+	eng := newEngine(t, client, nil)
+	var out, errw bytes.Buffer
+	headless.Run(context.Background(), eng, "do both", nil, headless.FormatStreamJSON, &out, &errw, false)
+	for _, l := range decodeLines(t, out.String()) {
+		if !documented[l.Type] {
+			t.Errorf("undocumented stream-json type %q — the README's type list is a contract", l.Type)
+		}
+	}
+}
+
+// TestStreamJSONKeepsTheUntrustedFence pins the other half: the TUI and
+// `sessions export` strip the fence for their human readers, but the
+// machine-readable surface keeps it, and the README says so.
+func TestStreamJSONKeepsTheUntrustedFence(t *testing.T) {
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.CallResp("c1", "read_file", `{"path":"a.go"}`),
+		enginetest.TextResp("done"),
+	}}
+	eng := newEngine(t, client, nil)
+	var out, errw bytes.Buffer
+	headless.Run(context.Background(), eng, "read a.go", nil, headless.FormatStreamJSON, &out, &errw, false)
+	var found bool
+	for _, l := range decodeLines(t, out.String()) {
+		if l.Type == "tool_result" && l.Result != nil {
+			found = true
+			if !strings.Contains(l.Result.Text, `<untrusted source="read_file">`) {
+				t.Errorf("tool_result lost its fence: %q", l.Result.Text)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("no tool_result line in %s", out.String())
+	}
+}

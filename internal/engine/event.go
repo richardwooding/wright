@@ -86,6 +86,18 @@ type Event struct {
 	Decision *Decision      // ApprovalDecided
 	Question *QuestionEvent // Question
 
+	// Preview is what Describe worked out about this call before it ran: the
+	// title the approval prompt would have shown, and for an edit the real
+	// unified diff. It is attached to ToolResult so the UI can show a diff
+	// for a call that was *never* prompted about — the ordinary case in
+	// auto-edit mode, where the preview was computed and thrown away.
+	//
+	// It is deliberately a field rather than an event kind of its own:
+	// headless projects every kind into the documented stream-json "type"
+	// vocabulary, but builds Line field by field and never marshals an
+	// Event, so a new field cannot reach that contract. Keep it that way.
+	Preview *Preview // ToolResult
+
 	Usage      core.Usage // Usage: this model call; RunFinished: whole run
 	Cost       float64    // Usage, RunFinished: USD, 0 when the model is not in the catalog
 	ContextPct float64    // Usage: last prompt size / context window, 0 when unknown

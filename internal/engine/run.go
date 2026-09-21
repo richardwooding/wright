@@ -236,6 +236,9 @@ func (e *Engine) translate(ev agentkit.Event) {
 		out.Kind, out.Call, out.Text = KindToolProgress, ev.ToolCall, ev.Text
 	case agentkit.EventToolResult:
 		out.Kind, out.Call, out.Result, out.Err, out.Duration = KindToolResult, ev.ToolCall, ev.ToolResult, ev.Err, ev.Duration
+		if ev.ToolCall != nil {
+			out.Preview = e.takePreview(ev.RunID, ev.Depth, ev.ToolCall.ID)
+		}
 	case agentkit.EventRetry:
 		out.Kind, out.Err, out.Attempt, out.Delay = KindRetry, ev.Err, ev.Attempt, ev.Delay
 		out.Text = fmt.Sprintf("retrying model call (attempt %d) in %s: %v", ev.Attempt, ev.Delay.Round(time.Millisecond), ev.Err)

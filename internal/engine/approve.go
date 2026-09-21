@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/richardwooding/agentkit"
@@ -35,6 +36,11 @@ func (e *Engine) Approve(ctx context.Context, c agentkit.Call) (agentkit.Decisio
 		return agentkit.Deny("could not evaluate this call: " + err.Error()), nil
 	}
 	req.Depth = c.Depth
+	// Describe ran for this call whichever way it is about to be decided, so
+	// keep what it produced: the result event carries it to the UI. Before
+	// this, the diff for an edit reached the screen only when an approval
+	// prompt happened to be raised, which in auto-edit mode is never.
+	e.stashPreview(c, preview)
 	verdict := e.policyFor(c.Depth).Evaluate(req)
 	switch verdict.Decision {
 	case policy.Allow:
@@ -227,6 +233,40 @@ func (e *Engine) allowedWithGrant(c agentkit.Call, verdict policy.Verdict, edite
 	return d
 }
 
+// previewKey identifies a call within a run. It is not grantKeyFor: that keys
+// on the arguments too, and the arguments the *result* carries are the edited
+// ones when the user changed them in the prompt. Call IDs repeat across turns
+// (llmkit synthesises call_1, call_2 … per response), which popping on use
+// handles.
+func previewKey(runID string, depth int, callID string) string {
+	return runID + "\x00" + strconv.Itoa(depth) + "\x00" + callID
+}
+
+// stashPreview keeps a call's preview until its result event is translated.
+// Previews are display material only — a title and a diff — so a lost or
+// mismatched one costs a nicer card, never a wrong decision.
+func (e *Engine) stashPreview(c agentkit.Call, p Preview) {
+	if p.Title == "" && p.Diff == "" && p.Body == "" {
+		return
+	}
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.previews[previewKey(c.RunID, c.Depth, c.Call.ID)] = p
+}
+
+// takePreview pops the preview recorded for a call, if any.
+func (e *Engine) takePreview(runID string, depth int, callID string) *Preview {
+	key := previewKey(runID, depth, callID)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	p, ok := e.previews[key]
+	if !ok {
+		return nil
+	}
+	delete(e.previews, key)
+	return &p
+}
+
 // takeGrant pops the grant recorded for a call, if any.
 func (e *Engine) takeGrant(callID string, args json.RawMessage) (CallGrant, bool) {
 	key := grantKeyFor(callID, args)
@@ -338,6 +378,9 @@ func (e *Engine) failPending() {
 	// A grant whose call never ran (a cancelled run) must not be waiting for
 	// the next call that happens to carry the same arguments.
 	clear(e.grants)
+	// Previews are harmless but unbounded: a cancelled run leaves one per
+	// call that never returned a result, and nothing else would ever pop it.
+	clear(e.previews)
 }
 
 func (e *Engine) countHardDeny(ctx context.Context) {

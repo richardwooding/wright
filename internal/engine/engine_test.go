@@ -366,3 +366,43 @@ func TestSetModeRejectsBypass(t *testing.T) {
 		t.Fatalf("SetMode auto-edit: %v", err)
 	}
 }
+
+// TestAutoAllowedCallCarriesItsPreview is the regression this exists for. The
+// engine computes a preview — for an edit, a real unified diff — for every
+// call, at every depth, and before this it was discarded on the Allow branch.
+// A user in auto-edit mode, where edits never prompt, therefore never saw a
+// diff of what the agent changed.
+func TestAutoAllowedCallCarriesItsPreview(t *testing.T) {
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.CallResp("c1", "edit_file", `{"path":"a.go"}`),
+		enginetest.TextResp("done"),
+	}}
+	f := newFixture(t, client, func(o *engine.Options) {
+		o.Mode = policy.ModeAutoEdit // edits are allowed outright: no prompt
+		inner := o.Describe          // the fixture's real describer, for this workspace
+		o.Describe = func(name string, args []byte) (policy.Request, engine.Preview, bool, error) {
+			req, pv, ok, err := inner(name, args)
+			pv.Diff = "--- a/a.go\n+++ b/a.go\n@@ -1 +1 @@\n-old\n+new\n"
+			return req, pv, ok, err
+		}
+	})
+	_ = f.eng.Submit("edit a.go")
+	var result *engine.Event
+	for _, ev := range f.collect(t, nil) {
+		if ev.Kind == engine.KindApprovalRequest {
+			t.Fatalf("auto-edit mode raised an approval prompt; this test is not exercising the Allow branch")
+		}
+		if ev.Kind == engine.KindToolResult && ev.Call != nil && ev.Call.Name == "edit_file" {
+			result = &ev
+		}
+	}
+	if result == nil {
+		t.Fatal("no edit_file result event")
+	}
+	if result.Preview == nil {
+		t.Fatal("the result carried no preview: the diff was computed and thrown away")
+	}
+	if !strings.Contains(result.Preview.Diff, "+new") {
+		t.Errorf("Preview.Diff = %q, want the unified diff", result.Preview.Diff)
+	}
+}
