@@ -2,6 +2,7 @@ package transcript_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -28,6 +29,19 @@ func sample(md *markdown.Renderer) *transcript.Model {
 		Diff: diff, Status: transcript.StatusOK, Duration: 340 * time.Millisecond,
 	})
 	m.Append(&transcript.ToolCard{ID: "c2", Name: "bash", Args: json.RawMessage(`{"command":"go test ./..."}`), Status: transcript.StatusDenied, Depth: 1})
+	// Highlighted content, so the width clamp and the one-row-per-element
+	// rule are checked against styled lines too — a clamped line that lost
+	// its reset sequence would bleed colour into the rest of the row.
+	m.Append(&transcript.ToolCard{
+		ID: "c3", Name: "bash", Args: json.RawMessage(`{"command":"cat src/Demo.pas"}`),
+		Output: "program Demo;\nbegin\n  WriteLn('a very long string literal that will certainly be clamped at a narrow width');\nend.\n[exit code 0, 3ms]",
+		Status: transcript.StatusOK,
+	})
+	m.Append(&transcript.ToolCard{
+		ID: "c4", Name: "read_file", Args: json.RawMessage(`{"path":"internal/x.go"}`),
+		Output: "     1\tpackage main\n     2\tfunc main() { println(\"a long line that needs clamping at forty columns or fewer\") }",
+		Status: transcript.StatusOK,
+	})
 	m.Append(&transcript.Approval{Tool: "bash", Summary: "go test", Allowed: true, By: "user", Rules: []string{"bash(go test *) (session)"}})
 	m.Append(&transcript.Notice{Text: "compacted 40k → 12k tokens", Level: transcript.LevelInfo})
 	m.Append(&transcript.Notice{Text: "sandbox off", Level: transcript.LevelError})
@@ -58,8 +72,14 @@ func TestExpandedCardShowsArgsDiffAndOutput(t *testing.T) {
 	long := strings.Repeat("line\n", 60)
 	out := &transcript.ToolCard{Name: "bash", Args: json.RawMessage(`{"command":"ls"}`), Output: long, Status: transcript.StatusError, Expanded: true}
 	m.Append(out)
-	if s := joined(m.Lines(80)); strings.Contains(s, "+new") {
-		t.Fatalf("collapsed card leaked its diff:\n%s", s)
+	// A collapsed edit card now shows a *short* diff — that is the point of
+	// the card, and the question "what did it just change?" otherwise costs a
+	// keystroke and a scroll. It still shows no arguments and no output.
+	if s := joined(m.Lines(80)); !strings.Contains(s, "+new") {
+		t.Fatalf("collapsed edit card did not show its short diff:\n%s", s)
+	}
+	if s := joined(m.Lines(80)); strings.Contains(s, `"path": "a.go"`) || strings.Contains(s, "line\nline") {
+		t.Fatalf("collapsed card leaked its arguments or output:\n%s", s)
 	}
 	m.SetToolsExpanded(true)
 	s := joined(m.Lines(80))
@@ -70,6 +90,81 @@ func TestExpandedCardShowsArgsDiffAndOutput(t *testing.T) {
 	}
 	if strings.Count(s, "line\n") > 41 {
 		t.Errorf("output tail not limited to 40 lines")
+	}
+}
+
+// TestCollapsedDiffCollapsesWhenLarge is the other half of the rule the user
+// chose: a small change is worth a few rows inline, a large one is a count and
+// a keystroke. 48 edits in one session is an ordinary day.
+func TestCollapsedDiffCollapsesWhenLarge(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("--- a/x.go\n+++ b/x.go\n@@ -1,40 +1,40 @@\n")
+	for i := range 40 {
+		fmt.Fprintf(&b, "-old %d\n+new %d\n", i, i)
+	}
+	m := transcript.New(theme.New(false), nil)
+	m.Append(&transcript.ToolCard{Name: "edit_file", Args: json.RawMessage(`{"path":"a.go"}`), Diff: b.String(), Status: transcript.StatusOK})
+	s := joined(m.Lines(80))
+	if strings.Contains(s, "+new 0") {
+		t.Errorf("an 80-line diff was shown inline:\n%s", s)
+	}
+	for _, want := range []string{"80 changed lines", "ctrl+o", "+40", "−40"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in:\n%s", want, s)
+		}
+	}
+}
+
+// TestCollapsedCardIsOneLineForEverythingElse pins the invariant the row
+// budget rests on: only a small edit earns extra rows.
+func TestCollapsedCardIsOneLineForEverythingElse(t *testing.T) {
+	long := strings.Repeat("line\n", 60)
+	for _, c := range []*transcript.ToolCard{
+		{Name: "bash", Args: json.RawMessage(`{"command":"ls"}`), Output: long, Status: transcript.StatusOK},
+		{Name: "read_file", Args: json.RawMessage(`{"path":"a.go"}`), Output: long, Status: transcript.StatusOK},
+		{Name: "web_fetch", Args: json.RawMessage(`{"url":"https://x.test"}`), Output: long, Status: transcript.StatusOK},
+		{Name: "grep", Args: json.RawMessage(`{"pattern":"x"}`), Output: long, Status: transcript.StatusOK},
+		{Name: "bash", Args: json.RawMessage(`{"command":"sleep 9"}`), Status: transcript.StatusRunning, Progress: []string{"a", "b"}},
+	} {
+		m := transcript.New(theme.New(false), nil)
+		m.Append(c)
+		if got := len(m.Lines(80)); got != 1 {
+			t.Errorf("%s collapsed to %d lines, want 1:\n%s", c.Name, got, joined(m.Lines(80)))
+		}
+	}
+}
+
+// TestCollapsedErrorCardShowsWhyWithoutExpanding is the deliberate second
+// exception to one-line-collapsed. A refusal or a failed build that has to be
+// expanded before it says anything is the worst thing the old card did.
+func TestCollapsedErrorCardShowsWhyWithoutExpanding(t *testing.T) {
+	m := transcript.New(theme.New(false), nil)
+	m.Append(&transcript.ToolCard{
+		Name: "bash", Args: json.RawMessage(`{"command":"go build ./..."}`),
+		Output: "internal/x.go:12:3: undefined: foo\n[exit code 2, 1.8s]",
+		Status: transcript.StatusError,
+	})
+	s := joined(m.Lines(80))
+	for _, want := range []string{"✗ error", "undefined: foo", "[exit code 2, 1.8s]"} {
+		if !strings.Contains(s, want) {
+			t.Errorf("a collapsed failure did not say %q:\n%s", want, s)
+		}
+	}
+}
+
+// TestOneSliceElementPerRow is the invariant the row budget rests on: the
+// viewport counts elements, so an element containing a newline is a row the
+// layout does not know about.
+func TestOneSliceElementPerRow(t *testing.T) {
+	for _, width := range []int{40, 80, 200} {
+		m := sample(markdown.New())
+		m.SetToolsExpanded(true)
+		m.SetShowReasoning(true)
+		for i, l := range m.Lines(width) {
+			if strings.Contains(l, "\n") {
+				t.Errorf("width %d, line %d contains a newline: %q", width, i, l)
+			}
+		}
 	}
 }
 
@@ -148,8 +243,10 @@ func TestLiveEmptyAssistantShowsEllipsis(t *testing.T) {
 
 func TestClearAndBlocks(t *testing.T) {
 	m := sample(nil)
-	if m.Len() != 8 || len(m.Blocks()) != 8 {
-		t.Fatalf("Len = %d", m.Len())
+	// The count is whatever sample() appends; what matters is that Len and
+	// Blocks agree with each other and that Clear empties both.
+	if m.Len() == 0 || m.Len() != len(m.Blocks()) {
+		t.Fatalf("Len = %d, Blocks = %d", m.Len(), len(m.Blocks()))
 	}
 	m.Clear()
 	if m.Len() != 0 || len(m.Lines(80)) != 0 {

@@ -7,6 +7,7 @@ package transcript
 
 import (
 	"github.com/richardwooding/wright/internal/theme"
+	"github.com/richardwooding/wright/internal/tui/highlight"
 	"github.com/richardwooding/wright/internal/tui/markdown"
 )
 
@@ -20,6 +21,7 @@ type renderContext struct {
 	width         int
 	th            theme.Theme
 	md            *markdown.Renderer
+	hl            *highlight.Renderer
 	showReasoning bool
 }
 
@@ -33,6 +35,7 @@ type entry struct {
 // Model owns the blocks and their render cache.
 type Model struct {
 	th            theme.Theme
+	hl            *highlight.Renderer
 	md            *markdown.Renderer
 	width         int
 	showReasoning bool
@@ -41,8 +44,22 @@ type Model struct {
 
 // New builds an empty transcript. md may be nil, in which case assistant text
 // is rendered as plain wrapped text.
-func New(th theme.Theme, md *markdown.Renderer) *Model {
-	return &Model{th: th, md: md}
+func New(th theme.Theme, md *markdown.Renderer, opts ...Option) *Model {
+	m := &Model{th: th, md: md}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
+}
+
+// Option configures a Model.
+type Option func(*Model)
+
+// WithHighlighter supplies the syntax highlighter tool cards use. Without one
+// every card is shown plain, which is what the tests that predate it expect
+// and a perfectly good way to run.
+func WithHighlighter(h *highlight.Renderer) Option {
+	return func(m *Model) { m.hl = h }
 }
 
 // Append adds a block and returns it for later mutation by the caller.
@@ -126,7 +143,7 @@ func (m *Model) Lines(width int) []string {
 		m.width = width
 		m.InvalidateAll()
 	}
-	ctx := renderContext{width: width, th: m.th, md: m.md, showReasoning: m.showReasoning}
+	ctx := renderContext{width: width, th: m.th, md: m.md, hl: m.hl, showReasoning: m.showReasoning}
 	var out []string
 	for i, e := range m.entries {
 		if !e.valid {

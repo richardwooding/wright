@@ -24,6 +24,7 @@ import (
 	"github.com/richardwooding/wright/internal/policy"
 	"github.com/richardwooding/wright/internal/theme"
 	"github.com/richardwooding/wright/internal/tui/composer"
+	"github.com/richardwooding/wright/internal/tui/highlight"
 	"github.com/richardwooding/wright/internal/tui/markdown"
 	"github.com/richardwooding/wright/internal/tui/overlay"
 	"github.com/richardwooding/wright/internal/tui/transcript"
@@ -179,6 +180,7 @@ type Model struct {
 func New(ctl Controller, o Options) Model {
 	th := theme.New(true) // dark until BackgroundColorMsg says otherwise
 	md := markdown.New()
+	hl := highlight.New()
 	m := Model{
 		ctx:    context.Background(),
 		ctl:    ctl,
@@ -186,7 +188,7 @@ func New(ctl Controller, o Options) Model {
 		th:     th,
 		md:     md,
 		vp:     viewport.New(),
-		tr:     transcript.New(th, md),
+		tr:     transcript.New(th, md, transcript.WithHighlighter(hl)),
 		cards:  map[string]*transcript.ToolCard{},
 		follow: true,
 		spin:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),

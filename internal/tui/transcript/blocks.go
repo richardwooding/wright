@@ -12,6 +12,7 @@ import (
 	"github.com/richardwooding/wright/internal/theme"
 	"github.com/richardwooding/wright/internal/tui/diffview"
 	"github.com/richardwooding/wright/internal/tui/markdown"
+	"github.com/richardwooding/wright/internal/tui/toolview"
 )
 
 // Status is the state of a tool card.
@@ -142,16 +143,37 @@ func renderReasoning(ctx renderContext, reasoning string) []string {
 func (c *ToolCard) render(ctx renderContext) []string {
 	indent := strings.Repeat("  ", c.Depth)
 	width := ctx.width - len(indent)
-	head := indent + c.headline(ctx.th, width)
-	if !c.Expanded {
-		return []string{head}
-	}
-	out := []string{head}
+	out := []string{indent + c.headline(ctx.th, width)}
 	bar := ctx.th.Subtle.Render("│ ")
-	for _, l := range c.body(ctx, width-2) {
+	body := c.body(ctx, width-2)
+	if !c.Expanded {
+		// A collapsed card is one line for almost everything. The exception
+		// is a small edit, where a few rows of diff answer the question the
+		// card exists to raise; toolview.Digest decides, and returns nothing
+		// for every other tool.
+		body = toolview.Digest(c.input(ctx, width-2), c.deps(ctx))
+	}
+	for _, l := range body {
 		out = append(out, indent+bar+l)
 	}
 	return out
+}
+
+// input is everything toolview needs to decide how this card looks.
+func (c *ToolCard) input(ctx renderContext, width int) toolview.Input {
+	return toolview.Input{
+		Plan:     toolview.For(c.Name, c.Args),
+		Output:   c.Output,
+		Diff:     c.Diff,
+		Progress: c.Progress,
+		Running:  c.Status == StatusRunning,
+		Errored:  c.Status == StatusError || c.Status == StatusDenied,
+		Width:    width,
+	}
+}
+
+func (c *ToolCard) deps(ctx renderContext) toolview.Deps {
+	return toolview.Deps{Theme: ctx.th, Highlighter: ctx.hl}
 }
 
 // headline is the collapsed one-liner: glyph, name, argument summary, diff
@@ -162,7 +184,7 @@ func (c *ToolCard) headline(th theme.Theme, width int) string {
 		arrow = theme.GlyphExpanded
 	}
 	parts := []string{arrow + " " + th.Bold.Render(c.Name)}
-	if s := c.Summary(); s != "" {
+	if s := toolview.Headline(c.Name, c.Args, c.Output, c.Status == StatusRunning); s != "" {
 		parts = append(parts, s)
 	}
 	if c.Diff != "" {
@@ -193,48 +215,21 @@ func (c *ToolCard) statusWord(th theme.Theme) string {
 	}
 }
 
-// body is the expanded content: arguments, then diff or output tail, then
-// progress lines while running.
+// body is the expanded content: arguments, then the diff or the output tail,
+// then progress lines while running.
 func (c *ToolCard) body(ctx renderContext, width int) []string {
 	var out []string
 	if args := prettyArgs(c.Args); len(args) > 0 {
 		out = append(out, ctx.th.Subtle.Render("args:"))
 		out = append(out, tail(args, argsLines)...)
 	}
-	switch {
-	case c.Diff != "":
-		out = append(out, diffview.Lines(c.Diff, ctx.th, width)...)
-	case c.Output != "":
-		lines := strings.Split(strings.TrimRight(c.Output, "\n"), "\n")
-		if len(lines) > outputTail {
-			out = append(out, ctx.th.Subtle.Render(fmt.Sprintf("… %d earlier lines", len(lines)-outputTail)))
-			lines = lines[len(lines)-outputTail:]
-		}
-		out = append(out, lines...)
-	}
-	if c.Status == StatusRunning {
-		for _, p := range c.Progress {
-			out = append(out, ctx.th.Subtle.Render(p))
-		}
-	}
-	return out
+	return append(out, toolview.Full(c.input(ctx, width), c.deps(ctx))...)
 }
 
-// Summary picks the most telling argument (path, command, pattern…) for the
-// one-liner.
-func (c *ToolCard) Summary() string {
-	var m map[string]any
-	if err := json.Unmarshal(c.Args, &m); err != nil {
-		return ""
-	}
-	for _, key := range []string{"path", "file", "file_path", "command", "cmd", "pattern", "query", "url", "name", "prompt"} {
-		if v, ok := m[key].(string); ok && v != "" {
-			v = strings.ReplaceAll(strings.TrimSpace(v), "\n", " ")
-			return ansi.Truncate(v, summaryMax, "…")
-		}
-	}
-	return ""
-}
+// Summary is the most telling argument (path, command, pattern…) for the
+// one-liner. /ps and the approval block call it too, and both want the
+// request rather than the result, which is why it stays as it was.
+func (c *ToolCard) Summary() string { return toolview.Summary(c.Args) }
 
 func (a *Approval) render(ctx renderContext) []string {
 	th := ctx.th

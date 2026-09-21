@@ -50,6 +50,12 @@ func TestImportDAG(t *testing.T) {
 		// tui may name policy's Mode/GrantOffer types (engine.Approval carries
 		// them and Controller.SetMode takes a Mode) but never the classifier.
 		{"tui", []string{"tools", "sandbox", "policy/shellclass"}},
+		// toolview decides how a card looks and highlight colours its text.
+		// Both are leaves on purpose: a renderer must never be able to reach
+		// the permission engine, and deciding a cosmetic question by asking
+		// the classifier would put the security component on the render path.
+		{"tui/toolview", []string{"engine", "policy", "tools", "tui/transcript"}},
+		{"tui/highlight", []string{"engine", "policy", "tools", "tui/transcript", "tui/toolview"}},
 		{"tools", []string{"tui", "engine"}},
 		{"policy", []string{"tui", "engine", "tools"}},
 		{"policy/shellclass", []string{"tui", "engine", "tools", "policy", "workspace"}},
