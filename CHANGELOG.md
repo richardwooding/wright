@@ -6,6 +6,49 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-09-21
+
+### Added
+
+- **Tool cards you can read.** An edit card used to be one line —
+  "Edited src/X.pas: replaced 1 occurrence at line 214" — with no sign of what
+  changed. It now shows that summary *and* the diff, inline when the change is
+  small and as a count with `ctrl+o` when it is not. The diff cost nothing to
+  produce: wright already computed a real unified diff for every edit, to show
+  in an approval prompt, and threw it away whenever the policy allowed the call
+  without asking — which in auto-edit mode is always.
+- **Syntax highlighting, decided by what was asked for.** `read_file` on a
+  `.pas` file, an edit to a `.go` file, `cat src/X.pas` through bash: the
+  language comes from the path in the *request*, never guessed from the
+  output, so a build log is never coloured as source and a file whose
+  extension says nothing stays plain. Colours are wright's own six, so a card
+  agrees with the diff two lines above it, and the text still reads correctly
+  with colour stripped — highlighting is decoration and nothing else.
+- **A failed command says why without being expanded.** A collapsed error card
+  shows the first lines of the failure and the exit code. Everything else
+  stays one line.
+- **Line numbers and paths a tool writes itself are kept and made subtle**
+  (`read_file`'s gutter, `grep`'s `path:line:`) rather than duplicated, and
+  wright's own `[exit code …]` / `[note: …]` trailers are lifted out of the
+  output so a 900-line result cannot scroll the exit code away.
+
+### Changed
+
+- **The `<untrusted source="…">` fence no longer reaches human eyes.** It tells
+  the *model* that tool output is data rather than instructions; the transcript
+  and `wright sessions export` now strip it, while `--output stream-json` and
+  the session store keep it, as the README documents. A side effect worth
+  having: the fence was the string's prefix, so wright could never recognise a
+  successful `git diff` through bash as a diff. Now it can, and colours it.
+
+### Fixed
+
+- **The stream-json type list in the README was incomplete.** `retry`,
+  `compact`, `redacted`, `injection` and `external_prompt` could all reach a
+  consumer undocumented — `redacted` and `injection` being exactly the ones a
+  machine reader would want. The list is complete, and a test now walks every
+  event kind against it so the next omission fails the build.
+
 ## [0.6.0] - 2026-09-21
 
 ### Added

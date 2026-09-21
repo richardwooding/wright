@@ -743,6 +743,69 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
 
 ### TUI
 
+- **The preview is computed for every call and was thrown away.**
+  `Engine.Approve` opens with `describe(c)` — a `policy.Request` *and* a
+  `Preview` carrying, for an edit, a real unified diff — and the `policy.Allow`
+  branch used it for nothing. Only the Ask branch passed it on, so a diff
+  reached the screen only when an approval prompt happened to be raised, which
+  in auto-edit mode is never: a user made 48 edits and saw one line each.
+  `Approve` now stashes it in `Engine.previews` and `translate` pops it onto
+  the `KindToolResult` event, the same handover `e.grants` already uses for the
+  same reason. Keyed `runID\x00depth\x00callID` and **not** `grantKeyFor`,
+  which keys on arguments the user may have edited in the prompt. It is a
+  *field*, deliberately, not an event kind: `headless.write` emits `lineFor`
+  for every kind but `KindRunFinished`, so a new kind would have grown the
+  documented stream-json `type` vocabulary, while `lineFor` builds `Line` field
+  by field and never marshals an `Event`. `TestStreamJSONTypesAreTheDocumentedSet`
+  walks every `engine.Kind` against the README's list so the next one fails
+  loudly instead of shipping.
+- **The `<untrusted>` fence is for the model, not the reader.** `prompt.Unwrap`
+  strips it in `applyToolResult` and in `export.writeResult`; stream-json and
+  the session store keep it. Two things follow. The fence is the string's
+  *prefix*, so `diffview.IsDiff` could never match a successful result —
+  `git diff` through bash had been uncoloured since the fence landed, and
+  unwrapping fixes it as a side effect. And in the export the unwrap must run
+  **before** `truncate`, or the envelope eats ~40 characters of the budget and
+  a cut string keeps an opener with no closer. `Unwrap(Wrap(x)) == x` holds,
+  but not the reverse: a body that already contained `<\/untrusted` is
+  indistinguishable from one that was escaped. The fuzz target states the
+  honest property; `--plain` needs nothing, because `untrustedMiddleware`
+  returns early on `IsError` and errors are never fenced.
+- **A card is decided by the request, never by the output.** `tui/toolview`
+  turns `(tool, args)` into a `Plan` — language, gutter, whether a diff or
+  trailers belong — and `tui/highlight` colours the text. Both are leaves,
+  pinned by `dag_test.go`: a renderer must not be able to reach the permission
+  engine. That is why bash's language comes from a gated word scan and not
+  from `policy/shellclass`, whose AST answer is better but whose import would
+  put a security component on the render path. The gate refuses anything with
+  `;|&><`, anything that is not a pager, and any command naming two languages,
+  so its failure mode is "plain", never "wrong". Never call `lexers.Analyse`:
+  guessing from content is what makes a build log render as Go.
+- **Highlight only the lines you will show.** Tokenising scales with the
+  input: a 1198-line Go file costs ~40 ms against ~0.9 ms for the 40-line
+  window a card displays, and a resize re-renders every card at once. A
+  running card is never highlighted either — `applyToolProgress` invalidates
+  per progress line, and half an output is the least likely to lex cleanly.
+- **lipgloss expands tabs, and that silently rewrites source.** Every style in
+  `highlight.styleSet` and the gutter style in `toolview.joinGutter` set
+  `TabWidth(lipgloss.NoTabConversion)`. Without it a highlighted Go file's
+  indentation disagrees with the file, `read_file`'s own `%6d\t` gutter turns
+  into spaces, and a Makefile's rule syntax is destroyed. Unhighlighted output
+  passes tabs through, so the two paths must agree.
+- **A tool card already had a human summary; it was ignored.** The tools write
+  "Edited src/X.pas: replaced 1 occurrence at line 214" and the headline
+  showed a summary of the *arguments* instead. `toolview.Headline` prefers the
+  result's first line for the write tools only — `read_file`, `grep` and
+  `bash` return content, whose first line describes nothing — and falls back
+  to `Summary` while a call is still running. `ToolCard.Summary` keeps its
+  behaviour and signature because `/ps` and the approval block both want the
+  request.
+- **Collapsed is one row, with two deliberate exceptions.** A small edit
+  (≤ `toolview.DiffInline` changed lines) shows its diff, and a failure shows
+  the first lines of why plus the exit code — a refusal you must expand to
+  read is the worst thing the card did. Everything else stays one line, and
+  `TestViewFitsTerminalHeight` now includes a transcript of such cards at 8,
+  12, 24 and 50 rows, because the viewport clamp is what makes this safe.
 - **Alt-screen, one root model.** `tui.Model` owns a transcript viewport, the
   composer, at most one overlay and the status bar; `Run` returns the
   end-of-run summary to print after the alt screen is gone. `--plain`

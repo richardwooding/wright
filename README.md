@@ -513,7 +513,8 @@ wright -p "…" --max-steps 20
 `--output stream-json` emits one JSON object per line. `type` is the event
 kind in snake_case (`run_started`, `step`, `text`, `reasoning`, `tool_call`,
 `tool_progress`, `tool_result`, `usage`, `approval_request`,
-`approval_decided`, `question`, `todos`, `queued`, `notice`, `error`), and
+`approval_decided`, `question`, `todos`, `queued`, `notice`, `error`,
+`retry`, `compact`, `redacted`, `injection`, `external_prompt`), and
 every other field appears only when it applies: `time`, `run_id`, `depth`,
 `step`, `text`, `tool {name,id,args}`, `result {text,is_error}`,
 `usage {input_tokens,output_tokens,cached_input_tokens,…}`, `cost_usd`,
@@ -537,7 +538,11 @@ $ wright -p "please list the files here" --output stream-json
 
 Every tool result reaches the model fenced as
 `<untrusted source="…">…</untrusted>`: tool, file, web, MCP and sub-agent
-content is data, not instructions, and the prompt says so.
+content is data, not instructions, and the prompt says so. The fence is
+addressed to the model, so the two surfaces a *person* reads — the TUI
+transcript and `wright sessions export` — strip it before showing the result.
+`--output stream-json` keeps it, as shown above: that surface is the
+machine-readable contract and the guarantee is part of it.
 
 ## Configuration
 
@@ -856,7 +861,7 @@ bodies.
 
 ## Status
 
-wright is pre-1.0. v0.6.0 is the current release. Working end to end
+wright is pre-1.0. v0.7.0 is the current release. Working end to end
 today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,
