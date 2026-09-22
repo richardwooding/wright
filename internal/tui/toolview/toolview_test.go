@@ -23,11 +23,11 @@ func TestForDecidesFromTheRequest(t *testing.T) {
 	}{
 		{
 			"read a pascal unit", "read_file", `{"path":"src/LLMKit.Core.pas"}`,
-			toolview.Plan{Lang: "ObjectPascal", Gutter: toolview.GutterNumbered},
+			toolview.Plan{Lang: "ObjectPascal", Gutter: toolview.GutterNumbered, OutputIsSource: true},
 		},
 		{
 			"read a file with no language", "read_file", `{"path":"NOTES"}`,
-			toolview.Plan{Gutter: toolview.GutterNumbered},
+			toolview.Plan{Gutter: toolview.GutterNumbered, OutputIsSource: true},
 		},
 		{
 			"edit go", "edit_file", `{"path":"internal/x.go"}`,
@@ -51,7 +51,7 @@ func TestForDecidesFromTheRequest(t *testing.T) {
 		},
 		{
 			"bash reading a file", "bash", `{"command":"cat src/x.pas"}`,
-			toolview.Plan{Lang: "ObjectPascal", Trailers: true},
+			toolview.Plan{Lang: "ObjectPascal", Trailers: true, OutputIsSource: true},
 		},
 		{
 			"bash building", "bash", `{"command":"go build ./..."}`,
@@ -60,7 +60,7 @@ func TestForDecidesFromTheRequest(t *testing.T) {
 		{"grep", "grep", `{"pattern":"func"}`, toolview.Plan{Gutter: toolview.GutterPathLine}},
 		{"web_fetch is never highlighted", "web_fetch", `{"url":"https://x.test/a.go"}`, toolview.Plan{}},
 		{"an MCP tool", "mcp:srv:thing", `{"path":"x.go"}`, toolview.Plan{}},
-		{"malformed arguments", "read_file", `{not json`, toolview.Plan{Gutter: toolview.GutterNumbered}},
+		{"malformed arguments", "read_file", `{not json`, toolview.Plan{Gutter: toolview.GutterNumbered, OutputIsSource: true}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -252,5 +252,88 @@ func TestHighlightingFollowsTheRequestNotTheContent(t *testing.T) {
 	// Either way the text itself is untouched.
 	if strip(strings.Join(coloured, "\n")) != strip(strings.Join(plain, "\n")) {
 		t.Error("highlighting changed the text")
+	}
+}
+
+// TestAToolsOwnSentenceIsNeverHighlighted is the regression. write_file knows
+// its language, for the diff — but its *result* is wright's own sentence, and
+// lexing "Wrote 271 bytes (18 lines) to src/Request.php" as PHP paints the
+// byte count as a numeric literal. Colouring the harness's words as if the
+// program had said them is the one thing highlighting must never do.
+func TestAToolsOwnSentenceIsNeverHighlighted(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct{ name, tool, a, out string }{
+		{"write_file", "write_file", `{"path":"src/Request.php"}`, "Wrote 271 bytes (18 lines) to src/Request.php"},
+		{"edit_file", "edit_file", `{"path":"src/Request.php"}`, "Edited src/Request.php: replaced 1 occurrence at line 214"},
+		{"multi_edit", "multi_edit", `{"edits":[{"path":"a.php"}]}`, "Applied 3 edits (3 replacements) in 1 file: a.php"},
+		{"a build log", "bash", `{"command":"composer install"}`, "Generating autoload files\n2 packages installed"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			for _, l := range toolview.Full(toolview.Input{
+				Plan: toolview.For(tt.tool, args(tt.a)), Output: tt.out, Width: 90,
+			}, deps()) {
+				if strings.Contains(l, "\x1b[3") { // a foreground colour
+					t.Errorf("wright's own words were highlighted as source: %q", l)
+				}
+			}
+		})
+	}
+}
+
+// TestANewFileShowsWhatWasWritten covers the other half: a write_file has no
+// diff (Describe reports "new file, N lines", correctly — a diff against
+// nothing is all "+"), so the card had nothing to show but the arguments,
+// where the whole file is one escaped JSON string clipped at the width. In a
+// project written from scratch that is most of the transcript.
+func TestANewFileShowsWhatWasWritten(t *testing.T) {
+	t.Parallel()
+	php := "<?php\n\nnamespace LLMKit;\n\nfinal class Request\n{\n    public function model(): string\n    {\n        return $this->model;\n    }\n}\n"
+	a, err := json.Marshal(map[string]string{"path": "src/Request.php", "content": php})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := toolview.Full(toolview.Input{
+		Plan: toolview.For("write_file", a), Written: toolview.Written("write_file", a),
+		Output: "Wrote 271 bytes (11 lines) to src/Request.php", Width: 90,
+	}, deps())
+	joined := strings.Join(lines, "\n")
+	if !strings.Contains(strip(joined), "final class Request") {
+		t.Errorf("the written content is not on the card:\n%s", strip(joined))
+	}
+	if !strings.Contains(joined, "\x1b[") {
+		t.Error("the written content was not highlighted, though the path names PHP")
+	}
+	// One row per line of the file, and no escaped JSON anywhere.
+	if strings.Contains(joined, `\n`) {
+		t.Errorf("the content was shown escaped:\n%s", joined)
+	}
+	if got, want := len(lines), strings.Count(strings.TrimRight(php, "\n"), "\n")+1; got != want {
+		t.Errorf("got %d rows, want %d (one per line of the file)", got, want)
+	}
+}
+
+// TestWrittenOnlyForANewFile: an overwrite has a real diff, which is the
+// better answer, and no other tool carries content to show.
+func TestWrittenOnlyForANewFile(t *testing.T) {
+	t.Parallel()
+	a, _ := json.Marshal(map[string]string{"path": "x.php", "content": "<?php\necho 1;\n"})
+	if got := toolview.Written("write_file", a); got == "" {
+		t.Error("write_file carries no content")
+	}
+	for _, tool := range []string{"edit_file", "multi_edit", "read_file", "bash", "web_fetch"} {
+		if got := toolview.Written(tool, a); got != "" {
+			t.Errorf("Written(%q) = %q, want empty", tool, got)
+		}
+	}
+	// With a diff present the diff wins: the content is not shown twice.
+	lines := toolview.Full(toolview.Input{
+		Plan:    toolview.For("write_file", a),
+		Written: toolview.Written("write_file", a),
+		Diff:    "--- a/x.php\n+++ b/x.php\n@@ -1 +1,2 @@\n echo 1;\n+echo 2;\n",
+		Width:   90,
+	}, deps())
+	if j := strip(strings.Join(lines, "\n")); !strings.Contains(j, "+echo 2;") || strings.Count(j, "echo 1;") != 1 {
+		t.Errorf("the diff did not take precedence over the content:\n%s", j)
 	}
 }

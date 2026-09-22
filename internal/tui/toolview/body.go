@@ -19,9 +19,12 @@ type Input struct {
 	Output   string // the result text, already unwrapped
 	Diff     string
 	Progress []string
-	Running  bool
-	Errored  bool
-	Width    int
+	// Written is the content a write_file call is putting on disk, shown
+	// when there is no diff to show instead.
+	Written string
+	Running bool
+	Errored bool
+	Width   int
 }
 
 // Deps are the renderers the transcript owns and lends.
@@ -52,6 +55,11 @@ func Full(in Input, d Deps) []string {
 	switch {
 	case in.Diff != "":
 		out = append(out, diffview.Lines(in.Diff, d.Theme, in.Width)...)
+	case in.Written != "":
+		// A new file: show what was written, which the result line only
+		// counts. The output line itself is redundant beside it — the
+		// headline already carries "Wrote N bytes (M lines) to path".
+		out = append(out, writtenLines(in, d)...)
 	case in.Output != "":
 		out = append(out, outputLines(in, d)...)
 	}
@@ -115,6 +123,26 @@ func outputLines(in Input, d Deps) []string {
 	return out
 }
 
+// writtenLines renders the content of a newly written file: the same tail
+// window and the same highlighting an ordinary read would get, so a file the
+// agent just created reads exactly like one it just showed you.
+func writtenLines(in Input, d Deps) []string {
+	lines := strings.Split(strings.TrimRight(in.Written, "\n"), "\n")
+	var out []string
+	if len(lines) > OutputTail {
+		out = append(out, d.Theme.Subtle.Render(fmt.Sprintf("… %d earlier lines", len(lines)-OutputTail)))
+		lines = lines[len(lines)-OutputTail:]
+	}
+	if in.Running || d.Highlighter == nil {
+		return append(out, lines...)
+	}
+	styled, ok := d.Highlighter.Lines(strings.Join(lines, "\n"), in.Plan.Lang, d.Theme)
+	if !ok {
+		return append(out, lines...)
+	}
+	return append(out, styled...)
+}
+
 // content applies the gutter and the highlighting to the lines that will be
 // shown — and only those: tokenising scales with the input, and a card never
 // shows more than OutputTail lines of it.
@@ -122,6 +150,11 @@ func content(lines []string, in Input, d Deps) []string {
 	// A running card is never highlighted. Its body re-renders on every
 	// progress event, and half an output is the least likely to lex cleanly.
 	if in.Running || d.Highlighter == nil {
+		return applyGutter(lines, nil, in, d)
+	}
+	// Only when the result text is the file's content. A write_file result
+	// is wright's own sentence and must never be painted as source.
+	if !in.Plan.OutputIsSource {
 		return applyGutter(lines, nil, in, d)
 	}
 	text, prefixes := splitGutter(lines, in.Plan.Gutter)

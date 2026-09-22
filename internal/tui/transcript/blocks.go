@@ -166,6 +166,7 @@ func (c *ToolCard) input(ctx renderContext, width int) toolview.Input {
 		Output:   c.Output,
 		Diff:     c.Diff,
 		Progress: c.Progress,
+		Written:  toolview.Written(c.Name, c.Args),
 		Running:  c.Status == StatusRunning,
 		Errored:  c.Status == StatusError || c.Status == StatusDenied,
 		Width:    width,
@@ -296,11 +297,56 @@ func prettyArgs(raw json.RawMessage) []string {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil
 	}
+	raw = elideLongStrings(raw)
 	var buf bytes.Buffer
 	if err := json.Indent(&buf, raw, "", "  "); err != nil {
 		return strings.Split(string(raw), "\n")
 	}
 	return strings.Split(buf.String(), "\n")
+}
+
+// argElide is the length past which a string argument is summarised rather
+// than printed.
+const argElide = 160
+
+// elideLongStrings replaces a long string argument with a note of its size.
+//
+// A whole file arrives in write_file's "content" and in an edit's
+// "old_string"/"new_string", and JSON-encoding it makes one enormous line of
+// \n escapes that the card then clips at the terminal's width: several rows of
+// noise saying nothing. The body shows that content properly — as the diff, or
+// for a new file as the highlighted text — so the arguments only have to say
+// it was there.
+//
+// Re-encoding also undoes encoding/json's HTML escaping, so "\u003c?php"
+// prints as "<?php" — the model's own spelling, which is what a reader
+// expects to see.
+func elideLongStrings(raw json.RawMessage) json.RawMessage {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return raw
+	}
+	changed := false
+	for k, v := range m {
+		s, ok := v.(string)
+		if !ok || len(s) <= argElide {
+			continue
+		}
+		m[k] = fmt.Sprintf("… %d lines, %d bytes", strings.Count(s, "\n")+1, len(s))
+		changed = true
+	}
+	if !changed {
+		// Still re-encode nothing: keep the original bytes so a payload this
+		// cannot model (an array of edits, say) is shown exactly as it came.
+		return raw
+	}
+	buf := &bytes.Buffer{}
+	enc := json.NewEncoder(buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(m); err != nil {
+		return raw
+	}
+	return json.RawMessage(bytes.TrimRight(buf.Bytes(), "\n"))
 }
 
 // tail keeps at most n lines, noting how many were dropped.

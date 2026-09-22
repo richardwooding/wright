@@ -60,6 +60,14 @@ type Plan struct {
 	Gutter Gutter
 	// Diffable is whether a diff belongs on this card at all.
 	Diffable bool
+	// OutputIsSource is whether the *result text* is the file's content
+	// rather than a report about it. Lang alone is not enough to decide:
+	// write_file knows its language (for the diff) but its output is
+	// wright's own sentence — "Wrote 271 bytes (18 lines) to src/X.php" —
+	// and lexing that as PHP paints the byte count as a numeric literal.
+	// Colouring the harness's words as if the program had said them is the
+	// one thing highlighting must never do.
+	OutputIsSource bool
 	// Trailers is whether wright's own "[exit code …]" and "[note: …]" lines
 	// should be lifted out of the output and shown as themselves.
 	Trailers bool
@@ -80,13 +88,15 @@ const (
 func For(tool string, args json.RawMessage) Plan {
 	switch tool {
 	case toolReadFile:
-		return Plan{Lang: languageOf(args, "path"), Gutter: GutterNumbered}
+		return Plan{Lang: languageOf(args, "path"), Gutter: GutterNumbered, OutputIsSource: true}
 	case toolWriteFile, toolEditFile:
 		return Plan{Lang: languageOf(args, "path"), Diffable: true}
 	case toolMultiEdit:
 		return Plan{Lang: multiEditLanguage(args), Diffable: true}
 	case toolBash:
-		return Plan{Lang: bashLanguage(args), Trailers: true}
+		// A pager's output is the file; every other command reports.
+		lang := bashLanguage(args)
+		return Plan{Lang: lang, Trailers: true, OutputIsSource: lang != ""}
 	case toolGrep:
 		return Plan{Gutter: GutterPathLine}
 	}
@@ -195,4 +205,20 @@ func writesASentence(tool string) bool {
 		return true
 	}
 	return false
+}
+
+// Written is the text a write_file call is putting on disk, taken from the
+// arguments it was already carrying.
+//
+// It exists because a new file has no diff to show — Describe reports "new
+// file, N lines" and nothing else, correctly, since a diff against nothing is
+// all "+" — and the card was therefore left with the arguments, where the
+// whole file appears as one escaped JSON string clipped at the terminal's
+// width. In a project being written from scratch that is most of the
+// transcript: 154 of one session's 315 calls were write_file.
+func Written(tool string, args json.RawMessage) string {
+	if tool != toolWriteFile {
+		return ""
+	}
+	return stringArg(args, "content")
 }
