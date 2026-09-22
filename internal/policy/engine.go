@@ -322,12 +322,18 @@ func (ev *eval) run() {
 		// narrows the command (or approves this call) instead.
 		return
 	}
-	// Plan mode never consults allow rules. They match on tool and argv, so
-	// a rule written for ordinary work — the builtin bash(git show *), or a
-	// user's bash(go build *) — would otherwise authorise a write in the one
-	// mode that promises not to make any. The mode table below still allows
-	// reads, which is all plan mode is for.
-	if ev.mode != ModePlan && ev.allowed() {
+	// Plan mode consults allow rules for the read-only tools only. The
+	// danger it is guarding against is a rule written for ordinary work —
+	// the builtin bash(git show *), or a user's bash(go build *) — quietly
+	// authorising a write in the one mode that promises not to make any, and
+	// that danger is entirely in the tools that *can* write. readTools
+	// (read_file, glob, grep, list_dir) cannot, so skipping their rules never
+	// protected anything; it only made plan mode the single most restrictive
+	// mode for reading, which is backwards for the mode whose whole job is to
+	// read and plan. A user reading a dependency's source was asked about
+	// every file while the rule they had written for exactly that sat
+	// unconsulted. bash, the write tools, web and MCP still skip them here.
+	if (ev.mode != ModePlan || ev.kind == kindRead) && ev.allowed() {
 		return
 	}
 	// The builtin write asks are the default mode's own rule written as
@@ -933,11 +939,15 @@ func (ev *eval) modeOther() {
 // denial would name a --allow flag that changes nothing. A one-off approval
 // still works in plan mode; that is what the prompt is for.
 func (e *Engine) Suggest(req Request) []GrantOffer {
-	if e.Mode() == ModePlan {
+	kind := kindOf(req.Tool)
+	// An offer that cannot take effect is worse than none: it invites
+	// "always allow" and then keeps asking. In plan mode only the read-only
+	// tools consult allow rules, so only they may be offered one.
+	if e.Mode() == ModePlan && kind != kindRead {
 		return nil
 	}
 	var rules []Rule
-	switch kindOf(req.Tool) {
+	switch kind {
 	case kindBash:
 		rules = suggestBash(req)
 	case kindRead, kindWrite:

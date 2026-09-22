@@ -293,6 +293,21 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "plan mode ignores an allow rule that would write", mode: policy.ModePlan, req: f.bash("git show --output=out.txt HEAD"), want: policy.Deny, reason: "plan mode"},
 		{name: "plan mode ignores a builtin allow for a build", mode: policy.ModePlan, req: f.bash("go build ./..."), want: policy.Deny, reason: "plan mode"},
 		{name: "plan mode ignores a user allow rule for an edit", mode: policy.ModePlan, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "edit_file(**)")}, req: f.write("main.go"), want: policy.Deny, reason: "plan mode"},
+		// Plan mode *does* consult allow rules for the read-only tools. It is
+		// the mode for reading and planning, and skipping a read rule there
+		// protected nothing — a read_file rule cannot make an edit — while
+		// making plan the single most restrictive mode for reads. A user
+		// reading a dependency's source was asked about every file with the
+		// rule they had written for exactly that sitting unconsulted.
+		{name: "plan mode honours a read rule outside the workspace", mode: policy.ModePlan, layers: [][]policy.Rule{builtin, userAllow}, req: f.read("~/notes/a.md"), want: policy.Allow},
+		{name: "plan mode honours a read rule for grep", mode: policy.ModePlan, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "grep(~/notes/**)")}, req: policy.Request{Tool: "grep", Paths: []string{f.abs("~/notes/a.md")}}, want: policy.Allow},
+		{name: "plan mode honours a read rule for list_dir", mode: policy.ModePlan, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "list_dir(~/notes/**)")}, req: policy.Request{Tool: "list_dir", Paths: []string{f.abs("~/notes/a.md")}}, want: policy.Allow},
+		// Without such a rule it still asks, so the rule is doing the work.
+		{name: "plan mode still asks for an unruled read outside", mode: policy.ModePlan, layers: [][]policy.Rule{builtin}, req: f.read("~/notes/a.md"), want: policy.Ask, reason: "outside"},
+		// The floors are untouched: a read rule cannot reach a secret or a
+		// protected path, in plan mode or any other.
+		{name: "plan mode read rule cannot reach a secret", mode: policy.ModePlan, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "read_file(**)")}, req: f.read(".env"), want: policy.Deny, hard: true},
+		{name: "plan mode read rule cannot reach a protected path", mode: policy.ModePlan, layers: [][]policy.Rule{builtin, rules(t, policy.Allow, policy.SourceUser, "read_file(**)")}, req: f.read(etcPasswd), want: policy.Deny},
 		{name: "bash plan read protected denies", mode: policy.ModePlan, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
 		{name: "bash plan read outside asks", mode: policy.ModePlan, req: f.bash("cat " + filepath.Join(f.home, "notes", "a.md")), want: policy.Ask, reason: "outside"},
 		{name: "bash bypass read protected denies", mode: policy.ModeBypass, req: f.bash("cat /etc/passwd"), want: policy.Deny, reason: "protected"},
@@ -469,6 +484,48 @@ func TestSuggestShapes(t *testing.T) {
 		{"read protected none", f.read("~/.ssh/id_ed"), nil},
 		{"fetch domain", fetch("https://api.example.com/x"), []string{"web_fetch(domain:api.example.com)"}},
 		{"mcp", policy.Request{Tool: "mcp:s:t"}, []string{"mcp:s:t"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := got(tt.req)
+			if strings.Join(g, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("Suggest = %v, want %v", g, tt.want)
+			}
+		})
+	}
+}
+
+// TestSuggestInPlanMode pins the other half of plan mode consulting read
+// rules: it may offer one for a read, because such a rule now takes effect
+// there, and must still offer nothing for the tools whose rules it ignores —
+// an offer that cannot take effect invites "always allow" and then keeps
+// asking, which is worse than no offer at all.
+func TestSuggestInPlanMode(t *testing.T) {
+	f := newFixture(t)
+	e := policy.New(f.ws, policy.ModePlan)
+	got := func(req policy.Request) []string {
+		var out []string
+		for _, o := range e.Suggest(req) {
+			if o.Scope == policy.ScopeSession {
+				out = append(out, o.Rule.String())
+			}
+		}
+		return out
+	}
+	tests := []struct {
+		name string
+		req  policy.Request
+		want []string
+	}{
+		{"a read outside the workspace is offered", f.read("~/notes/a.md"), []string{"read_file(~/notes/**)"}},
+		{"grep is offered", policy.Request{Tool: "grep", Paths: []string{f.abs("~/notes/a.md")}}, []string{"grep(~/notes/**)"}},
+		// Plan mode still ignores these rules, so offering one would be a lie.
+		{"bash is not offered", f.bash("go build ./..."), nil},
+		{"a write is not offered", f.write("main.go"), nil},
+		{"web is not offered", fetch("https://api.example.com/x"), nil},
+		{"mcp is not offered", policy.Request{Tool: "mcp:s:t"}, nil},
+		// The floors still remove an offer that could never be honoured.
+		{"a protected read is not offered", f.read("~/.ssh/id_ed"), nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
