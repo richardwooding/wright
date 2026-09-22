@@ -6,6 +6,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-09-22
+
+### Added
+
+- **A newly written file shows what was written.** `write_file` creating a
+  file has no diff — `Describe` reports "new file, N lines", correctly, since a
+  diff against nothing is all `+` — so the card had nothing to show but the
+  arguments, where the whole file appears as one escaped JSON string clipped at
+  the terminal's width. In a project being written from scratch that is most of
+  the transcript: 154 of one session's 315 calls were `write_file`. The card now
+  shows the content itself, highlighted in the language the path names, under
+  the same 40-line cap as any other output.
+- **A long argument is summarised instead of dumped.** A whole file arriving in
+  `content` or `old_string` printed as rows of `\n` escapes that said nothing;
+  it now reads `"content": "… 18 lines, 236 bytes"`, and the body shows the
+  real thing. Re-encoding also drops the model's HTML escaping, so `\u003c?php`
+  prints as `<?php`.
+
+### Fixed
+
+- **A tool's own sentence is no longer painted as source code.** `write_file`
+  knows its language for the diff's sake, and v0.7.0 then lexed the *result* in
+  it too — so "Wrote 271 bytes (18 lines) to src/Request.php" had its byte count
+  coloured as a numeric literal, and "Applied 3 edits (3 replacements) in 1
+  file" had three. Highlighting is for content, and the rule wright already
+  applied to `[exit code …]` trailers now holds everywhere: the harness's words
+  are never coloured as if the program had said them.
+
 ## [0.7.1] - 2026-09-22
 
 ### Fixed

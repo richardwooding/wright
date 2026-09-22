@@ -861,7 +861,7 @@ bodies.
 
 ## Status
 
-wright is pre-1.0. v0.7.1 is the current release. Working end to end
+wright is pre-1.0. v0.7.2 is the current release. Working end to end
 today: the TUI,
 headless mode and all three output formats, the permission engine and shell
 classifier, the sandbox backends, the tool set (`read_file`, `write_file`,

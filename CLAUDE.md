@@ -803,6 +803,26 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   indentation disagrees with the file, `read_file`'s own `%6d\t` gutter turns
   into spaces, and a Makefile's rule syntax is destroyed. Unhighlighted output
   passes tabs through, so the two paths must agree.
+- **Knowing a call's language is not permission to colour its output.**
+  `toolview.Plan` carries `Lang` (for the diff) *and* `OutputIsSource`, and only
+  the second gates highlighting the result text. Without that split, v0.7.0
+  lexed `write_file`'s own sentence as PHP and painted the byte count in
+  "Wrote 271 bytes (18 lines)" as a numeric literal. `OutputIsSource` is true
+  only where the result *is* the file: `read_file`, and `bash` when the pager
+  gate matched.
+- **A new file has no diff, so the card shows the content instead.**
+  `describeWrite` returns `Body: "new file, N lines"` and an empty `Diff` when
+  the path does not exist — right, because a diff against nothing is all `+` —
+  which left the dominant card of a greenfield project (154 of 315 calls in one
+  session) with nothing but its arguments. `toolview.Written` takes the text
+  from the `content` argument the call already carried, so this costs no tokens
+  and no tool change. An overwrite still shows its diff; the diff is the better
+  answer and takes precedence.
+- **`prettyArgs` elides a long string argument.** A file in `content` or
+  `old_string` became rows of `\n` escapes clipped at the width. Re-encoding to
+  elide it also turns off `encoding/json`'s HTML escaping, which is why
+  `\u003c?php` now prints as `<?php`; the original bytes are kept untouched
+  when nothing needed eliding, so a payload this cannot model is never rewritten.
 - **A tool card already had a human summary; it was ignored.** The tools write
   "Edited src/X.pas: replaced 1 occurrence at line 214" and the headline
   showed a summary of the *arguments* instead. `toolview.Headline` prefers the
