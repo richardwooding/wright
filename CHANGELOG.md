@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-09-22
+
+### Fixed
+
+- **A small multi-line file no longer dumps its escaped self into the args
+  block.** v0.7.2 summarised an argument only past a byte threshold, so a
+  short file — 153 bytes, 13 lines — still printed as one clipped line of
+  `\n` escapes, directly above the body showing the same content properly. A
+  value spanning more than two lines is now summarised at any length: a
+  multi-line string cannot render usefully on one JSON line whatever its size.
+
 ## [0.7.2] - 2026-09-22
 
 ### Added
