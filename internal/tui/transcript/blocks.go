@@ -143,7 +143,7 @@ func renderReasoning(ctx renderContext, reasoning string) []string {
 func (c *ToolCard) render(ctx renderContext) []string {
 	indent := strings.Repeat("  ", c.Depth)
 	width := ctx.width - len(indent)
-	out := []string{indent + c.headline(ctx.th, width)}
+	out := []string{indent + c.headline(ctx.th, width, ctx.root)}
 	bar := ctx.th.Subtle.Render("│ ")
 	body := c.body(ctx, width-2)
 	if !c.Expanded {
@@ -179,13 +179,13 @@ func (c *ToolCard) deps(ctx renderContext) toolview.Deps {
 
 // headline is the collapsed one-liner: glyph, name, argument summary, diff
 // stats, duration and the status word.
-func (c *ToolCard) headline(th theme.Theme, width int) string {
+func (c *ToolCard) headline(th theme.Theme, width int, root string) string {
 	arrow := theme.GlyphCollapsed
 	if c.Expanded {
 		arrow = theme.GlyphExpanded
 	}
 	parts := []string{arrow + " " + th.Bold.Render(c.Name)}
-	if s := toolview.Headline(c.Name, c.Args, c.Output, c.Status == StatusRunning); s != "" {
+	if s := toolview.Headline(c.Name, c.Args, c.Output, c.Status == StatusRunning, root); s != "" {
 		parts = append(parts, s)
 	}
 	if c.Diff != "" {
@@ -228,9 +228,18 @@ func (c *ToolCard) body(ctx renderContext, width int) []string {
 }
 
 // Summary is the most telling argument (path, command, pattern…) for the
-// one-liner. /ps and the approval block call it too, and both want the
-// request rather than the result, which is why it stays as it was.
-func (c *ToolCard) Summary() string { return toolview.Summary(c.Args) }
+// one-liner, as /ps and the approval block show it.
+//
+// It still describes the *request*. What it drops for a bash call is a
+// leading "cd <workspace>" — a move to the directory the shell is already in,
+// which is not part of what the request does, and which otherwise fills the
+// whole sixty-character budget and leaves nothing for the command. The
+// command as written is always one keypress away in the expanded card, and
+// the approval prompt never shortens anything.
+//
+// Root is the workspace root, empty when the caller does not know one; then
+// an absolute cd is shown rather than guessed at.
+func (c *ToolCard) Summary(root string) string { return toolview.SummaryFor(c.Name, c.Args, root) }
 
 func (a *Approval) render(ctx renderContext) []string {
 	th := ctx.th

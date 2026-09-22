@@ -503,7 +503,7 @@ func (m *Model) cmdPs([]string) tea.Cmd {
 		fmt.Fprintf(&b, "Running — %s in flight:", countOf(len(running), "tool call"))
 		for _, c := range running {
 			fmt.Fprintf(&b, "\n  %s%-10s %s", strings.Repeat("  ", c.Depth), c.Name, formatDuration(time.Since(c.Started)))
-			if s := c.Summary(); s != "" {
+			if s := c.Summary(m.opts.WorkspaceRoot); s != "" {
 				fmt.Fprintf(&b, "  %s", s)
 			}
 		}

@@ -267,7 +267,7 @@ func TestSummaryPrefersPathThenCommand(t *testing.T) {
 	}
 	for _, tt := range tests {
 		c := &transcript.ToolCard{Args: json.RawMessage(tt.args)}
-		if got := c.Summary(); got != tt.want {
+		if got := c.Summary(""); got != tt.want {
 			t.Errorf("Summary(%s) = %q, want %q", tt.args, got, tt.want)
 		}
 	}

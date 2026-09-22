@@ -188,7 +188,7 @@ func New(ctl Controller, o Options) Model {
 		th:     th,
 		md:     md,
 		vp:     viewport.New(),
-		tr:     transcript.New(th, md, transcript.WithHighlighter(hl)),
+		tr:     transcript.New(th, md, transcript.WithHighlighter(hl), transcript.WithWorkspaceRoot(o.WorkspaceRoot)),
 		cards:  map[string]*transcript.ToolCard{},
 		follow: true,
 		spin:   spinner.New(spinner.WithSpinner(spinner.MiniDot)),

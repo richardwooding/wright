@@ -105,6 +105,45 @@ func For(tool string, args json.RawMessage) Plan {
 	return Plan{}
 }
 
+// SummaryFor is the card's one-liner for a call, given the workspace root.
+//
+// It dispatches on the tool: bash goes through a path that drops the leading
+// "cd <workspace> &&" the model writes on almost every command, and every
+// other tool falls straight through to Summary. Summary itself stays generic
+// and untouched — teaching it about `cd` would apply shell lexing to any tool
+// with a "command" key, MCP tools included.
+//
+// Nothing is hidden by the strip: the expanded card prints the arguments
+// verbatim, the approval overlay shows the exact bytes that will run, and the
+// audit log records the whole call. No consent surface changes.
+func SummaryFor(tool string, args json.RawMessage, root string) string {
+	if tool != toolBash {
+		return Summary(args)
+	}
+	cmd := strings.ReplaceAll(strings.TrimSpace(stringArg(args, "command")), "\n", " ")
+	if cmd == "" {
+		return Summary(args)
+	}
+	dir, rest, ok := stripLeadingCd(cmd)
+	if !ok {
+		return ansi.Truncate(cmd, SummaryMax, "…")
+	}
+	// `cd a && cd b && go test` collapses to the last directory. The string
+	// strictly shrinks each time, so this terminates.
+	for {
+		d, r, more := stripLeadingCd(rest)
+		if !more {
+			break
+		}
+		dir, rest = d, r
+	}
+	if label := dirLabel(dir, root); label != "" {
+		rest = label + ": " + rest
+	}
+	// Truncating *after* the strip is the entire point.
+	return ansi.Truncate(rest, SummaryMax, "…")
+}
+
 // Summary picks the most telling argument (path, command, pattern…) for the
 // card's one-liner.
 //
@@ -185,13 +224,13 @@ func multiEditLanguage(args json.RawMessage) string {
 // a dump of the raw output. A running call has no result yet, and for the
 // tools whose output is data rather than a sentence (read_file, grep, bash)
 // the first line is a line of the file, not a description of anything.
-func Headline(tool string, args json.RawMessage, output string, running bool) string {
+func Headline(tool string, args json.RawMessage, output string, running bool, root string) string {
 	if running || output == "" || !writesASentence(tool) {
-		return Summary(args)
+		return SummaryFor(tool, args, root)
 	}
 	first, _, _ := strings.Cut(strings.TrimSpace(output), "\n")
 	if first == "" {
-		return Summary(args)
+		return SummaryFor(tool, args, root)
 	}
 	return ansi.Truncate(first, SummaryMax, "…")
 }

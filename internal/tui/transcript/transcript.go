@@ -22,6 +22,7 @@ type renderContext struct {
 	th            theme.Theme
 	md            *markdown.Renderer
 	hl            *highlight.Renderer
+	root          string // workspace root; immutable, so it cannot stale a cached card
 	showReasoning bool
 }
 
@@ -37,6 +38,7 @@ type Model struct {
 	th            theme.Theme
 	hl            *highlight.Renderer
 	md            *markdown.Renderer
+	root          string
 	width         int
 	showReasoning bool
 	entries       []*entry
@@ -60,6 +62,15 @@ type Option func(*Model)
 // and a perfectly good way to run.
 func WithHighlighter(h *highlight.Renderer) Option {
 	return func(m *Model) { m.hl = h }
+}
+
+// WithWorkspaceRoot supplies the workspace root, which a bash card uses to
+// tell a redundant "cd <workspace>" prefix from one that really moves. It is
+// immutable for the session, which is why the card compares against it rather
+// than against the live working directory: a value that changed would stale
+// every cached card that had already been rendered.
+func WithWorkspaceRoot(root string) Option {
+	return func(m *Model) { m.root = root }
 }
 
 // Append adds a block and returns it for later mutation by the caller.
@@ -143,7 +154,7 @@ func (m *Model) Lines(width int) []string {
 		m.width = width
 		m.InvalidateAll()
 	}
-	ctx := renderContext{width: width, th: m.th, md: m.md, hl: m.hl, showReasoning: m.showReasoning}
+	ctx := renderContext{width: width, th: m.th, md: m.md, hl: m.hl, root: m.root, showReasoning: m.showReasoning}
 	var out []string
 	for i, e := range m.entries {
 		if !e.valid {

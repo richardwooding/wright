@@ -287,7 +287,7 @@ func (m *Model) applyApprovalDecided(ev engine.Event) {
 		}
 		if c, ok := m.cards[ev.Call.ID]; ok {
 			if block.Summary == "" {
-				block.Summary = c.Summary()
+				block.Summary = c.Summary(m.opts.WorkspaceRoot)
 			}
 			if !d.Allow {
 				c.Status = transcript.StatusDenied

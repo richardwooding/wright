@@ -155,7 +155,7 @@ func TestHeadlinePrefersWhatTheToolSaid(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			got := toolview.Headline(tt.tool, args(tt.args), tt.output, tt.running)
+			got := toolview.Headline(tt.tool, args(tt.args), tt.output, tt.running, "")
 			if got != tt.want {
 				t.Errorf("Headline = %q, want %q", got, tt.want)
 			}
@@ -335,5 +335,105 @@ func TestWrittenOnlyForANewFile(t *testing.T) {
 	}, deps())
 	if j := strip(strings.Join(lines, "\n")); !strings.Contains(j, "+echo 2;") || strings.Count(j, "echo 1;") != 1 {
 		t.Errorf("the diff did not take precedence over the content:\n%s", j)
+	}
+}
+
+// TestSummaryForStripsARedundantCd is the case that motivated this. In a real
+// session 89% of bash calls began `cd <workspace> &&`, 76 of 78 of those
+// targeted the directory bash was already in, and the prefix for that project
+// was exactly 60 characters — the whole summary budget — so every card showed
+// the cd and none of the command.
+func TestSummaryForStripsARedundantCd(t *testing.T) {
+	t.Parallel()
+	const root = "/var/home/richardwooding/Projects/Personal/php-llmkit"
+	cmd := func(c string) json.RawMessage {
+		b, err := json.Marshal(map[string]string{"command": c})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	tests := []struct{ name, in, want string }{
+		// Redundant: the shell is already there.
+		{"absolute cd to the root", "cd " + root + " && go test ./...", "go test ./..."},
+		{"semicolon separator", "cd " + root + "; go test ./...", "go test ./..."},
+		{"trailing slash", "cd " + root + "/ && ls", "ls"},
+		{"chained cds collapse", "cd /tmp && cd " + root + " && ls", "ls"},
+		{"newline flattened then stripped", "cd " + root + " &&\ngo build ./...", "go build ./..."},
+		{"internal spacing survives", "cd " + root + ` && echo "a  b"`, `echo "a  b"`},
+		// Real moves: the directory is kept.
+		{"below the root", "cd " + root + "/src && phpunit", "src: phpunit"},
+		{"relative target", "cd internal/tools && go test", "internal/tools: go test"},
+		// Not a cd prefix at all: unchanged.
+		{"cd alone is the command", "cd /x", "cd /x"},
+		{"quoted target", `cd "my dir" && ls`, `cd "my dir" && ls`},
+		{"double dash", "cd -- /x && ls", "cd -- /x && ls"},
+		{"command substitution", "cd $(ls | head -1) && ls", "cd $(ls | head -1) && ls"},
+		{"variable target", "cd $HOME && ls", "cd $HOME && ls"},
+		{"or is not and", "cd /x || ls", "cd /x || ls"},
+		{"cd is only a prefix of the word", "cdinstall x && y", "cdinstall x && y"},
+		{"cd in the middle", "echo cd /x && ls", "echo cd /x && ls"},
+		{"no cd", "go test ./...", "go test ./..."},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := toolview.SummaryFor("bash", cmd(tt.in), root); got != tt.want {
+				t.Errorf("SummaryFor(%q) = %q, want %q", tt.in, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSummaryForIsBashOnly proves the dispatch: identical arguments on any
+// other tool go through the generic Summary untouched, so a tool with a
+// "command" key that is not a shell script is never lexed as one.
+func TestSummaryForIsBashOnly(t *testing.T) {
+	t.Parallel()
+	const root = "/ws"
+	a := args(`{"command":"cd /ws && go test"}`)
+	if got := toolview.SummaryFor("bash", a, root); got != "go test" {
+		t.Errorf("bash: %q", got)
+	}
+	for _, tool := range []string{"mcp:srv:run", "web_fetch", "read_file", ""} {
+		if got := toolview.SummaryFor(tool, a, root); got != "cd /ws && go test" {
+			t.Errorf("SummaryFor(%q) = %q, want the command untouched", tool, got)
+		}
+	}
+}
+
+// TestSummaryForWithoutAWorkspaceRoot: with no root to compare against, an
+// absolute cd is shown rather than guessed at. The comparison fails safe
+// because one directory has several spellings — /home is a symlink to
+// var/home here, /tmp to /private/tmp on macOS — and a renderer must not
+// resolve symlinks on the draw path.
+func TestSummaryForWithoutAWorkspaceRoot(t *testing.T) {
+	t.Parallel()
+	got := toolview.SummaryFor("bash", args(`{"command":"cd /ws && go test"}`), "")
+	if got != "/ws: go test" {
+		t.Errorf("SummaryFor with no root = %q, want the directory shown", got)
+	}
+}
+
+// TestSummaryForReclaimsTheBudget is the arithmetic that made this a total
+// failure rather than a partial one: the prefix was exactly SummaryMax long,
+// so the truncation spent all of it before reaching the command.
+func TestSummaryForReclaimsTheBudget(t *testing.T) {
+	t.Parallel()
+	const root = "/var/home/richardwooding/Projects/Personal/php-llmkit"
+	if n := len("cd " + root + " && "); n != toolview.SummaryMax {
+		t.Fatalf("the prefix is %d chars and SummaryMax is %d; this test is no longer the real case", n, toolview.SummaryMax)
+	}
+	long := "vendor/bin/phpstan analyse src --level 8 --no-progress --memory-limit 1G"
+	b, err := json.Marshal(map[string]string{"command": "cd " + root + " && " + long})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := toolview.SummaryFor("bash", b, root)
+	if !strings.HasPrefix(got, "vendor/bin/phpstan analyse src") {
+		t.Errorf("SummaryFor = %q, want it to start with the real command", got)
+	}
+	if strings.Contains(got, "cd ") || strings.Contains(got, "php-llmkit") {
+		t.Errorf("SummaryFor = %q, want no trace of the cd", got)
 	}
 }
