@@ -272,3 +272,39 @@ func TestSummaryPrefersPathThenCommand(t *testing.T) {
 		}
 	}
 }
+
+// TestArgsElideMultiLineValues is the case a pty run caught that the unit
+// tests missed: the fixture happened to be over the byte threshold, so a
+// *small* multi-line file still dumped its whole escaped self into the args
+// block — on one clipped line, directly above the body showing the same
+// content properly.
+func TestArgsElideMultiLineValues(t *testing.T) {
+	php := "<?php\n\ndeclare(strict_types=1);\n\nnamespace LLMKit;\n\nfinal class Request\n{\n    public function m(): string\n    {\n        return \"x\";\n    }\n}\n"
+	if len(php) > 160 {
+		t.Fatalf("fixture is %d bytes; it must be under the byte threshold to test the line rule", len(php))
+	}
+	a, err := json.Marshal(map[string]string{"path": "src/Request.php", "content": php})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := transcript.New(theme.New(false), nil)
+	m.Append(&transcript.ToolCard{
+		Name: "write_file", Args: a, Output: "Wrote 153 bytes (13 lines) to src/Request.php",
+		Status: transcript.StatusOK, Expanded: true,
+	})
+	s := joined(m.Lines(100))
+	if strings.Contains(s, `\n`) {
+		t.Errorf("the args block still carries the escaped file:\n%s", s)
+	}
+	if !strings.Contains(s, "13 lines") {
+		t.Errorf("the args block does not say what it elided:\n%s", s)
+	}
+	// A short single-line value is still shown as itself.
+	if !strings.Contains(s, "src/Request.php") {
+		t.Errorf("a short argument was elided:\n%s", s)
+	}
+	// And the content is still on the card, properly.
+	if !strings.Contains(s, "final class Request") {
+		t.Errorf("the body lost the written content:\n%s", s)
+	}
+}

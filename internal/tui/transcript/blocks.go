@@ -306,8 +306,14 @@ func prettyArgs(raw json.RawMessage) []string {
 }
 
 // argElide is the length past which a string argument is summarised rather
-// than printed.
-const argElide = 160
+// than printed. A value spanning more than argElideLines is summarised at any
+// length: a multi-line string cannot render usefully on one JSON line
+// whatever its size, and for the write tools the body shows it properly just
+// below, so leaving it here is noise twice over.
+const (
+	argElide      = 160
+	argElideLines = 2
+)
 
 // elideLongStrings replaces a long string argument with a note of its size.
 //
@@ -329,7 +335,7 @@ func elideLongStrings(raw json.RawMessage) json.RawMessage {
 	changed := false
 	for k, v := range m {
 		s, ok := v.(string)
-		if !ok || len(s) <= argElide {
+		if !ok || (len(s) <= argElide && strings.Count(s, "\n") < argElideLines) {
 			continue
 		}
 		m[k] = fmt.Sprintf("… %d lines, %d bytes", strings.Count(s, "\n")+1, len(s))
