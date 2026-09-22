@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-22
+
+### Fixed
+
+- **A run no longer dies because you stepped away from an approval prompt.**
+  The run budget was a wall-clock deadline fixed when the run began, so it
+  bounded the person answering a prompt as well as the agent's work — and it is
+  not exposed as a flag, so there was no way to raise it. In one real session
+  two of three runs ended at exactly the two-hour budget with the agent idle the
+  whole time, blocked on a prompt nobody was there to answer. Via
+  **agentkit v0.5.0**, the budget now measures working time: the clock is paused
+  while an approver is waiting on a human, concurrent prompts count as one wait
+  rather than several, and a sub-agent shares its parent's clock so one prompt
+  pauses every budget waiting on that person. A tool that genuinely hangs is
+  still cut off, and a real timeout still reports `deadline` rather than reading
+  as an interrupt.
+
 ## [0.8.0] - 2026-09-22
 
 ### Fixed
