@@ -477,3 +477,47 @@ func environmentOf(t *testing.T, r *core.Request) string {
 	t.Fatalf("no cwd line in the request:\n%s", b.String())
 	return ""
 }
+
+// TestAnApprovalHeldOpenDoesNotKillTheRun is the bug a user hit twice in one
+// session: two of their three runs ended at exactly the 2-hour budget, with
+// the agent idle the whole time, blocked on an approval prompt they were not
+// at the keyboard to answer. The run's timeout is meant to bound the agent's
+// work, not the person's thinking, and there is no flag to raise it.
+func TestAnApprovalHeldOpenDoesNotKillTheRun(t *testing.T) {
+	const budget = 200 * time.Millisecond
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.CallResp("c1", "edit_file", `{"path":"a.go"}`),
+		enginetest.TextResp("edited"),
+	}}
+	f := newFixture(t, client, func(o *engine.Options) { o.Timeout = budget })
+	_ = f.eng.Submit("edit a.go")
+	var answered time.Time
+	evs := f.collect(t, func(ev engine.Event) {
+		if ev.Kind != engine.KindApprovalRequest {
+			return
+		}
+		// Sit on it for longer than the entire run budget, as a person who
+		// has stepped away would.
+		time.Sleep(budget * 2)
+		answered = time.Now()
+		f.eng.Reply(ev.Approval.ID, engine.Decision{Allow: true})
+	})
+	if answered.IsZero() {
+		t.Fatal("no approval was raised")
+	}
+	if !hasKind(evs, engine.KindApprovalDecided) {
+		t.Fatalf("the run died while the prompt was open: %s", kinds(evs))
+	}
+	for _, ev := range evs {
+		if ev.Kind == engine.KindRunFinished && ev.Finish != nil {
+			if ev.Finish.Err != nil {
+				t.Errorf("run finished with %v; holding a prompt open must not end the run", ev.Finish.Err)
+			}
+			// And the wall clock really did exceed the budget, so this is not
+			// passing because everything happened to be fast.
+			if ev.Finish.Duration < budget {
+				t.Fatalf("run took %s, under the %s budget: this test proves nothing", ev.Finish.Duration, budget)
+			}
+		}
+	}
+}
