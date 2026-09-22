@@ -6,6 +6,23 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-09-22
+
+### Fixed
+
+- **Plan mode no longer ignores your read-only allow rules.** It was the one
+  mode that skipped allow rules entirely, which made the mode whose whole job
+  is reading and planning the *most* restrictive mode for reads: a user
+  reading a dependency's source outside the workspace was asked about every
+  single file, while the `read_file(...)` rule they had written for exactly
+  that sat unconsulted — and no rule was offered either, so there was no way
+  out short of restarting with `--add-dir`. Plan mode now consults allow rules
+  for the read-only tools (`read_file`, `glob`, `grep`, `list_dir`) and offers
+  one for them, which cannot weaken its guarantee: none of the four can make
+  an edit. `bash`, the write tools, `web_fetch` and MCP still ignore allow
+  rules in plan mode, and every floor — hard-deny, secret files, protected
+  paths — runs first as before.
+
 ## [0.7.0] - 2026-09-21
 
 ### Added

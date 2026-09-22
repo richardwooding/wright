@@ -672,9 +672,20 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   `planMayAsk`, and allows `otherTools`), and
   `TestPlanModeKeepsEveryToolItCanPermit` evaluates every built-in tool
   against plan-mode policy and fails if the two lists disagree either way.
-  Plan mode also consults no allow rules, so `Suggest` returns nothing there:
-  an offer that cannot take effect is worse than none — the overlay would
-  invite "always allow" and then keep asking.
+  Plan mode consults allow rules **for `readTools` only** (`read_file`,
+  `glob`, `grep`, `list_dir`), and `Suggest` offers a rule for exactly that
+  set there — an offer that cannot take effect is worse than none, because the
+  overlay would invite "always allow" and then keep asking. The guard exists
+  because a rule written for ordinary work (`bash(go build *)`) must not
+  authorise a write in the mode that promises not to make any; that danger
+  lives wholly in the tools that *can* write, and none of the four can. It
+  used to skip every kind, which protected nothing and made plan — the mode
+  whose entire job is to read and plan — the single most restrictive mode for
+  reading: a user reading a dependency's source was asked about every file
+  while the read rule they had written for exactly that sat unconsulted, and
+  with no offer to accept either. bash, the write tools, web and MCP still
+  skip their rules there, and every floor (hard-deny, secrets, protected
+  paths) runs first regardless.
 - **Session metadata is written when it changes, not when a run ends.**
   `SetMode`/`SetModel` call `touchQuietly` directly, because a mode changed
   with shift+tab before the first prompt — the usual moment — was otherwise
