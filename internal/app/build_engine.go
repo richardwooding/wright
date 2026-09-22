@@ -81,7 +81,15 @@ func (b *builder) toolsAndEngine() error {
 	b.connectMCP()
 	fast := b.fastClient()
 	registered := append(wrapTodos(base, todos, late), b.mcp.Tools...)
-	subs := b.subAgents(append(slices.Clone(base), b.mcp.Tools...), late, fast)
+	// Sub-agents get their own toolset, built from the same Deps with a
+	// separate working directory. Every pointer in Deps — Snap, Jobs, Todos,
+	// GitHub — is shared, so /jobs still sees a child's work and an undo still
+	// covers its edits; the only thing isolated is the directory, so a child's
+	// `cd` cannot move the parent's next command. It starts at the workspace
+	// root, which is a stated place rather than wherever the parent wandered.
+	childDeps := deps
+	childDeps.Cwd = tools.NewCwd(b.ws.Root())
+	subs := b.subAgents(append(tools.New(childDeps), b.mcp.Tools...), late, fast)
 	eng, err := engine.New(b.ctx, engine.Options{
 		Model:         b.choice,
 		FastClient:    fast,

@@ -473,3 +473,55 @@ func FuzzEditFile(f *testing.F) {
 		}
 	})
 }
+
+// TestAChildToolsetIsolatesOnlyTheDirectory pins the shape app relies on for
+// sub-agents: a second toolset built from the same Deps with its own
+// CwdState. A child's `cd` must not move the parent — the parent's relative
+// paths are resolved against that directory when its *next* command is
+// described, so a leaked `cd` changes which files a permission decision is
+// about — while everything else in Deps stays shared, or /jobs would stop
+// seeing a child's work and an undo would stop covering its edits.
+func TestAChildToolsetIsolatesOnlyTheDirectory(t *testing.T) {
+	parentCwd := tools.NewCwd("")
+	f := newFixture(t, func(d *tools.Deps) { d.Cwd = parentCwd })
+	parentCwd.Set(f.root)
+	if err := os.Mkdir(filepath.Join(f.root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Exactly what app does when it builds the sub-agent toolset.
+	child := f.deps
+	child.Cwd = tools.NewCwd(f.deps.WS.Root())
+	childSet := tools.New(child)
+
+	run := func(ts agentkit.Toolset, cmd string) {
+		t.Helper()
+		tl, ok := ts.Lookup(tools.NameBash)
+		if !ok {
+			t.Fatal("no bash tool")
+		}
+		if _, err := tl.Call(context.Background(), json.RawMessage(cmd)); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run(childSet, `{"command":"cd sub"}`)
+	if got := child.Cwd.Get(); got != filepath.Join(f.root, "sub") {
+		t.Errorf("the child did not move: %q", got)
+	}
+	if got := parentCwd.Get(); got != f.root {
+		t.Errorf("the child's cd moved the parent to %q; it must stay where it was", got)
+	}
+	// And the reverse: the parent moving does not drag the child.
+	if _, err := f.text(tools.NameBash, `{"command":"cd sub"}`); err != nil {
+		t.Fatal(err)
+	}
+	if got := child.Cwd.Get(); got != filepath.Join(f.root, "sub") {
+		t.Errorf("the child's directory followed the parent: %q", got)
+	}
+
+	// Everything else is the same state, by identity.
+	if child.Jobs != f.deps.Jobs || child.Todos != f.deps.Todos || child.WS != f.deps.WS || child.Snap != f.deps.Snap {
+		t.Error("a child toolset must share jobs, todos, snapshots and the workspace; only the directory is isolated")
+	}
+}

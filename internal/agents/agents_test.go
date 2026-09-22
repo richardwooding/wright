@@ -388,3 +388,37 @@ func TestSubAgentEditIsDeniedByPolicy(t *testing.T) {
 		t.Fatalf("the child's edit_file should have failed: %+v", res)
 	}
 }
+
+// TestOnlyAnExplicitToolsListGivesASubAgentBash guards what keeps the shared
+// working directory from mattering in practice. explore gets the read-only
+// set, and a custom agent that names no tools gets everything except bash, so
+// only an agent that asks for the shell by name can run one. Each sub-agent
+// now also has its own working directory (see app), but that guard is the
+// reason this was latent rather than live, and it must not disappear quietly.
+func TestOnlyAnExplicitToolsListGivesASubAgentBash(t *testing.T) {
+	full := agentkit.Toolset{
+		fakeTool(tools.NameBash), fakeTool(tools.NameReadFile),
+		fakeTool(tools.NameWriteFile), fakeTool(tools.NameGrep),
+	}
+	has := func(ts agentkit.Toolset, name string) bool {
+		_, ok := ts.Lookup(name)
+		return ok
+	}
+	tests := []struct {
+		name string
+		def  agents.Definition
+		want bool
+	}{
+		{"read-only (explore's shape)", agents.Definition{ReadOnly: true}, false},
+		{"no tools listed", agents.Definition{}, false},
+		{"lists other tools", agents.Definition{Tools: []string{tools.NameReadFile, tools.NameGrep}}, false},
+		{"asks for bash by name", agents.Definition{Tools: []string{tools.NameBash}}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := has(agents.Toolset(tt.def, full), tools.NameBash); got != tt.want {
+				t.Errorf("bash present = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}

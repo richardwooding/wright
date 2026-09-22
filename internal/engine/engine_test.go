@@ -469,7 +469,7 @@ func environmentOf(t *testing.T, r *core.Request) string {
 			}
 		}
 	}
-	for _, line := range strings.Split(b.String(), "\n") {
+	for line := range strings.SplitSeq(b.String(), "\n") {
 		if strings.HasPrefix(line, "cwd: ") {
 			return line
 		}
