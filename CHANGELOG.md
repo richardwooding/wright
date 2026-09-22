@@ -6,6 +6,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **A `cd` prefix no longer eats the whole bash card.** The model writes
+  `cd <workspace> && …` on most commands — 89% and 94% of bash calls in two
+  real sessions — and for an ordinary project path that prefix is about sixty
+  characters, which is the entire summary budget. In one session 76 of 78 bash
+  cards showed the `cd` and *none* of the command. The card, `/ps` and the
+  transcript now show the command; the directory appears only when the `cd`
+  genuinely moves somewhere else. Nothing is hidden — the expanded card, the
+  approval prompt and the audit log all carry the command exactly as written.
+- **The model is told the working directory it actually has.** It persists
+  across bash calls and wright said so, but the `cwd:` line in the prompt was
+  snapshotted once at session start and never moved, so after any `cd` it named
+  the wrong directory — and a successful `cd` produced no confirmation at all,
+  only a refused one did. Told a fact and given a value it could not rely on,
+  re-establishing the directory every call was the reasonable thing to do. The
+  line is now live, a move is confirmed where it happens, and the docs say what
+  to do with it rather than only stating it.
+- **A sub-agent no longer moves its parent's working directory.** Sub-agents
+  shared one directory with the main agent, so a child's `cd` changed where the
+  parent's next command ran — and which files its next permission decision was
+  about. Each sub-agent now has its own, starting at the workspace root, while
+  jobs, todos and snapshots stay shared. Reachable only by a custom sub-agent
+  that named `bash` explicitly, so no released configuration hit it.
+
 ## [0.7.3] - 2026-09-22
 
 ### Fixed

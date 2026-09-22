@@ -415,6 +415,31 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   names that path to the model, so any tool that spills must redact first
   (`bash`, `web_fetch`). Redacting the clipped result only cleans the excerpt
   and leaves the secret on disk.
+- **The model must be told the working directory it actually has.** It
+  persists across bash calls (a `__WRIGHT_CWD=` epilogue, parsed by `splitCwd`
+  and applied by `updateCwd`), and `tools.Docs()` said so — while the prompt's
+  `<environment>` block printed `engine.Options.Cwd`, a string snapshotted at
+  session build that never moved. Told a fact and handed a value it could not
+  rely on, the model re-established the directory with `cd <workspace> &&` on
+  **89% of bash calls** in one real session, 76 of whose 78 `cd` targets were
+  the directory the shell was already in. `Options.CwdNow` now reports the
+  live value (a func, because the tracker lives in `tools`, which the engine
+  must never import; `app` wires them). The dynamic block is rebuilt **once
+  per run**, so `updateCwd` also notes a *move* — before this only a refused
+  `cd` said anything and a successful one was silent, which is what let the
+  model believe nothing had stuck. And both docs now state the consequence
+  ("write the command plainly, use relative paths, `cd` only to move
+  elsewhere"), not just the fact: the same lesson as `bashTimeoutNote`.
+- **A sub-agent gets its own `CwdState` and shares everything else.** `app`
+  builds the child toolset from a copy of `Deps` with a fresh
+  `tools.NewCwd(ws.Root())`; `tools.New` takes `Deps` by value and substitutes
+  `Cwd` only when nil, while `Snap`/`Jobs`/`Todos`/`GitHub` are pointers, so
+  `/jobs` still sees a child's work and `/undo` still covers its edits. Before
+  this a child's `cd` moved the parent — and with it the directory the
+  parent's *next* `describeBash` resolved relative paths against, so a child
+  could change what a parent's permission decision was about. It was latent
+  because `explore` gets the read-only set and a custom agent naming no tools
+  gets everything except bash; both guards are pinned by a test.
 - **A described path must be the path that runs.** `bash` executes with
   `spec.Dir = Cwd.Get()`, which `cd` moves, so `describeBash` wraps
   `policy.NewShellWorkspace` in `cwdWorkspace` to resolve relative words
@@ -883,6 +908,22 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   (`discardRunOverlays`), because `Engine.failPending` abandons the waiters
   without deciding them, so a prompt left on screen asks about a call that is
   already over.
+- **A card summary describes the request, minus a `cd` that moves nowhere.**
+  `toolview.SummaryFor` dispatches on the tool: bash gets a lexical strip of a
+  leading `cd <workspace> &&`, everything else falls through to `Summary`,
+  which stays generic — teaching it about `cd` would lex any tool with a
+  "command" key, MCP tools included. The strip is `strings` only and never a
+  `shellclass` call, for the same DAG reason as `bashLanguage`: a renderer must
+  not reach the permission engine. It is gated so its failure mode is
+  "unchanged" — one field before the first `&&`/`;` (never `||`), no quotes or
+  `$`, a non-empty remainder kept as its original bytes. The directory is
+  dropped only when it equals the workspace root and shown otherwise, and that
+  comparison fails safe because one directory has several spellings (`/home` →
+  `var/home`, macOS `/tmp` → `/private/tmp`) and a renderer must not call
+  `EvalSymlinks` on the draw path. It compares against the **root**, not the
+  live cwd, because the root is immutable and so cannot stale a cached card.
+  Nothing is hidden: the expanded card, the approval overlay and the audit log
+  all carry the command as written, so **no consent surface changes**.
 - **UI honesty.** Every status is glyph + word (`✓ ok`, `✗ denied`,
   `⛔ bypass`, `sandbox off`), never colour alone; the approval prompt focuses
   deny for `SeverityDestructive`, says in the "allow" label *and* in the facts
