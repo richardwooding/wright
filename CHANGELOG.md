@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-09-22
+
 ### Fixed
 
 - **A `cd` prefix no longer eats the whole bash card.** The model writes
