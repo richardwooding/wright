@@ -123,7 +123,7 @@ func environment(in Inputs) string {
 	if in.WS != nil {
 		fmt.Fprintf(&b, "workspace: %s\n", in.WS.Root())
 	}
-	fmt.Fprintf(&b, "cwd: %s\n", orUnknown(in.Cwd))
+	fmt.Fprintf(&b, "%s\n", cwdLine(in))
 	if !in.Now.IsZero() {
 		fmt.Fprintf(&b, "date: %s\n", in.Now.Format("2006-01-02"))
 	}
@@ -270,4 +270,24 @@ Search broadly first, then read the specific files that matter. Report file path
 // Title returns the prompt that names a session from its first exchange.
 func Title() string {
 	return `Write a title of at most 8 words for this coding session, describing the task in plain language (for example "Fix flaky retry test in httpx"). Reply with the title only: no quotes, no trailing period, no explanation.`
+}
+
+// cwdLine states the working directory and, crucially, what follows from it.
+//
+// The model was already told twice that the directory persists — in the bash
+// tool's description and in the Tools section — and still prefixed almost
+// every command with `cd <workspace> &&`, because the directory it was given
+// was snapshotted at session build and never moved. A fact with no
+// consequence attached is one the model re-derives for itself; the same
+// lesson as the bash timeout, which the agent used to re-implement with its
+// own `timeout` wrapper until the bound was stated.
+func cwdLine(in Inputs) string {
+	cwd := orUnknown(in.Cwd)
+	switch {
+	case in.WS != nil && in.Cwd != "" && in.Cwd == in.WS.Root():
+		return "cwd: " + cwd + " (the workspace root; bash already runs here, so commands need no cd prefix)"
+	case in.Cwd != "":
+		return "cwd: " + cwd + " (bash runs here and stays where cd leaves it; commands need no cd prefix)"
+	}
+	return "cwd: " + cwd
 }

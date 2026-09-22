@@ -38,6 +38,12 @@ const maxRedirects = 10
 // engine (which opens the model client, so a bad model fails here).
 func (b *builder) toolsAndEngine() error {
 	late := &lateEngine{}
+	// Hoisted rather than inlined so the engine can report the *live*
+	// directory in the prompt. tools.New substitutes its own CwdState when
+	// Deps.Cwd is nil, so losing this handle would make CwdNow go stale with
+	// no test failing. b.cwd is the invocation directory and is not
+	// necessarily the workspace root.
+	cwdState := tools.NewCwd(b.cwd)
 	todos := &tools.TodoList{}
 	b.jobs = tools.NewJobSet()
 	deps := tools.Deps{
@@ -48,7 +54,7 @@ func (b *builder) toolsAndEngine() error {
 		Redactor:    b.redactor,
 		Fetch:       fetchClient(),
 		SpillDir:    b.spillDir(),
-		Cwd:         tools.NewCwd(b.cwd),
+		Cwd:         cwdState,
 		GitHub:      b.gitHub,
 		Todos:       todos,
 		Jobs:        b.jobs,
@@ -82,6 +88,7 @@ func (b *builder) toolsAndEngine() error {
 		Settings:      settings,
 		WS:            b.ws,
 		Cwd:           cwd,
+		CwdNow:        cwdState.Get,
 		Mode:          b.mode,
 		Policy:        b.pol,
 		Tools:         append(registered, subs...),

@@ -554,3 +554,45 @@ func TestGitHubAuthCanBeTurnedOffMidSession(t *testing.T) {
 		t.Errorf("still carrying a credential after Disable: %q", v)
 	}
 }
+
+// TestBashConfirmsAMove pins the note a successful `cd` now produces. Until
+// this, only a *refused* cd said anything and a successful one was silent —
+// the asymmetry that let the model believe the directory had not stuck and
+// re-establish it with a `cd` prefix on every call.
+func TestBashConfirmsAMove(t *testing.T) {
+	f := newFixture(t, nil)
+	if err := os.Mkdir(filepath.Join(f.root, "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := f.text(tools.NameBash, `{"command":"cd sub"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(moved, "working directory is now sub") {
+		t.Errorf("a successful cd said nothing:\n%s", moved)
+	}
+	// A command that moves nothing stays silent — the no-op `cd <where we
+	// already are>` is the overwhelmingly common case and must cost nothing.
+	stayed, err := f.text(tools.NameBash, `{"command":"pwd"}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stayed, "working directory is now") {
+		t.Errorf("a command that moved nothing announced a move:\n%s", stayed)
+	}
+	same, err := f.text(tools.NameBash, `{"command":"cd ."}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(same, "working directory is now") {
+		t.Errorf("a cd to the current directory announced a move:\n%s", same)
+	}
+	// The root is named rather than shown as workspace.Rel's ".".
+	back, err := f.text(tools.NameBash, `{"command":"cd .."}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(back, "working directory is now the workspace root") {
+		t.Errorf("the root was not named:\n%s", back)
+	}
+}

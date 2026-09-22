@@ -406,3 +406,74 @@ func TestAutoAllowedCallCarriesItsPreview(t *testing.T) {
 		t.Errorf("Preview.Diff = %q, want the unified diff", result.Preview.Diff)
 	}
 }
+
+// TestThePromptFollowsTheWorkingDirectory is the bug that made the model
+// prefix almost every bash command with `cd <workspace> &&`. It was told —
+// twice — that the working directory persists, and then handed a `cwd:` line
+// snapshotted once at session build that never moved. Told a fact and given a
+// value it could not rely on, re-establishing the directory every call was
+// the rational thing to do.
+func TestThePromptFollowsTheWorkingDirectory(t *testing.T) {
+	here := "/somewhere/start"
+	client := &enginetest.Scripted{Responses: []*core.Response{
+		enginetest.TextResp("one"), enginetest.TextResp("two"),
+	}}
+	f := newFixture(t, client, func(o *engine.Options) {
+		o.Cwd = here
+		o.CwdNow = func() string { return here }
+	})
+	_ = f.eng.Submit("first")
+	f.collect(t, nil)
+	here = "/somewhere/start/sub" // as a `cd` would move it
+	_ = f.eng.Submit("second")
+	f.collect(t, nil)
+
+	reqs := client.Requests()
+	if len(reqs) < 2 {
+		t.Fatalf("got %d requests, want at least 2", len(reqs))
+	}
+	first, last := environmentOf(t, reqs[0]), environmentOf(t, reqs[len(reqs)-1])
+	if !strings.Contains(first, "/somewhere/start") || strings.Contains(first, "/sub") {
+		t.Errorf("first run's cwd = %q, want the starting directory", first)
+	}
+	if !strings.Contains(last, "/somewhere/start/sub") {
+		t.Errorf("second run's cwd = %q, want the directory the shell moved to", last)
+	}
+}
+
+// TestPromptCwdFallsBackToTheStaticValue: every caller that tracks nothing —
+// which is every test and every embedder — keeps the old behaviour.
+func TestPromptCwdFallsBackToTheStaticValue(t *testing.T) {
+	client := &enginetest.Scripted{Responses: []*core.Response{enginetest.TextResp("hi")}}
+	f := newFixture(t, client, func(o *engine.Options) {
+		o.Cwd = "/only/static"
+		o.CwdNow = nil
+	})
+	_ = f.eng.Submit("go")
+	f.collect(t, nil)
+	if got := environmentOf(t, client.Requests()[0]); !strings.Contains(got, "/only/static") {
+		t.Errorf("cwd = %q, want the static Options.Cwd", got)
+	}
+}
+
+// environmentOf returns the cwd line of the <environment> block in whichever
+// part of a request carries it.
+func environmentOf(t *testing.T, r *core.Request) string {
+	t.Helper()
+	var b strings.Builder
+	for _, m := range r.Messages {
+		for _, p := range m.Parts {
+			if txt, ok := p.(core.TextPart); ok {
+				b.WriteString(txt.Text)
+				b.WriteString("\n")
+			}
+		}
+	}
+	for _, line := range strings.Split(b.String(), "\n") {
+		if strings.HasPrefix(line, "cwd: ") {
+			return line
+		}
+	}
+	t.Fatalf("no cwd line in the request:\n%s", b.String())
+	return ""
+}

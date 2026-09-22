@@ -31,12 +31,22 @@ type DescribeFunc func(name string, args []byte) (req policy.Request, preview Pr
 // Options configure an Engine. Client is for tests and custom providers; when
 // nil the model is opened through llmkit by name.
 type Options struct {
-	Model         model.Choice
-	Client        core.Chatter
-	FastClient    core.Chatter // summaries and titles; nil = same as Client
-	Settings      config.Settings
-	WS            *workspace.Workspace
-	Cwd           string
+	Model      model.Choice
+	Client     core.Chatter
+	FastClient core.Chatter // summaries and titles; nil = same as Client
+	Settings   config.Settings
+	WS         *workspace.Workspace
+	Cwd        string
+	// CwdNow reports the shell's *live* working directory, which bash's `cd`
+	// moves. Cwd is where it started and the fallback for callers that track
+	// nothing. It is a func because the tracker lives in tools, which must
+	// never be imported here; app owns both and wires them together.
+	//
+	// Without it the environment block told the model a directory that was
+	// snapshotted at session build and never moved again — so a model that
+	// had been told "the working directory persists" was handed a value it
+	// could not rely on, and re-established it with a `cd` on every call.
+	CwdNow        func() string
 	Mode          policy.Mode
 	Policy        *policy.Engine
 	Tools         agentkit.Toolset

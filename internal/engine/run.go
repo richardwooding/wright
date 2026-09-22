@@ -209,7 +209,7 @@ func (e *Engine) promptInputs(ctx context.Context, choice model.Choice, mode pol
 		osName, arch = runtime.GOOS, runtime.GOARCH
 	}
 	return prompt.Inputs{
-		WS: e.opts.WS, Cwd: e.opts.Cwd, Model: choice, Mode: mode,
+		WS: e.opts.WS, Cwd: e.cwd(), Model: choice, Mode: mode,
 		Sandbox: e.opts.Sandbox, SandboxNet: e.opts.SandboxNet, Git: gs, Now: e.now(),
 		Instructions: e.opts.Instructions, Tools: e.opts.ToolDocs,
 		Attribution: e.opts.Settings.AttributionEnabled(), Trailer: e.opts.Settings.Git.Trailer,
@@ -315,4 +315,15 @@ func tokens(n int) string {
 	default:
 		return fmt.Sprint(n)
 	}
+}
+
+// cwd is the working directory to state in the prompt: the live one when the
+// app is tracking it, else the value the session started with.
+func (e *Engine) cwd() string {
+	if e.opts.CwdNow != nil {
+		if d := e.opts.CwdNow(); d != "" {
+			return d
+		}
+	}
+	return e.opts.Cwd
 }

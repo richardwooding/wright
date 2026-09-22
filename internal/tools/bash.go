@@ -33,6 +33,14 @@ const (
 	// cwdMarker is printed by the script's epilogue so the tool can follow
 	// `cd` across calls without a persistent shell.
 	cwdMarker = "__WRIGHT_CWD="
+
+	// bashCwdNote states the consequence, not just the fact. Saying only
+	// "the working directory persists" left the model prefixing almost every
+	// command with `cd <workspace> &&` — 89% of calls in one real session, of
+	// which 76 of 78 targeted the directory the shell was already in. This is
+	// the same lesson as bashTimeoutNote: a bound the model is not told how to
+	// use is one it re-implements.
+	bashCwdNote = "It starts in the workspace root and stays wherever cd leaves it, so write the command plainly and use relative paths; cd only to move somewhere else."
 	// waitDelay bounds how long Wait blocks on stragglers holding the pipes
 	// after the process group was killed.
 	waitDelay = 2 * time.Second
@@ -61,7 +69,8 @@ type bashArgs struct {
 func (d *Deps) bash() agentkit.Tool {
 	return &tool{
 		Tool: agentkit.Func(NameBash,
-			"Run a bash script in the sandbox. stdout and stderr are merged; the working directory persists across calls; no network unless network is set and granted. "+
+			"Run a bash script in the sandbox. stdout and stderr are merged; no network unless network is set and granted. "+
+				bashCwdNote+" "+
 				bashTimeoutNote+
 				" Set background for a long-running command (a dev server, a watcher): it returns a job id at once and the job tool reads its output.",
 			d.runBash),
@@ -333,8 +342,30 @@ func (d *Deps) updateCwd(newCwd string) []string {
 	if err != nil || !inside {
 		return []string{fmt.Sprintf("working directory %s is outside the workspace; staying in %s", newCwd, d.rel(d.Cwd.Get()))}
 	}
+	prev := d.Cwd.Get()
 	d.Cwd.Set(abs)
-	return nil
+	if abs == prev {
+		return nil
+	}
+	// Confirm a move, because until now only a *refused* cd said anything and
+	// a successful one was silent — which is what let the model believe the
+	// directory had not stuck and re-establish it on the next call. The
+	// environment block states the directory too, but it is rebuilt once per
+	// run, so mid-run this note is the only ground truth. Nothing is emitted
+	// for the overwhelmingly common no-op `cd <the directory we are in>`.
+	//
+	// Background jobs run no cwd epilogue (see startBackground), so they never
+	// reach here and never move the foreground shell.
+	return []string{"working directory is now " + d.cwdLabel(abs) + "; it persists into the next call"}
+}
+
+// cwdLabel names a directory as the model should see it: workspace-relative,
+// and spelled out for the root, which workspace.Rel returns as ".".
+func (d *Deps) cwdLabel(abs string) string {
+	if rel := d.rel(abs); rel != "." && rel != "" {
+		return rel
+	}
+	return "the workspace root"
 }
 
 // bashResult assembles the model-facing text: output, notes, status.
