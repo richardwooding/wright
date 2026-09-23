@@ -222,6 +222,34 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   value outside the workspace is opaque. The global options taint the
   subcommand's result instead of replacing it — returning early there would
   drop the hard deny `git push --force origin main` raises.
+- **An offer for a rule the user already has is worse than no offer.**
+  `suggestBash` offered one rule per non-inert command with no reference to the
+  rules in force, so a script with *one* uncovered command re-offered every
+  covered one too. A user was shown `bash(gofmt *)` three times in six minutes
+  after saving it, and 31% of the offers in that session were rules they already
+  held — a floor, since an offer shown and ignored is recorded nowhere. The
+  suggester now runs over `ev.rules` (the evaluation's own snapshot, never a
+  second `e.snapshot()`: a `Grant` landing between the two would let the prompt
+  claim a rule the lattice never consulted), and `heldBy` reuses
+  `matchesCommand` plus the `+net`/`+install` checks. **Completeness is
+  load-bearing in both directions**: a rule matching the argv *without* `+net`
+  does not hold a `+net` offer, so that offer must still be shown — it is the
+  only thing that would end the loop — while a rule that does cover the command
+  makes its offer a no-op. A held rule is kept and shown rather than dropped,
+  because it answers the question the prompt actually raises. That block can
+  never be a row in `p.grants.items`: the list is positionally identical to
+  `Approval.Offers` and `--plain` renders offers `i+2` and parses them `n-2`, so
+  an extra row would save a different rule than the one it shows. It is flat
+  lines, the way `Help.View` builds its sections. `audit.Decision.OffersHeld`
+  records the count so the noise stays measurable.
+- **`viewGrants` budgets rows and windows the list.** It did neither, and
+  `frame` cuts from the bottom: a six-command script yields eighteen offers at
+  two lines each, so the footer documenting space/enter/number/esc was gone at
+  *every* height including forty rows, and the focus marker could sit
+  off-screen. When the page is short it sheds content in priority order —
+  hints, then the held block, then the intro — and `grantRows` slices `marks`
+  alongside `items`, or `box()` reads another row's flag and the `[x]` lands on
+  the wrong rule.
 - **One approval can accept several rules.** `engine.Decision.Grants` is a
   list: a script needs a rule per command, and a prompt that could accept one
   meant being asked again on the very next call. `Engine.ask` dedupes by rule

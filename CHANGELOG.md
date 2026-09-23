@@ -6,6 +6,33 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-09-23
+
+### Fixed
+
+- **The approval prompt no longer offers rules you already have.** A script
+  with one uncovered command offered a rule for every *covered* command too, so
+  you could be shown `bash(gofmt *)` three times in six minutes after saving it
+  — 31% of the offers in one real session were rules already held, and that is a
+  floor, since an offer shown and ignored is recorded nowhere. Those rules are
+  now listed separately on the "allow…" page as **already allowed — not offered
+  again**, naming the rule doing the work when a wider one covers a narrower
+  offer. They are never selectable: ticking a rule already in force records
+  nothing.
+- **The prompt says what it is actually asking about.** "your allow rules do not
+  cover command `./out`" now appears on the prompt itself. It was always
+  computed; it just sat behind the `x` key while the offers list showed a rule
+  you already owned.
+- **The "allow…" page fits on the screen.** It neither budgeted rows nor
+  scrolled, and the frame cuts from the bottom, so for a realistic script —
+  eighteen offers at two lines each — the line documenting space/enter/number/esc
+  was gone at every terminal height, and the focused row could be off-screen.
+  It now windows the list, keeps the focused row visible, and sheds the intro
+  before the key hints when space is tight.
+- A rule that matches a command but grants no network still offers the `+net`
+  version, which is the one thing that would stop the prompt. This is why
+  "already covered" means covered *including the grants the command needs*.
+
 ## [0.8.1] - 2026-09-22
 
 ### Fixed
