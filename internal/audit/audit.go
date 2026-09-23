@@ -101,8 +101,15 @@ type Decision struct {
 	Mode        string `json:"mode,omitempty"`
 	By          string `json:"by,omitempty"` // policy | user | headless
 	OffersShown int    `json:"offers_shown,omitempty"`
-	HardDeny    bool   `json:"hard_deny,omitempty"`
-	Reason      string `json:"reason,omitempty"`
+	// OffersHeld counts rules the prompt did *not* offer because the user
+	// already holds one covering that command. It exists so the noise this
+	// removed stays measurable: before it, the only trace of a redundant
+	// offer was the user re-ticking it, which undercounts badly.
+	OffersHeld int `json:"offers_held,omitempty"`
+	// Uncovered names what no allow rule covered, in coverage's own words.
+	Uncovered string `json:"uncovered,omitempty"`
+	HardDeny  bool   `json:"hard_deny,omitempty"`
+	Reason    string `json:"reason,omitempty"`
 
 	// Grants are the rules the user chose to remember, each as
 	// "<rule> (<scope>)". One prompt can accept several.

@@ -402,7 +402,7 @@ func (e *Engine) countHardDeny(ctx context.Context) {
 // given nothing.
 func (e *Engine) auditDecision(c agentkit.Call, v policy.Verdict, by string, d *Decision, grant CallGrant) {
 	outcome := outcomeOf(v, d)
-	rec := &audit.Decision{Outcome: outcome, Class: v.Class.String(), Mode: e.Mode().String(), By: by, OffersShown: len(v.Offers), HardDeny: v.HardDeny, Reason: v.Reason}
+	rec := &audit.Decision{Outcome: outcome, Class: v.Class.String(), Mode: e.Mode().String(), By: by, OffersShown: len(v.Offers), OffersHeld: len(v.Held), Uncovered: v.Uncovered, HardDeny: v.HardDeny, Reason: v.Reason}
 	if v.Rule != nil {
 		rec.Rule = v.Rule.String()
 		rec.Source = string(v.Rule.Source)

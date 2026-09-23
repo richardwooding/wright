@@ -203,6 +203,10 @@ type eval struct {
 	req     Request
 	kind    reqKind
 	v       Verdict
+	// uncovered is what coverage found missing, kept so offer() can put it on
+	// the verdict. Routed through offer() rather than set directly so it can
+	// never linger on a verdict that went on to allow.
+	uncovered string
 }
 
 // reqKind buckets tools for the mode table.
@@ -528,7 +532,7 @@ func (ev *eval) finishAsk() {
 	}
 	rule := ev.v.Rule
 	ev.decide(Ask, fmt.Sprintf("ask rule %s [%s]", rule, rule.Source), rule)
-	ev.v.Offers = ev.e.Suggest(ev.req)
+	ev.offer()
 }
 
 // planMayAsk reports the kinds plan mode still prompts for rather than
@@ -538,19 +542,29 @@ func (ev *eval) planMayAsk() bool {
 }
 
 // allowed applies allow rules and grants: every element must be covered.
-func (ev *eval) allowed() bool {
+// allowRules are the allow rules in force for this request's tool. Factored
+// out so the suggester asks the same question of the same set the lattice
+// did: two answers to "is this already allowed?" drifting apart would produce
+// a prompt that offers nothing and explains nothing.
+func (ev *eval) allowRules() []*Rule {
 	allow := make([]*Rule, 0, len(ev.rules))
 	for i := range ev.rules {
 		if ev.rules[i].Decision == Allow && ev.rules[i].MatchesTool(ev.req.Tool) {
 			allow = append(allow, &ev.rules[i])
 		}
 	}
+	return allow
+}
+
+func (ev *eval) allowed() bool {
+	allow := ev.allowRules()
 	if len(allow) == 0 {
 		ev.explain("no allow rules for %s", ev.req.Tool)
 		return false
 	}
 	covered, rule, why := ev.coverage(allow)
 	if !covered {
+		ev.uncovered = why
 		ev.explain("allow rules do not cover %s", why)
 		return false
 	}
@@ -709,7 +723,7 @@ func (ev *eval) modeTable() {
 		ev.modeOther()
 	}
 	if ev.v.Decision == Ask {
-		ev.v.Offers = ev.e.Suggest(ev.req)
+		ev.offer()
 	}
 }
 
@@ -938,20 +952,39 @@ func (ev *eval) modeOther() {
 // to "always allow" something that then keeps asking, and the headless
 // denial would name a --allow flag that changes nothing. A one-off approval
 // still works in plan mode; that is what the prompt is for.
+// Suggest is the exported entry point, for callers outside an evaluation. It
+// takes its own snapshot; inside the lattice use ev.offer(), which reuses the
+// snapshot the decision was made against — a Grant landing between the two
+// would otherwise let the prompt claim a rule the lattice never consulted.
 func (e *Engine) Suggest(req Request) []GrantOffer {
-	kind := kindOf(req.Tool)
+	mode, rules, trusted := e.snapshot()
+	ev := &eval{e: e, mode: mode, rules: rules, trusted: trusted, req: req, kind: kindOf(req.Tool)}
+	offers, _ := ev.suggest()
+	return offers
+}
+
+// offer records the rules worth showing with an Ask: the ones to offer, the
+// ones already in force, and what was not covered.
+func (ev *eval) offer() {
+	ev.v.Offers, ev.v.Held = ev.suggest()
+	ev.v.Uncovered = ev.uncovered
+}
+
+func (ev *eval) suggest() ([]GrantOffer, []HeldRule) {
+	req, kind := ev.req, ev.kind
 	// An offer that cannot take effect is worse than none: it invites
 	// "always allow" and then keeps asking. In plan mode only the read-only
 	// tools consult allow rules, so only they may be offered one.
-	if e.Mode() == ModePlan && kind != kindRead {
-		return nil
+	if ev.mode == ModePlan && kind != kindRead {
+		return nil, nil
 	}
 	var rules []Rule
+	var held []HeldRule
 	switch kind {
 	case kindBash:
-		rules = suggestBash(req)
+		rules, held = ev.suggestBash()
 	case kindRead, kindWrite:
-		rules = e.suggestPaths(req)
+		rules, held = ev.suggestPaths()
 	case kindWeb:
 		if req.URL != nil && req.URL.Hostname() != "" {
 			if r, err := ParseRule(req.Tool+"(domain:"+req.URL.Hostname()+")", SourceSession); err == nil {
@@ -971,15 +1004,24 @@ func (e *Engine) Suggest(req Request) []GrantOffer {
 			GrantOffer{Rule: r, Scope: ScopeUser, Label: "allow " + r.String() + " for every project (your user config)"},
 		)
 	}
-	return offers
+	return offers, held
 }
 
-func suggestBash(req Request) []Rule {
+func (ev *eval) suggestBash() (rules []Rule, held []HeldRule) {
+	req := ev.req
 	sh := req.Shell
 	if sh == nil || sh.Unknown || sh.HardDeny != "" || sh.Class >= shellclass.Destructive {
-		return nil
+		return nil, nil
 	}
-	var rules []Rule
+	// Only looked up when there is something to look up: a fresh session with
+	// no allow rules pays nothing for this.
+	var allow []*Rule
+	if len(ev.rules) > 0 {
+		allow = ev.allowRules()
+	}
+	// One seen set across both lists, so a rule text never appears in each.
+	// Safe because equal text implies the same argv prefix and the same
+	// +net/+install suffix, so two commands producing it are held together.
 	seen := map[string]bool{}
 	for _, c := range sh.Commands {
 		if len(c.Argv) == 0 || strings.HasPrefix(c.Argv[0], "(") {
@@ -1005,11 +1047,20 @@ func suggestBash(req Request) []Rule {
 			continue
 		}
 		seen[text] = true
-		if r, err := ParseRule(text, SourceSession); err == nil {
-			rules = append(rules, r)
+		r, err := ParseRule(text, SourceSession)
+		if err != nil {
+			continue
 		}
+		// An offer for a rule already in force is worse than no offer: it
+		// invites "always allow", records nothing, and buries the one rule
+		// that would actually end the prompt. Keep it to show, do not offer it.
+		if by := heldBy(allow, c, req.Network, sh.Installs); by != nil {
+			held = append(held, HeldRule{Rule: r, By: *by})
+			continue
+		}
+		rules = append(rules, r)
 	}
-	return rules
+	return rules, held
 }
 
 // effectiveArgv is the command a rule should be about: what actually runs,
@@ -1027,6 +1078,33 @@ func effectiveArgv(c shellclass.Command) []string {
 // offered for a wrapped command names the program — so matching only the
 // outer form would offer a rule that could never take effect — while a rule
 // someone already saved for the outer form must keep working.
+// heldBy returns the allow rule that already covers c *completely*, or nil.
+//
+// Completeness is the whole point and cuts both ways. A rule that matches the
+// argv but carries no +net does not cover a command that needs the network —
+// so the offer adding +net is genuinely new and must still be shown, which is
+// exactly the prompt a user finds most baffling ("I have bash(composer *),
+// why am I being asked?"). And a rule that does cover the command makes its
+// offer a no-op: ticking it records something already in force.
+//
+// It is deliberately stricter than coverBash, which checks +install against
+// the last matching rule rather than per rule. The error directions are not
+// symmetric: a false "held" hides the one rule that would end the loop and
+// cannot be fixed from the prompt, while a false "new" is merely today's
+// behaviour.
+func heldBy(allow []*Rule, c shellclass.Command, netWanted, installs bool) *Rule {
+	for _, r := range allow {
+		switch {
+		case !r.IsBare() && !r.IsBash(), !matchesCommand(r, c):
+		case (c.Network || netWanted) && !r.Net():
+		case installs && !r.Installs():
+		default:
+			return r
+		}
+	}
+	return nil
+}
+
 func matchesCommand(r *Rule, c shellclass.Command) bool {
 	if r.MatchesCommand(c.Argv) {
 		return true
@@ -1064,9 +1142,13 @@ func offerWords(argv []string) []string {
 	return argv[:1]
 }
 
-func (e *Engine) suggestPaths(req Request) []Rule {
+func (ev *eval) suggestPaths() (rules []Rule, held []HeldRule) {
+	e, req := ev.e, ev.req
 	paths := append(slices.Clone(req.Paths), req.Writes...)
-	var rules []Rule
+	var allow []*Rule
+	if len(ev.rules) > 0 {
+		allow = ev.allowRules()
+	}
 	seen := map[string]bool{}
 	for _, p := range paths {
 		if e.ws.IsProtected(p) || e.ws.IsSecretFile(p) {
@@ -1092,11 +1174,32 @@ func (e *Engine) suggestPaths(req Request) []Rule {
 			continue
 		}
 		seen[text] = true
-		if r, err := ParseRule(text, SourceSession); err == nil {
-			rules = append(rules, r)
+		r, err := ParseRule(text, SourceSession)
+		if err != nil {
+			continue
+		}
+		// Same rule as for bash: a path an existing rule already covers is
+		// shown, not offered. Reachable through a multi_edit whose files sit
+		// in two directories when a rule covers only one of them.
+		if by := ev.heldPath(allow, p); by != nil {
+			held = append(held, HeldRule{Rule: r, By: *by})
+			continue
+		}
+		rules = append(rules, r)
+	}
+	return rules, held
+}
+
+// heldPath returns the allow rule that already covers a path, or nil. The
+// test is the one coverPaths uses, so the suggester and the lattice cannot
+// disagree about what is already allowed.
+func (ev *eval) heldPath(allow []*Rule, path string) *Rule {
+	for _, r := range allow {
+		if r.IsBare() || r.MatchesPath(path, ev.e.ws.Home, ev.e.ws.Root()) {
+			return r
 		}
 	}
-	return rules
+	return nil
 }
 
 // containment applies the workspace rules ahead of the allow rules and

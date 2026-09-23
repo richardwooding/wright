@@ -144,6 +144,18 @@ func (s Scope) String() string {
 	return fmt.Sprintf("scope(%d)", int(s))
 }
 
+// HeldRule is a rule the prompt would have offered, suppressed because an
+// existing allow rule already covers it.
+//
+// Rule is the offer that was not made; By is the rule in force that covers
+// it. They differ when a wider rule holds a narrower offer — bash(go *)
+// holding bash(go build *) — and naming both is what lets the prompt say
+// which of the user's own rules is doing the work.
+type HeldRule struct {
+	Rule Rule
+	By   Rule
+}
+
 // GrantOffer is a rule the user may accept to avoid being asked again.
 type GrantOffer struct {
 	Rule  Rule
@@ -186,6 +198,17 @@ type Verdict struct {
 	Explain []string
 	// Offers are grants that would make the same request pass next time.
 	Offers []GrantOffer
+	// Held are offers suppressed because an allow rule already covers them.
+	// They are carried rather than dropped because they answer the question
+	// the prompt actually raises — "I saved a rule for this, why am I being
+	// asked?" — which a shorter list alone does not. Never selectable:
+	// accepting one would record a rule the user already has.
+	Held []HeldRule
+	// Uncovered names the element of the request that no allow rule covered,
+	// in the words coverage itself uses ("command `go vet ./...`", "network
+	// access for `curl x` (the allow rule has no +net)"). It is set only
+	// where Offers are, so it is meaningful exactly when a prompt exists.
+	Uncovered string
 	// HardDeny is true when the hard-deny set decided; counted per run.
 	HardDeny bool
 	// Network is true when the command should run with network access if it

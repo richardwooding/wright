@@ -180,7 +180,13 @@ func TestEvaluateTable(t *testing.T) {
 		{name: "builtin deny metadata endpoint", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: fetch("http://169.254.169.254/latest"), want: policy.Deny},
 		{name: "builtin deny localhost fetch", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: fetch("http://127.0.0.1:8080/"), want: policy.Deny},
 		// --- ask rules
-		{name: "project ask beats builtin allow", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, projectAsk}, req: f.bash("rg foo ."), want: policy.Ask, reason: "ask rule", offers: true},
+		// No offer here, and that is an improvement rather than a loss: the
+		// builtin allow bash(rg *) already covers the command, so offering it
+		// again would record a rule the user has — and an explicit ask rule
+		// outranks allow rules anyway, so it could never have stopped the
+		// prompt. The verdict still names the ask rule, and the prompt says
+		// how many held rules matched.
+		{name: "project ask beats builtin allow", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin, projectAsk}, req: f.bash("rg foo ."), want: policy.Ask, reason: "ask rule", noOffers: true},
 		{name: "ask rule in bypass becomes allow", mode: policy.ModeBypass, layers: [][]policy.Rule{builtin, projectAsk}, req: f.bash("rg foo ."), want: policy.Allow},
 		{name: "ask rule for edit in plan is deny", mode: policy.ModePlan, layers: [][]policy.Rule{builtin}, req: f.write("main.go"), want: policy.Deny, reason: "plan mode"},
 		{name: "builtin ask git push", mode: policy.ModeDefault, layers: [][]policy.Rule{builtin}, req: f.bash("git push origin feature"), want: policy.Ask},
@@ -1084,5 +1090,154 @@ func TestGhOffersNameTheCommandGroup(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestSuggestSkipsRulesAlreadyHeld is the reported bug. A script with one
+// uncovered command was offering a rule for every *covered* command too: a
+// user was shown bash(gofmt *) three times in six minutes after saving it,
+// and 31% of the offers in that session were rules they already held.
+//
+// Ticking such an offer records nothing, and it buries the one rule that
+// would actually stop the prompt.
+func TestSuggestSkipsRulesAlreadyHeld(t *testing.T) {
+	f := newFixture(t)
+	held := func(t *testing.T, texts ...string) []policy.Rule {
+		t.Helper()
+		return rules(t, policy.Allow, policy.SourceUser, texts...)
+	}
+	names := func(offers []policy.GrantOffer) []string {
+		var out []string
+		for _, o := range offers {
+			if o.Scope == policy.ScopeSession {
+				out = append(out, o.Rule.String())
+			}
+		}
+		return out
+	}
+	tests := []struct {
+		name       string
+		hold       []string
+		script     string
+		wantOffers []string
+		wantHeld   []string
+	}{
+		{
+			name: "the reported case", hold: []string{"bash(gofmt *)"},
+			script:     "gofmt -l . && go vet ./...",
+			wantOffers: []string{"bash(go vet *)"}, wantHeld: []string{"bash(gofmt *)"},
+		},
+		{
+			// Load-bearing: the held rule grants no network, so the +net offer
+			// is genuinely new and is the only thing that would help.
+			name: "a rule without +net does not hold a +net offer", hold: []string{"bash(curl *)"},
+			script:     "curl -sS https://example.test",
+			wantOffers: []string{"bash(curl *) +net"}, wantHeld: nil,
+		},
+		{
+			// With the +net rule in force the curl itself needs no offer; the
+			// prompt exists only because of the second command. (A script the
+			// rules cover completely raises no prompt at all — see
+			// TestAFullyCoveredScriptDoesNotAsk.)
+			name: "a +net rule does hold it", hold: []string{"bash(curl *) +net", "bash(make *)"},
+			script:     "curl -sS https://example.test && ./out",
+			wantOffers: []string{"bash(./out *) +net"}, wantHeld: []string{"bash(curl *) +net"},
+		},
+		{
+			name: "a wider rule holds a narrower offer", hold: []string{"bash(go *)"},
+			script:     "go build ./... && make x",
+			wantOffers: []string{"bash(make x *)"}, wantHeld: []string{"bash(go build *)"},
+		},
+		{
+			name: "nothing held, nothing suppressed", hold: nil,
+			script:     "go build ./... && go vet ./...",
+			wantOffers: []string{"bash(go build *)", "bash(go vet *)"}, wantHeld: nil,
+		},
+		{
+			// An inert command needs no rule, so it belongs in neither list.
+			name: "the cd is neither offered nor held", hold: []string{"bash(make *)"},
+			script:     "cd " + f.ws.Root() + " && make && ./out",
+			wantOffers: []string{"bash(./out *)"}, wantHeld: []string{"bash(make *)"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			layers := [][]policy.Rule{}
+			if len(tt.hold) > 0 {
+				layers = append(layers, held(t, tt.hold...))
+			}
+			e := policy.New(f.ws, policy.ModeDefault, layers...)
+			v := e.Evaluate(f.bash(tt.script))
+			if got := names(v.Offers); !slices.Equal(got, tt.wantOffers) {
+				t.Errorf("offers = %v, want %v", got, tt.wantOffers)
+			}
+			var gotHeld []string
+			for _, h := range v.Held {
+				gotHeld = append(gotHeld, h.Rule.String())
+			}
+			if !slices.Equal(gotHeld, tt.wantHeld) {
+				t.Errorf("held = %v, want %v", gotHeld, tt.wantHeld)
+			}
+		})
+	}
+}
+
+// TestHeldNamesTheRuleDoingTheWork: when a wider rule covers a narrower
+// offer, the prompt must be able to say which of the user's rules is
+// responsible — "covered by bash(go *)" rather than a bare assertion.
+func TestHeldNamesTheRuleDoingTheWork(t *testing.T) {
+	f := newFixture(t)
+	e := policy.New(f.ws, policy.ModeDefault, rules(t, policy.Allow, policy.SourceUser, "bash(go *)"))
+	v := e.Evaluate(f.bash("go build ./... && make x"))
+	if len(v.Held) != 1 {
+		t.Fatalf("held = %+v", v.Held)
+	}
+	if got, want := v.Held[0].By.String(), "bash(go *)"; got != want {
+		t.Errorf("By = %q, want %q", got, want)
+	}
+	if got, want := v.Held[0].Rule.String(), "bash(go build *)"; got != want {
+		t.Errorf("Rule = %q, want %q", got, want)
+	}
+}
+
+// TestVerdictNamesWhatWasUncovered: the sentence that answers "why am I being
+// asked when I approved this?" is already computed for Explain; it must reach
+// the verdict so the prompt can show it, and the two must agree.
+func TestVerdictNamesWhatWasUncovered(t *testing.T) {
+	f := newFixture(t)
+	e := policy.New(f.ws, policy.ModeDefault, rules(t, policy.Allow, policy.SourceUser, "bash(gofmt *)"))
+	v := e.Evaluate(f.bash("gofmt -l . && make x"))
+	if !strings.Contains(v.Uncovered, "make x") {
+		t.Errorf("Uncovered = %q, want it to name the uncovered command", v.Uncovered)
+	}
+	var trace string
+	for _, l := range v.Explain {
+		if strings.Contains(l, "do not cover") {
+			trace = l
+		}
+	}
+	if !strings.Contains(trace, v.Uncovered) {
+		t.Errorf("Explain says %q but Uncovered is %q; they must not drift", trace, v.Uncovered)
+	}
+	// An allowed call carries no such claim.
+	allowed := policy.New(f.ws, policy.ModeDefault, rules(t, policy.Allow, policy.SourceUser, "bash(gofmt *)")).
+		Evaluate(f.bash("gofmt -l ."))
+	if allowed.Decision != policy.Allow || allowed.Uncovered != "" {
+		t.Errorf("an allowed verdict carries Uncovered = %q", allowed.Uncovered)
+	}
+}
+
+// TestAFullyCoveredScriptDoesNotAsk is the boundary of the change: when the
+// rules cover everything there is no prompt, so there is nothing to offer and
+// nothing to report as held.
+func TestAFullyCoveredScriptDoesNotAsk(t *testing.T) {
+	f := newFixture(t)
+	e := policy.New(f.ws, policy.ModeDefault, rules(t, policy.Allow, policy.SourceUser, "bash(curl *) +net"))
+	v := e.Evaluate(f.bash("curl -sS https://example.test"))
+	if v.Decision != policy.Allow {
+		t.Fatalf("decision = %v, want allow", v.Decision)
+	}
+	if len(v.Offers) != 0 || len(v.Held) != 0 || v.Uncovered != "" {
+		t.Errorf("an allowed call carries offers=%v held=%v uncovered=%q", v.Offers, v.Held, v.Uncovered)
 	}
 }
