@@ -372,6 +372,7 @@ func (p *Approval) facts(w int) []string {
 	if p.a.Verdict.Reason != "" {
 		out = append(out, p.th.Subtle.Render(ansiTrunc(p.a.Verdict.Reason, w)))
 	}
+	out = append(out, p.coverageFacts(w)...)
 	if len(out) > 0 {
 		out = append(out, "")
 	}
@@ -379,6 +380,31 @@ func (p *Approval) facts(w int) []string {
 }
 
 // previewLines is the diff, command or body as plain lines.
+// coverageFacts answer the question this prompt actually raises for anyone who
+// has been saving rules: "I approved this, why am I being asked again?"
+//
+// The wording matches policy's own explain("allow rules do not cover %s", …),
+// so there is one sentence to maintain and the strings it produces were
+// written as the tail of exactly that sentence.
+func (p *Approval) coverageFacts(w int) []string {
+	var out []string
+	if u := p.a.Verdict.Uncovered; u != "" {
+		out = append(out, wrap(p.th.Warm.Render(theme.GlyphAsk+" ")+"your allow rules do not cover "+u, w)...)
+	}
+	// With every command covered but an explicit ask rule deciding, there are
+	// no offers at all — so [a] is hidden and the held rules have nowhere to
+	// appear. Give the count here instead, and say plainly that they did not
+	// decide: the call is still being refused pending an answer, and a line
+	// reading as "this is allowed" on a prompt that is asking would be worse
+	// than the noise this whole change removes.
+	if len(p.a.Offers) == 0 && len(p.a.Verdict.Held) > 0 {
+		out = append(out, wrap(p.th.Subtle.Render(fmt.Sprintf(
+			"%d rule(s) you already have match this call; the decision above outranks them",
+			len(p.a.Verdict.Held))), w)...)
+	}
+	return out
+}
+
 func (p *Approval) previewLines() []string {
 	switch {
 	case p.a.Preview.Diff != "":
@@ -403,11 +429,97 @@ func (p *Approval) coloured(w int) []string {
 	return out
 }
 
+// viewGrants is the "allow…" page: the rules to remember, then the rules
+// already in force.
+//
+// Nothing here may be appended to p.grants.items. That list is positionally
+// identical to p.a.Offers — grant() indexes the offers by list index and the
+// digits are fmt.Sprint(i+1) — so one extra row would make every digit below
+// it save the wrong rule. The held block is therefore flat lines, the way
+// Help.View builds its sections.
+//
+// It also budgets rows and windows the list, which it did not before: a
+// six-command script yields eighteen offers at two lines each, and frame cuts
+// from the bottom, so the footer hint was gone and the focus marker could sit
+// off-screen — at any terminal height.
 func (p *Approval) viewGrants(width, height, w int) string {
-	body := []string{p.th.Subtle.Render("Remember rules so this is not asked again. Each shows the exact rule text and where it is stored."), ""}
-	body = append(body, p.grants.render(p.th, w)...)
-	body = append(body, "", p.th.Subtle.Render("space mark · enter apply marked (or the focused row) · number apply one · esc back"))
-	return frame(p.th, p.Title()+" · allow…", body, width, height)
+	// frame keeps height-frameRows body lines and spends two on the title and
+	// the blank under it. What is left is shed in priority order, because a
+	// short terminal cannot have everything: the key hints outrank the held
+	// block, which outranks the explanatory intro. Losing the hints is what
+	// this page did before it budgeted at all — frame cuts from the bottom,
+	// so they went first, at every height including forty rows.
+	foot := []string{"", p.th.Subtle.Render("space mark · enter apply · number apply one · esc back")}
+	avail := max(height-frameRows-2-len(foot), 1)
+
+	var head []string
+	if avail >= 8 {
+		head = []string{p.th.Subtle.Render("Remember rules so this is not asked again. Each shows the exact rule text and where it is stored."), ""}
+		avail -= len(head)
+	}
+	heldRoom := 0
+	if n := len(p.a.Verdict.Held); n > 0 && avail >= 6 {
+		// Blank, heading and at least one rule; a third of the page at most.
+		heldRoom = min(n+2, max(avail/3, 3))
+	}
+	body := append(head, p.grantRows(w, max(avail-heldRoom, 2))...)
+	body = append(body, p.heldLines(w, heldRoom)...)
+	return frame(p.th, p.Title()+" · allow…", append(body, foot...), width, height)
+}
+
+// grantRows renders the offers as a window that keeps the focused row visible.
+// Each offer is two lines (label and rule/scope), so the window counts pairs.
+func (p *Approval) grantRows(w, room int) []string {
+	if len(p.grants.items)*2 <= room {
+		return p.grants.render(p.th, w)
+	}
+	// One row of the budget goes to the "… more below" line.
+	rows := max((room-1)/2, 1)
+	start := 0
+	if p.grants.focus >= rows {
+		start = p.grants.focus - rows + 1
+	}
+	end := min(start+rows, len(p.grants.items))
+	// marks must be sliced alongside items or box() reads another row's flag
+	// and the [x] lands on the wrong rule.
+	win := list{items: p.grants.items[start:end], focus: p.grants.focus - start, marks: p.grants.marks[start:end]}
+	out := win.render(p.th, w)
+	if end < len(p.grants.items) {
+		out = append(out, p.th.Subtle.Render(fmt.Sprintf("  … %d more below", len(p.grants.items)-end)))
+	}
+	return out
+}
+
+// heldLines names the rules this prompt did not offer because the user
+// already has one covering that command.
+//
+// Deliberately factual rather than reassuring: "you already have this" says
+// what is true without implying the call is allowed, which it is not — it is
+// still waiting for an answer.
+func (p *Approval) heldLines(w, room int) []string {
+	held := p.a.Verdict.Held
+	if len(held) == 0 || room < 2 {
+		return nil
+	}
+	out := []string{"", p.th.Bold.Render("already allowed — not offered again")}
+	shown := min(len(held), room-2) // the blank and the heading are rows too
+	if shown < len(held) {
+		shown-- // and so is the "… and N more" line
+	}
+	if shown < 1 {
+		return nil
+	}
+	for _, h := range held[:shown] {
+		line := "  " + h.Rule.String() + "  ·  you already have this"
+		if h.Rule.String() != h.By.String() {
+			line = "  " + h.Rule.String() + "  ·  covered by " + h.By.String()
+		}
+		out = append(out, p.th.Subtle.Render(ansiTrunc(line, w)))
+	}
+	if n := len(held) - shown; n > 0 {
+		out = append(out, p.th.Subtle.Render(fmt.Sprintf("  … and %d more you already have", n)))
+	}
+	return out
 }
 
 func (p *Approval) viewEdit(width, height, w int) string {

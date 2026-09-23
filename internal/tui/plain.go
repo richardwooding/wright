@@ -225,6 +225,20 @@ func (r *plainRunner) askApproval(ev engine.Event) {
 	for _, l := range grantLines(a.Grants) {
 		r.line("    " + l)
 	}
+	// Unnumbered, and before the numbered block, so the offer numbers stay
+	// contiguous: askApproval renders them i+2 and pickOffers parses n-2, two
+	// offsets that must keep agreeing. Anything numbered inserted here would
+	// silently shift which rule an answer saves.
+	if u := a.Verdict.Uncovered; u != "" {
+		r.line("    your allow rules do not cover " + u)
+	}
+	for _, h := range a.Verdict.Held {
+		if h.Rule.String() == h.By.String() {
+			r.line("    already allowed, not offered: " + h.Rule.String())
+			continue
+		}
+		r.line("    already allowed, not offered: " + h.Rule.String() + " (covered by " + h.By.String() + ")")
+	}
 	r.line("  1) allow once")
 	for i, o := range a.Offers {
 		r.line(fmt.Sprintf("  %d) allow and remember: %s  [%s]", i+2, o.Rule.String(), o.Scope))

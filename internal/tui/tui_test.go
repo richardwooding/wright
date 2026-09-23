@@ -152,6 +152,35 @@ func (f *fakeController) scriptWithOffers(t *testing.T, texts ...string) {
 	}}
 }
 
+// scriptWithHeld is scriptWithOffers plus rules the engine suppressed because
+// the user already holds one covering that command.
+func (f *fakeController) scriptWithHeld(t *testing.T, offers, held []string) {
+	t.Helper()
+	rule := func(text string) policy.Rule {
+		t.Helper()
+		r, err := policy.ParseRule(text, policy.SourceSession)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	var os []policy.GrantOffer
+	for _, text := range offers {
+		os = append(os, policy.GrantOffer{Rule: rule(text), Scope: policy.ScopeSession, Label: "allow " + text})
+	}
+	var hs []policy.HeldRule
+	for _, text := range held {
+		hs = append(hs, policy.HeldRule{Rule: rule(text), By: rule(text)})
+	}
+	f.events <- engine.Event{Kind: engine.KindRunStarted}
+	f.events <- engine.Event{Kind: engine.KindApprovalRequest, Call: call("c1", "bash", ""), Approval: &engine.Approval{
+		ID: "ap1", Tool: "bash", Args: json.RawMessage(`{"command":"gofmt -l . && ./out"}`),
+		Preview:  engine.Preview{Title: "gofmt -l . && ./out", Body: "gofmt -l . && ./out"},
+		Severity: engine.SeverityInfo, Offers: os,
+		Verdict: policy.Verdict{Held: hs, Uncovered: "command `./out`"},
+	}}
+}
+
 func call(id, name, args string) *core.ToolCall {
 	return &core.ToolCall{ID: id, Name: name, Arguments: json.RawMessage(args)}
 }
@@ -1324,5 +1353,47 @@ func TestBashDiffOutputIsColoured(t *testing.T) {
 	// +1 −1 in the headline is what only the diff path can produce.
 	if !strings.Contains(out, "+1") || !strings.Contains(out, "−1") {
 		t.Errorf("bash diff output was not recognised as a diff:\n%s", out)
+	}
+}
+
+// TestPlainModeNumbersOnlyActionableOffers: held rules are shown in plain mode
+// too, but unnumbered. The offer numbers are rendered i+2 and parsed n-2 in
+// two separate places, so anything numbered inserted into that block would
+// silently shift which rule an answer saves.
+func TestPlainModeNumbersOnlyActionableOffers(t *testing.T) {
+	events := make(chan engine.Event, 32)
+	ctl := &fakeController{events: events}
+	out := &promptWriter{marker: "n) deny", seen: make(chan struct{})}
+	in := io.MultiReader(strings.NewReader("hello\n"), afterReader{ch: out.seen, r: strings.NewReader("2\n")})
+	ctl.onSubmit = func() {
+		ctl.scriptWithHeld(t, []string{"bash(./out *)"}, []string{"bash(gofmt *)", "bash(go vet *)"})
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := tui.Run(ctx, ctl, tui.Options{Plain: true, Events: events, In: in, Out: out}); err != nil {
+		t.Fatal(err)
+	}
+	got := out.String()
+	for _, want := range []string{
+		"your allow rules do not cover command `./out`",
+		"already allowed, not offered: bash(gofmt *)",
+		"already allowed, not offered: bash(go vet *)",
+		"1) allow once",
+		"2) allow and remember: bash(./out *)",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("missing %q in plain output:\n%s", want, got)
+		}
+	}
+	// The two held rules must not have taken 3) and 4).
+	if strings.Contains(got, "3)") {
+		t.Errorf("a held rule consumed an offer number:\n%s", got)
+	}
+	if len(ctl.replies) != 1 {
+		t.Fatalf("replies = %+v", ctl.replies)
+	}
+	d := ctl.replies[0].d
+	if !d.Allow || len(d.Grants) != 1 || d.Grants[0].Rule.String() != "bash(./out *)" {
+		t.Fatalf("answering 2 did not grant the single offer: %+v", d)
 	}
 }

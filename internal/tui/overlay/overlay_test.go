@@ -556,3 +556,149 @@ func TestApprovalOffersEveryProjectScopeLast(t *testing.T) {
 		t.Fatalf("done=%v decision=%+v", done, got)
 	}
 }
+
+// TestApprovalGrantsPageShowsHeldRules covers the fix and, more importantly,
+// its worst failure mode. The held rules must render on the allow… page — they
+// are the answer to "I saved a rule for this, why am I being asked?" — but
+// they must never be rows in the selectable list, which is positionally
+// identical to Approval.Offers. A row inserted there would make every digit
+// below it save a different rule than the one it shows.
+func TestApprovalGrantsPageShowsHeldRules(t *testing.T) {
+	var got *engine.Decision
+	offers := []policy.GrantOffer{
+		offer(t, "bash(head *)", policy.ScopeSession),
+		offer(t, "bash(tail *)", policy.ScopeProjectLocal),
+	}
+	a := approval(t, engine.SeverityCaution, offers...)
+	a.Verdict.Held = []policy.HeldRule{
+		{Rule: offer(t, "bash(go test *)", policy.ScopeUser).Rule, By: offer(t, "bash(go test *)", policy.ScopeUser).Rule},
+		{Rule: offer(t, "bash(go build *)", policy.ScopeUser).Rule, By: offer(t, "bash(go *)", policy.ScopeUser).Rule},
+	}
+	var o overlay.Overlay = overlay.NewApproval(a, th, func(d engine.Decision) { got = &d })
+	o, _ = press(o, "a")
+	view := plain(o.View(80, 30))
+	for _, want := range []string{
+		"already allowed",
+		"bash(go test *)", "you already have this",
+		"bash(go build *)", "covered by bash(go *)",
+	} {
+		if !strings.Contains(view, want) {
+			t.Errorf("missing %q on the allow… page:\n%s", want, view)
+		}
+	}
+	// The held rules carry no digit and no checkbox: they are not choices.
+	if strings.Contains(view, "[3]") {
+		t.Errorf("a held rule was numbered as if it were selectable:\n%s", view)
+	}
+	if strings.Contains(view, "[ ] bash(go test *)") || strings.Contains(view, "[x] bash(go test *)") {
+		t.Errorf("a held rule was given a checkbox:\n%s", view)
+	}
+	// And the digits still mean what they show. This is the assertion that
+	// matters: getting it wrong saves a rule the user did not choose.
+	if _, done := press(o, "2"); !done || got == nil || len(got.Grants) != 1 ||
+		got.Grants[0].Rule.String() != "bash(tail *)" {
+		t.Fatalf("digit 2 did not grant the second offer: %+v", got)
+	}
+}
+
+// TestApprovalMainPageNamesWhatWasUncovered: the sentence answering "why am I
+// being asked?" belongs where the user is already looking, not behind a key.
+// The held rules themselves stay on the allow… page.
+func TestApprovalMainPageNamesWhatWasUncovered(t *testing.T) {
+	a := approval(t, engine.SeverityCaution, offer(t, "bash(head *)", policy.ScopeSession))
+	a.Verdict.Uncovered = "command `head -30`"
+	a.Verdict.Held = []policy.HeldRule{
+		{Rule: offer(t, "bash(go test *)", policy.ScopeUser).Rule, By: offer(t, "bash(go test *)", policy.ScopeUser).Rule},
+	}
+	var o overlay.Overlay = overlay.NewApproval(a, th, func(engine.Decision) {})
+	view := plain(o.View(80, 30))
+	if !strings.Contains(view, "your allow rules do not cover command `head -30`") {
+		t.Errorf("the main page does not say what was uncovered:\n%s", view)
+	}
+	if strings.Contains(view, "already allowed") {
+		t.Errorf("the held block belongs on the allow… page, not the main one:\n%s", view)
+	}
+}
+
+// TestApprovalWithOnlyHeldRulesStillExplains is the degenerate case: an
+// explicit ask rule outranks allow rules, so when they cover everything there
+// are no offers, [a] is hidden, and the held rules would have nowhere to
+// appear. The main page has to carry the count — worded so it cannot be read
+// as "this is allowed", because the call is still waiting for an answer.
+func TestApprovalWithOnlyHeldRulesStillExplains(t *testing.T) {
+	a := approval(t, engine.SeverityCaution) // no offers at all
+	a.Verdict.Held = []policy.HeldRule{
+		{Rule: offer(t, "bash(rg *)", policy.ScopeUser).Rule, By: offer(t, "bash(rg *)", policy.ScopeUser).Rule},
+	}
+	var o overlay.Overlay = overlay.NewApproval(a, th, func(engine.Decision) {})
+	view := plain(o.View(80, 30))
+	if strings.Contains(view, "[a] allow…") {
+		t.Fatal("the allow… option must stay hidden when there is nothing to offer")
+	}
+	for _, want := range []string{"1 rule(s) you already have match this call", "outranks them"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("missing %q; the held rules have nowhere else to appear:\n%s", want, view)
+		}
+	}
+}
+
+// manyOffers is a realistic script's worth: six commands at three scopes each.
+// The median script that raised a prompt in a real session had five or six.
+func manyOffers(t *testing.T) []policy.GrantOffer {
+	t.Helper()
+	var out []policy.GrantOffer
+	for _, r := range []string{"bash(gofmt *)", "bash(go vet *)", "bash(go test *)", "bash(go build *)", "bash(go run *)", "bash(head *)"} {
+		for _, s := range []policy.Scope{policy.ScopeSession, policy.ScopeProjectLocal, policy.ScopeUser} {
+			out = append(out, offer(t, r, s))
+		}
+	}
+	return out
+}
+
+// TestApprovalGrantsPageKeepsItsFooter guards a bug that predates the held
+// block and that adding content to this page would have made worse: eighteen
+// offers at two lines each overflowed the frame, which cuts from the bottom,
+// so the line documenting space/enter/number/esc was simply gone — at every
+// terminal height, including 40 rows. Height-fits alone does not catch it,
+// because truncation is exactly how it "fits".
+func TestApprovalGrantsPageKeepsItsFooter(t *testing.T) {
+	a := approval(t, engine.SeverityCaution, manyOffers(t)...)
+	a.Verdict.Held = []policy.HeldRule{
+		{Rule: offer(t, "bash(git *)", policy.ScopeUser).Rule, By: offer(t, "bash(git *)", policy.ScopeUser).Rule},
+	}
+	var o overlay.Overlay = overlay.NewApproval(a, th, func(engine.Decision) {})
+	o, _ = press(o, "a")
+	for _, h := range []int{10, 24, 40} {
+		view := plain(o.View(80, h))
+		if !strings.Contains(view, "space mark") {
+			t.Errorf("height %d (%d rows rendered): the key hints were cut:\n%s", h, lipgloss.Height(view), view)
+		}
+		if strings.Contains(view, "space mark") && !strings.Contains(view, "esc back") {
+			t.Errorf("height %d: the footer was truncated before the escape hatch:\n%s", h, view)
+		}
+		if got := lipgloss.Height(view); got > h {
+			t.Errorf("height %d: view is %d rows", h, got)
+		}
+	}
+}
+
+// TestApprovalGrantsPageKeepsFocusVisible: with more offers than fit, the
+// focused row must stay on screen. Before the window, arrowing down moved a
+// marker nobody could see.
+func TestApprovalGrantsPageKeepsFocusVisible(t *testing.T) {
+	var o overlay.Overlay = overlay.NewApproval(approval(t, engine.SeverityCaution, manyOffers(t)...), th, func(engine.Decision) {})
+	o, _ = press(o, "a")
+	for i := range 14 {
+		o, _ = press(o, "down")
+		if view := plain(o.View(80, 24)); !strings.Contains(view, "›") {
+			t.Fatalf("focus left the screen after %d moves:\n%s", i+1, view)
+		}
+	}
+	// And marking still lands on the focused row, not on a neighbour: the
+	// window slices marks alongside items, and getting that wrong would put
+	// the [x] on a different rule than the one highlighted.
+	o, _ = press(o, "space")
+	if view := plain(o.View(80, 24)); !strings.Contains(view, "› [x]") {
+		t.Errorf("the mark did not land on the focused row:\n%s", view)
+	}
+}
