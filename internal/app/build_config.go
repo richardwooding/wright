@@ -371,6 +371,13 @@ func effectiveSettings(l *config.Layered, user config.Settings, trusted bool, en
 	// contradict the assurance that prompt gives. So it is taken from the
 	// user's own config even when the project is trusted.
 	s.GitHub = user.GitHub
+	// Model endpoints are the same question, one step stronger: this decides
+	// where the prompt goes, and the prompt carries the user's code. A
+	// repository that could name the endpoint by being trusted once could
+	// read every file the agent reads. Untrusted project layers lose the
+	// whole model block already (tighteningOnly is an allowlist); this is
+	// what stops a *trusted* one setting it.
+	s.Model.Endpoints = user.Model.Endpoints
 	if v := env("WRIGHT_MODEL"); v != "" {
 		s.Model.Default = v
 	}

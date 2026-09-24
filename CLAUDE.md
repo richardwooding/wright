@@ -797,6 +797,27 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   (`Options.Audit` was nil, `Delete` removed it) or stop at a malformed line,
   since `audit.Read` yields the error and ends — so the export keeps what it
   read, says so in a note, and never fails because of it.
+- **A self-hosted model endpoint is user-config-only, and its name must not
+  shadow a provider.** `model.endpoints` registers an OpenAI-compatible server
+  (RamaLama, llama.cpp, vLLM, LM Studio) through
+  `openaicompat.NewProvider` + `llmkit.Register`, which llmkit already
+  supports — no library change was needed. Two things are load-bearing.
+  **Registration must run before `model.Detect`** (`build_model.go`), because
+  `named()` treats a name no provider claims as a hard error on purpose, so
+  `ramalama/…` is unroutable until its endpoint exists. And **`Registry.Register`
+  replaces a duplicate ID**, so an endpoint called `anthropic` would silently
+  send every Claude call to the user's box; the check asks
+  `llmkit.Default.Lookup` rather than keeping a list, because Lookup consults
+  the alias map too and cannot drift — with a `registered()` set beside it, or
+  wright's own second call would collide with its own first. Endpoints come
+  from the user's config even for a *trusted* project (`s.Model.Endpoints =
+  user.Model.Endpoints`, beside the same line for `github.auth`): this decides
+  where the prompt goes, and the prompt carries the user's code.
+  `openaicompat` has no host normalisation and inserts no version segment —
+  requests go to `<baseURL>/chat/completions` — so a scheme-less URL is
+  refused and a path-less one warned about. A configured endpoint has no
+  credential variable and no catalog row, so `model.List` has to add it
+  explicitly or the picker never shows it.
 - **Model names are provider-qualified when needed.** `llmkit.ParseModel`
   routes `org/model` names to Hugging Face and unknown bare names to Ollama,
   so `model.Best`/`Fast` emit `groq/openai/gpt-oss-120b`, `openrouter/…` via

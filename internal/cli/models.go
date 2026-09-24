@@ -22,10 +22,15 @@ func (c *ModelsCmd) Run(g *Globals) error {
 	if err != nil {
 		return err
 	}
+	// Registered before Detect for the same reason the session does it: a
+	// configured endpoint's name is unroutable until it exists.
+	if _, err := model.Endpoints(eff.Settings.Model.Endpoints); err != nil {
+		return err
+	}
 	choice, detectErr := model.Detect(g.Ctx, eff.Settings.Model, g.CLI.Model, os.Getenv, func(ctx context.Context) ([]string, error) {
 		return model.ProbeOllama(ctx, "")
 	})
-	list := model.List(os.Getenv)
+	list := model.List(os.Getenv, eff.Settings.Model.Endpoints)
 	if detectErr == nil && !contains(list, choice.Model) {
 		list = append([]model.Choice{choice}, list...)
 	}

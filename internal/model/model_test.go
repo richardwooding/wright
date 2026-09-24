@@ -201,7 +201,7 @@ func TestList(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := model.List(envOf(tt.env))
+			got := model.List(envOf(tt.env), nil)
 			var seen []string
 			for _, c := range got {
 				if !c.Info.Known {

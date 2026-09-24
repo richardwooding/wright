@@ -17,6 +17,15 @@ import (
 // per-session audit log and snapshot store. The redactor is created here
 // because the audit log needs it before any tool runs.
 func (b *builder) modelAndSession() error {
+	// Before Detect, which treats a name no provider claims as a hard error:
+	// "ramalama/gpt-oss:20b" is unroutable until its endpoint is registered.
+	warnings, err := model.Endpoints(b.settings.Model.Endpoints)
+	if err != nil {
+		return err
+	}
+	for _, w := range warnings {
+		b.warn("%s", w)
+	}
 	choice, err := model.Detect(b.ctx, b.settings.Model, b.o.Model, b.env, func(ctx context.Context) ([]string, error) {
 		return model.ProbeOllama(ctx, "")
 	})

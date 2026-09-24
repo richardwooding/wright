@@ -6,6 +6,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Point wright at a model server you run yourself.** Anything speaking the
+  OpenAI API — RamaLama, llama.cpp, vLLM, LM Studio — is reachable by naming it
+  in your user config:
+
+  ```jsonc
+  "model": { "endpoints": { "lab": { "baseURL": "http://127.0.0.1:8080/v1" } } }
+  ```
+
+  The key is the prefix, so `-m lab/gpt-oss:20b` routes there. **`ramalama` is
+  built in** at `http://127.0.0.1:8080/v1`, so `ramalama serve gpt-oss:20b`
+  needs no configuration at all. Verified end to end against a real RamaLama,
+  including tool calling, which is what the agent loop depends on.
+
+  Endpoints are read from **your own config only**, never from a project's
+  settings file, trusted or not — this decides where your prompts, and so your
+  code, are sent. wright refuses a name that would shadow a built-in provider
+  (registering over one would silently redirect it), refuses a URL with no
+  scheme, and warns when an endpoint is not on this machine.
+
 ## [0.8.2] - 2026-09-23
 
 ### Fixed

@@ -126,6 +126,13 @@ func Detect(ctx context.Context, settings config.Model, flag string, env func(st
 			return ollamaChoice(tags), nil
 		}
 	}
+	if len(settings.Endpoints) > 0 {
+		// An endpoint says where, never what: wright cannot know which model
+		// a self-hosted server has loaded, so it cannot pick one for the
+		// user. Naming the prefix is the useful half of the answer.
+		return Choice{}, fmt.Errorf("%w; you have the %s endpoint configured — name a model on it, as in `-m %s/<model>` or \"model\": {\"default\": \"%s/<model>\"}",
+			ErrNoProvider, strings.Join(sortedNames(settings.Endpoints), " and "), firstName(settings.Endpoints), firstName(settings.Endpoints))
+	}
 	return Choice{}, fmt.Errorf("%w (set one of %s, or run Ollama)", ErrNoProvider, strings.Join(credentialNames(), ", "))
 }
 
@@ -196,11 +203,13 @@ func Fast(c Choice) string {
 
 // List returns every catalog model whose provider has credentials, in
 // catalog order (provider, then ID), for the /model picker.
-func List(env func(string) string) []Choice {
+func List(env func(string) string, eps map[string]config.Endpoint) []Choice {
 	if env == nil {
 		return nil
 	}
-	var out []Choice
+	// Configured endpoints first: they are the user's own servers, and
+	// nothing else in this list would ever mention them.
+	out := endpointChoices(eps)
 	for _, c := range credentials {
 		if !hasAny(env, c.envs) {
 			continue
@@ -292,4 +301,12 @@ func indexPrefix(tags []string, prefix string) int {
 		}
 	}
 	return -1
+}
+
+// firstName is the endpoint named in the "no model chosen" hint.
+func firstName(eps map[string]config.Endpoint) string {
+	if names := sortedNames(eps); len(names) > 0 {
+		return names[0]
+	}
+	return ""
 }

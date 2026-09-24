@@ -46,6 +46,29 @@ type Model struct {
 	Reasoning       string `json:"reasoning,omitempty"`
 	MaxOutputTokens int    `json:"maxOutputTokens,omitempty"`
 	ContextWindow   int    `json:"contextWindow,omitempty"`
+	// Endpoints are OpenAI-compatible servers the user runs themselves —
+	// RamaLama, llama.cpp, vLLM, LM Studio. The key is the prefix in
+	// "<name>/<model>", so "ramalama" makes "ramalama/gpt-oss:20b" routable.
+	//
+	// Honoured from the user's own config only, even for a trusted project —
+	// see app.effectiveSettings. This decides where the prompt, and so the
+	// user's code, is sent; a repository must not be able to redirect it.
+	Endpoints map[string]Endpoint `json:"endpoints,omitempty"`
+}
+
+// Endpoint is one OpenAI-compatible server.
+type Endpoint struct {
+	// BaseURL is the absolute URL of the API root. It must include whatever
+	// version segment the server expects — these servers are addressed at
+	// "<base>/chat/completions" with nothing inserted, so RamaLama, vLLM and
+	// LM Studio all want the "/v1".
+	BaseURL string `json:"baseURL"`
+	// APIKeyEnv names the variable holding the key, never the key itself. A
+	// settings file is read by more things than wright.
+	APIKeyEnv string `json:"apiKeyEnv,omitempty"`
+	// KeyOptional allows a server that needs no key at all, which is the
+	// usual case for something listening on loopback.
+	KeyOptional bool `json:"keyOptional,omitempty"`
 }
 
 // Permissions holds the permission mode and the three rule lists.
@@ -336,6 +359,14 @@ func mergeModel(dst *Model, src Model) {
 	}
 	if src.ContextWindow != 0 {
 		dst.ContextWindow = src.ContextWindow
+	}
+	// Copied the way MCPServers are: a later layer adds or replaces one
+	// endpoint without discarding the others.
+	if src.Endpoints != nil {
+		if dst.Endpoints == nil {
+			dst.Endpoints = map[string]Endpoint{}
+		}
+		maps.Copy(dst.Endpoints, src.Endpoints)
 	}
 }
 

@@ -570,7 +570,8 @@ trust above — neither one ever answers the other.
 
 ```jsonc
 {
-  "model":       { "default": "", "fast": "", "reasoning": "", "maxOutputTokens": 0, "contextWindow": 0 },
+  "model":       { "default": "", "fast": "", "reasoning": "", "maxOutputTokens": 0, "contextWindow": 0,
+                   "endpoints": { "lab": { "baseURL": "http://127.0.0.1:8080/v1", "apiKeyEnv": "", "keyOptional": false } } },
   "permissions": { "mode": "default", "allow": [], "ask": [], "deny": [], "additionalDirectories": [] },
   "sandbox":     { "backend": "auto", "allowNetwork": false,
                    "extraReadOnly": [], "extraReadWrite": [], "passEnv": [] },
@@ -693,6 +694,36 @@ name, wright picks in this order: `--model` flag → `WRIGHT_MODEL` →
 contributing its best coding model from the llmkit catalog → a **loopback**
 Ollama probe of `/api/tags`, preferring coder-tuned tags. A bare name that no
 provider claims is an error, not a silent fall through to localhost.
+
+### A server you run yourself
+
+Anything speaking the OpenAI API — RamaLama, llama.cpp, vLLM, LM Studio — is reachable
+by naming it in your **user** config:
+
+```jsonc
+"model": {
+  "default": "lab/gpt-oss:20b",
+  "endpoints": {
+    "lab": { "baseURL": "http://127.0.0.1:8080/v1" }
+  }
+}
+```
+
+The key is the prefix, so `lab/gpt-oss:20b` routes there; `apiKeyEnv` names the variable
+holding a key when the server wants one. **`ramalama` is built in** at
+`http://127.0.0.1:8080/v1`, so `ramalama serve gpt-oss:20b` needs no configuration at all —
+just `-m ramalama/gpt-oss:20b`.
+
+The URL must be absolute and must include whatever version segment the server expects:
+requests go to `<baseURL>/chat/completions` with nothing inserted, which is why these all
+want the `/v1`. wright refuses a name that would shadow a built-in provider, refuses a URL
+with no scheme, and warns when an endpoint is not on this machine — that is where your
+prompts, and so your code, are sent.
+
+Endpoints are read from **your own config only**, never from a project's
+`.wright/settings.json`, trusted or not: a repository must not be able to choose where your
+code is sent. Such a model has no catalog entry, so context and cost show as `?` and `—`
+rather than being guessed at, and there is no separate fast model for summaries.
 
 ```
 $ wright models
