@@ -4,6 +4,41 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- **A repository's own `.git/config` could run a program on the host.** Several
+  git configuration keys name a program git executes during an ordinary read,
+  and a `.git/config` arrives as ordinary bytes — a zipped repository, a synced
+  folder, a network share; no `git clone` required. wright disarmed those keys
+  only for git run *inside* the sandbox. Every host-side call inherited the
+  plain environment: the status bar's `git status` poll (**every five
+  seconds**), the `git diff` behind every approval preview, and `git ls-files`.
+  Measured against git 2.55, a single hostile `core.fsmonitor` executed on all
+  three, and `git diff` additionally ran `diff.external` and the repository's
+  own filter and textconv drivers. (The `git rev-parse` that locates the
+  workspace runs none of them — it reads no index — but it is routed through
+  the same hardening so there is one path, not two.) Every host-side git now
+  goes through that hardening, and the tests run git against a hostile
+  repository rather than asserting about it.
+
+  Two gaps in the hardening itself came out of measuring it:
+
+  - `filter.<driver>.clean` / `.smudge` / `.process` and
+    `diff.<driver>.textconv` / `.command` also run a program, and the driver
+    name is chosen by the repository in its own `.gitattributes`, so no fixed
+    list can name them — `filter.<d>.clean` ran twice on a plain `git status`.
+    wright now enumerates the repository's own configuration (reading it runs
+    nothing) and blanks whatever it finds, in the sandbox as well as on the host.
+  - `diff.external` and `core.sshCommand` were being blanked, and git has no
+    "unset" through that mechanism — a blanked key is a key set to the empty
+    string, which git dutifully tries to execute. **This broke `git diff` for
+    the agent in every repository**, hostile or not, with `fatal: external diff
+    died`, and would have broken every ssh `git push` with `cannot run `. Both
+    are now left alone; `git diff` on wright's own path passes `--no-ext-diff
+    --no-textconv` instead, which is git's own way to refuse them.
+
 ## [0.8.3] - 2026-09-24
 
 ### Added

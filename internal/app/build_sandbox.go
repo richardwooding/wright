@@ -35,7 +35,7 @@ func (b *builder) sandboxing() error {
 	// so without this git would commit as user@hostname.
 	b.spec = sandbox.Spec{
 		Dir:       b.ws.Root(),
-		Env:       sandbox.Env(pass, git.WhoAmI(b.ctx, b.ws.Root()).Env()),
+		Env:       sandbox.Env(pass, git.SandboxEnv(b.ctx, b.ws.Root())),
 		ReadWrite: rw,
 		Roots:     b.ws.Roots,
 		ReadOnly:  expandAll(b.ws, b.settings.Sandbox.ExtraRO),

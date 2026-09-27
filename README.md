@@ -742,12 +742,23 @@ meter falls back to a 128k assumption.
 Commits carry the right identity already: wright resolves `user.name` and
 `user.email` **on the host, in your workspace**, so a conditional include
 (`includeIf`) is honoured, and passes them as `GIT_AUTHOR_*`/`GIT_COMMITTER_*`.
-Your global git config itself stays invisible inside the sandbox, and six
-configuration keys that name a program to run — `diff.external`,
-`core.fsmonitor`, `core.sshCommand`, `credential.helper`, `core.askpass` and
-the editors — are blanked, because a repository carries its own `.git/config`
-and cloning a hostile one would otherwise make an ordinary, auto-allowed
-`git status` execute something.
+Your global git config itself stays invisible inside the sandbox, and the
+configuration keys that name a program to run are disarmed — because a
+repository carries its own `.git/config`, and opening a hostile one would
+otherwise make an ordinary, auto-allowed `git status` execute something.
+That applies to **every** git wright runs, including the ones on the host —
+where the status bar polls `git status` every five seconds, and every
+approval preview runs `git diff`.
+
+Two families need two mechanisms. `core.fsmonitor`, `credential.helper`,
+`core.askpass`, the editors and the proxies are blanked in the environment,
+where they override the repository's own file. But `filter.<driver>.clean`
+and `diff.<driver>.textconv` are chosen *by the repository* — it picks the
+driver name in its own `.gitattributes` — so no written-down list can name
+them; wright reads the repository's config, which runs nothing, and blanks
+whatever it finds. `diff.external` and `core.sshCommand` are refused on the
+command line instead (`--no-ext-diff`), because blanking those two makes git
+try to run the empty string and fail.
 
 That is also why `git push` and `gh` could not authenticate: there was no
 credential path into the sandbox, by design.

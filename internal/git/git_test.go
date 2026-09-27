@@ -149,6 +149,11 @@ func TestSummaryString(t *testing.T) {
 // the identity on the host and carries it in. Without this a commit is
 // attributed to user@hostname, which the user never chose.
 func TestWhoAmIAndEnv(t *testing.T) {
+	// WhoAmI reads the host's global config on purpose, so isolate it: the
+	// half-configured case below cannot be observed on a machine whose own
+	// config supplies the missing half.
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	t.Setenv("GIT_CONFIG_SYSTEM", os.DevNull)
 	dir := repo(t)
 	for _, args := range [][]string{{"config", "user.name", "Ada Lovelace"}, {"config", "user.email", "ada@example.test"}} {
 		cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
@@ -162,7 +167,7 @@ func TestWhoAmIAndEnv(t *testing.T) {
 	if id.Name != "Ada Lovelace" || id.Email != "ada@example.test" {
 		t.Fatalf("WhoAmI = %+v", id)
 	}
-	env := id.Env()
+	env := git.SandboxEnv(context.Background(), dir)
 	for k, want := range map[string]string{
 		"GIT_AUTHOR_NAME":     "Ada Lovelace",
 		"GIT_AUTHOR_EMAIL":    "ada@example.test",
@@ -170,15 +175,21 @@ func TestWhoAmIAndEnv(t *testing.T) {
 		"GIT_COMMITTER_EMAIL": "ada@example.test",
 	} {
 		if env[k] != want {
-			t.Errorf("Env()[%s] = %q, want %q", k, env[k], want)
+			t.Errorf("SandboxEnv()[%s] = %q, want %q", k, env[k], want)
 		}
 	}
 	if env["GIT_CONFIG_GLOBAL"] != os.DevNull {
 		t.Errorf("GIT_CONFIG_GLOBAL = %q, want %q", env["GIT_CONFIG_GLOBAL"], os.DevNull)
 	}
-	// With no identity configured wright must not invent one, but the
-	// hardening entries are still there.
-	partial := (git.Identity{Name: "Ada"}).Env()
+	// With only half an identity configured wright must not invent the rest,
+	// but the hardening entries are still there.
+	half := repo(t)
+	cmd := exec.Command("git", "-C", half, "config", "user.name", "Ada")
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git config: %v: %s", err, out)
+	}
+	partial := git.SandboxEnv(context.Background(), half)
 	if _, ok := partial["GIT_AUTHOR_EMAIL"]; ok {
 		t.Errorf("a half-configured identity produced an author: %v", partial)
 	}
@@ -197,7 +208,7 @@ func TestWhoAmIAndEnv(t *testing.T) {
 			t.Errorf("key %d is neutralised to %q, want empty", i, v)
 		}
 	}
-	for _, want := range []string{"diff.external", "core.fsmonitor", "core.sshCommand"} {
+	for _, want := range []string{"core.fsmonitor", "credential.helper", "core.editor"} {
 		if !keys[want] {
 			t.Errorf("%s is not neutralised; a hostile repository could name a program", want)
 		}
@@ -210,7 +221,7 @@ func TestWhoAmIAndEnv(t *testing.T) {
 // must survive the overlay: only a value changes, never the count.
 func TestCredentialHelperKeys(t *testing.T) {
 	const helper = `!'/usr/bin/gh' auth git-credential`
-	base := git.Identity{Name: "Ada", Email: "ada@example.test"}.Env()
+	base := git.SandboxEnv(context.Background(), repo(t))
 
 	got := git.CredentialHelperKeys(helper)
 	if len(got) != 2 {
@@ -260,7 +271,7 @@ func TestCredentialHelperKeys(t *testing.T) {
 // who receives an authenticated request, and askpass runs when no helper
 // answered. Both were harmless while nothing could authenticate.
 func TestNeutralisedCoversCredentialAdjacentKeys(t *testing.T) {
-	env := git.Identity{}.Env()
+	env := git.SandboxEnv(context.Background(), repo(t))
 	n, err := strconv.Atoi(env["GIT_CONFIG_COUNT"])
 	if err != nil {
 		t.Fatal(err)

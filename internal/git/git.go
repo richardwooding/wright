@@ -6,9 +6,7 @@ package git
 
 import (
 	"context"
-	"os"
 	"os/exec"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -48,25 +46,37 @@ func (s Summary) String() string {
 	return strings.Join(parts, " ")
 }
 
-// run executes git in dir with the package timeout layered on ctx.
-func run(ctx context.Context, dir string, args ...string) (string, error) {
+// runWith executes git in dir with env and the package timeout layered on ctx.
+func runWith(ctx context.Context, dir string, env []string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, Timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.Env = env
 	out, err := cmd.Output()
 	return string(out), err
+}
+
+// run executes git in dir with the repository's program-naming config keys
+// neutralised. Nothing in this package may call exec directly: the whole
+// point is that a host-side git never runs what the repository chose. See
+// harden.go.
+func run(ctx context.Context, dir string, args ...string) (string, error) {
+	return runWith(ctx, dir, hostEnv(ctx, dir), args...)
 }
 
 // Status summarises the repository containing dir. It never returns an
 // error: outside a repository (or without git) Repo is false.
 func Status(ctx context.Context, dir string) Summary {
-	root, err := run(ctx, dir, "rev-parse", "--show-toplevel")
+	// Resolved once and reused: hostEnv shells out to enumerate the
+	// repository's own keys, and this runs every five seconds.
+	env := hostEnv(ctx, dir)
+	root, err := runWith(ctx, dir, env, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return Summary{}
 	}
 	s := Summary{Repo: true, Root: strings.TrimSpace(root)}
-	out, err := run(ctx, dir, "status", "--porcelain=v2", "-b", "--untracked-files=normal")
+	out, err := runWith(ctx, dir, env, "status", "--porcelain=v2", "-b", "--untracked-files=normal")
 	if err != nil {
 		return s
 	}
@@ -127,8 +137,14 @@ func countXY(s *Summary, rest string) {
 }
 
 // Diff returns the unified diff of the worktree (or the index when staged).
+//
+// --no-ext-diff and --no-textconv are the hardening: both keys name a program
+// the repository chose, and neither can be blanked in the environment without
+// breaking diff outright (see harden.go). Refusing them on the command line
+// costs nothing and is what keeps an approval preview from running the code
+// it is previewing.
 func Diff(ctx context.Context, dir string, staged bool) (string, error) {
-	args := []string{"diff", "--no-color"}
+	args := []string{"diff", "--no-color", "--no-ext-diff", "--no-textconv"}
 	if staged {
 		args = append(args, "--cached")
 	}
@@ -166,41 +182,11 @@ func WhoAmI(ctx context.Context, dir string) Identity {
 	return id
 }
 
-// neutralised are configuration keys that name a program for git to run. A
-// repository carries its own .git/config, so cloning a hostile one and
-// running an ordinary `git diff` or `git status` is enough to execute it —
-// and those commands are allowed by default because they are how an agent
-// reads a repository. Nothing static can see this: the command line is
-// innocent. Overriding the keys in the environment is what closes it.
-var neutralised = []string{
-	"diff.external",   // runs per changed file on git diff
-	"core.fsmonitor",  // runs on git status
-	"core.sshCommand", // runs on any remote operation
-	"credential.helper",
-	"sequence.editor",
-	"core.editor",
-	"core.askpass", // runs when no helper produced a credential
-	// The proxy keys are not programs: they decide who *receives* an
-	// authenticated request. They were harmless while no credential could be
-	// produced inside the sandbox; once one can, a cloned repository's own
-	// http.proxy is a way to be handed the request that carries it. Empty
-	// means "no proxy", so blanking them changes nothing for anyone who is
-	// not behind one — and someone who is cannot reach the network from the
-	// sandbox without --allow-network anyway.
-	"http.proxy",
-	"core.gitproxy",
-}
-
-// credentialHelperKey is credential.helper's position in neutralised, found
-// rather than written down: reordering the list above must not silently
-// blank a different key than the one a caller meant to replace.
-func credentialHelperKey() int { return slices.Index(neutralised, "credential.helper") }
-
 // CredentialHelperKeys re-points git's credential helper at one program
-// wright chose, replacing the blank that Env installs.
+// wright chose, replacing the blank that SandboxEnv installs.
 //
 // Only the *value* changes: the key name and GIT_CONFIG_COUNT are the ones
-// Env already emitted, so the two maps overlay without disturbing the
+// SandboxEnv already emitted, so the two maps overlay without disturbing the
 // block's bookkeeping. Every other neutralised key stays blank — in
 // particular core.sshCommand, which is the one a reader will worry about.
 //
@@ -216,35 +202,19 @@ func CredentialHelperKeys(helper string) map[string]string {
 	}
 }
 
-// Env returns the environment entries wright adds to a sandboxed git: the
-// commit identity resolved on the host, empty stand-ins for the config files
-// the sandbox hides, and overrides that disarm the configuration keys a
-// repository could use to name a program. Entries injected this way take
-// precedence over every config file, including the repository's own.
-func (id Identity) Env() map[string]string {
-	env := map[string]string{
-		// The global and system files are unreadable inside the sandbox;
-		// pointing git at an empty one turns a warning (or a fatal error
-		// under landlock) into ordinary "no global config".
-		"GIT_CONFIG_GLOBAL": os.DevNull,
-		"GIT_CONFIG_SYSTEM": os.DevNull,
-		"GIT_CONFIG_COUNT":  strconv.Itoa(len(neutralised)),
-		// With credential.helper blank, a push that needs a credential would
-		// otherwise block on git's terminal prompt inside a sandbox where
-		// nobody can answer it. Failing immediately is the honest outcome.
-		"GIT_TERMINAL_PROMPT": "0",
+// Toplevel returns the repository toplevel containing dir, or "" when dir is
+// not in a repository (or git is missing).
+//
+// It exists so that finding the workspace goes through this package's
+// hardening rather than running git separately. `rev-parse --show-toplevel`
+// is not known to run any of the keys harden.go disarms — measured against
+// git 2.55 it fires none of them, because it reads no index — but it is the
+// earliest git wright runs, before the user has been asked to trust
+// anything, and one hardened path is easier to keep true than two.
+func Toplevel(ctx context.Context, dir string) string {
+	out, err := run(ctx, dir, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return ""
 	}
-	for i, key := range neutralised {
-		env["GIT_CONFIG_KEY_"+strconv.Itoa(i)] = key
-		env["GIT_CONFIG_VALUE_"+strconv.Itoa(i)] = ""
-	}
-	// With no identity configured wright carries none: git keeps its own
-	// behaviour rather than committing under a name wright invented.
-	if id.Name != "" && id.Email != "" {
-		env["GIT_AUTHOR_NAME"] = id.Name
-		env["GIT_AUTHOR_EMAIL"] = id.Email
-		env["GIT_COMMITTER_NAME"] = id.Name
-		env["GIT_COMMITTER_EMAIL"] = id.Email
-	}
-	return env
+	return strings.TrimSpace(out)
 }

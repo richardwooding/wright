@@ -10,18 +10,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
-	"time"
+
+	"github.com/richardwooding/wright/internal/git"
 )
 
 // ErrOutside is returned by callers that refuse paths outside the workspace.
 var ErrOutside = errors.New("path is outside the workspace")
-
-// gitTimeout bounds the `git rev-parse` call so a slow filesystem or a hung
-// git never blocks startup.
-const gitTimeout = 2 * time.Second
 
 // Workspace is the set of roots the agent may work in plus the home and
 // config directories needed to recognise protected paths.
@@ -112,16 +108,13 @@ func canonical(p string) (string, error) {
 }
 
 // gitToplevel returns the repository toplevel containing dir, or "".
+//
+// It goes through internal/git rather than running git itself: this is the
+// earliest git call wright makes, before the user has been asked to trust
+// anything, so it is the one that most needs the repository's own
+// program-naming config keys disarmed. See internal/git/harden.go.
 func gitToplevel(dir string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), gitTimeout)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "rev-parse", "--show-toplevel")
-	cmd.Dir = dir
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	top := strings.TrimSpace(string(out))
+	top := git.Toplevel(context.Background(), dir)
 	if top == "" {
 		return ""
 	}
