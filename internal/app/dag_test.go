@@ -49,7 +49,7 @@ func TestImportDAG(t *testing.T) {
 	}{
 		// tui may name policy's Mode/GrantOffer types (engine.Approval carries
 		// them and Controller.SetMode takes a Mode) but never the classifier.
-		{"tui", []string{"tools", "sandbox", "policy/shellclass"}},
+		{"tui", []string{"tools", "sandbox"}},
 		// toolview decides how a card looks and highlight colours its text.
 		// Both are leaves on purpose: a renderer must never be able to reach
 		// the permission engine, and deciding a cosmetic question by asking
@@ -58,7 +58,6 @@ func TestImportDAG(t *testing.T) {
 		{"tui/highlight", []string{"engine", "policy", "tools", "tui/transcript", "tui/toolview"}},
 		{"tools", []string{"tui", "engine"}},
 		{"policy", []string{"tui", "engine", "tools"}},
-		{"policy/shellclass", []string{"tui", "engine", "tools", "policy", "workspace"}},
 		// The Phase 3 feature packages are built by the app and know
 		// nothing about the UI or the engine: mcpclient and skillsdir
 		// produce tools and text, agents produces sub-agent tools. The

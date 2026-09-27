@@ -3,8 +3,8 @@ package policy
 import (
 	"context"
 
+	"github.com/richardwooding/shellclass"
 	"github.com/richardwooding/wright/internal/git"
-	"github.com/richardwooding/wright/internal/policy/shellclass"
 	"github.com/richardwooding/wright/internal/workspace"
 )
 

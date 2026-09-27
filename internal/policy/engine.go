@@ -9,7 +9,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/richardwooding/wright/internal/policy/shellclass"
+	"github.com/richardwooding/shellclass"
 	"github.com/richardwooding/wright/internal/workspace"
 )
 
@@ -1113,7 +1113,7 @@ func matchesCommand(r *Rule, c shellclass.Command) bool {
 }
 
 // ruleWordsFor is the argv prefix an offered rule pins. A handler that knows
-// its program's shape says so (shellclass.Command.RuleWords); everything else
+// its program's shape says so (shellclass.Command.Prefix); everything else
 // is read from the words as written.
 //
 // The difference is not cosmetic. `gh --version` has a flag-shaped second
@@ -1121,8 +1121,8 @@ func matchesCommand(r *Rule, c shellclass.Command) bool {
 // grammar allows, and one real session saved exactly that because the first
 // gh command it ran happened to be `gh --version`.
 func ruleWordsFor(c shellclass.Command) []string {
-	if len(c.RuleWords) > 0 {
-		return c.RuleWords
+	if len(c.Prefix) > 0 {
+		return c.Prefix
 	}
 	return offerWords(effectiveArgv(c))
 }

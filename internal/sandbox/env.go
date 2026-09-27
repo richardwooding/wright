@@ -8,7 +8,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/richardwooding/wright/internal/policy/shellclass"
+	"github.com/richardwooding/shellclass"
 )
 
 // envAllow is the allowlist of variable names (glob syntax, matched with

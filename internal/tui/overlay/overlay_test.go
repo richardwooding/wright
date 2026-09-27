@@ -9,9 +9,9 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/richardwooding/shellclass"
 	"github.com/richardwooding/wright/internal/engine"
 	"github.com/richardwooding/wright/internal/policy"
-	"github.com/richardwooding/wright/internal/policy/shellclass"
 	"github.com/richardwooding/wright/internal/theme"
 	"github.com/richardwooding/wright/internal/tui/overlay"
 )

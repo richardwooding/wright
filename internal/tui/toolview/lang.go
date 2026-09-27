@@ -28,7 +28,7 @@ const segmentBreaks = ";|&><\n"
 // is no confident answer — which is the usual case and the right default.
 //
 // This is a word scan, not a shell parse, and deliberately not a call into
-// internal/policy/shellclass. The classifier is a security component the
+// github.com/richardwooding/shellclass. The classifier is a security component the
 // import DAG keeps out of the TUI on purpose, and reaching into it for a
 // cosmetic decision would make the renderer depend on the permission engine
 // and re-parse every command on the render path. The scan is gated hard

@@ -925,11 +925,13 @@ instead.
   tools, middleware, approvals, sessions and compaction.
 - [`llmkit`](https://github.com/richardwooding/llmkit) — multi-provider LLM
   client, streaming, and the model catalog behind cost and context.
+- [`shellclass`](https://github.com/richardwooding/shellclass) — the shell
+  classifier behind every `bash` approval: what a script can do, from the AST.
 - [`ssrfguard`](https://github.com/richardwooding/ssrfguard) — the HTTP client
   behind `web_fetch` and `web_search`.
 - [Charm](https://charm.land) v2 — Bubble Tea, Lip Gloss, Bubbles, Glamour.
-- [`mvdan.cc/sh`](https://github.com/mvdan/sh) — the bash parser the shell
-  classifier is built on.
+- [`mvdan.cc/sh`](https://github.com/mvdan/sh) — the bash parser `shellclass`
+  is built on.
 
 ## License
 

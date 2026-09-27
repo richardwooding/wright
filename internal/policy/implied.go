@@ -4,7 +4,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/richardwooding/wright/internal/policy/shellclass"
+	"github.com/richardwooding/shellclass"
 )
 
 // impliedCwdReaders are commands that walk a directory tree and default to

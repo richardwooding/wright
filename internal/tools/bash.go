@@ -17,8 +17,8 @@ import (
 	"github.com/richardwooding/agentkit"
 	"mvdan.cc/sh/v3/syntax"
 
+	"github.com/richardwooding/shellclass"
 	"github.com/richardwooding/wright/internal/policy"
-	"github.com/richardwooding/wright/internal/policy/shellclass"
 	"github.com/richardwooding/wright/internal/sandbox"
 )
 

@@ -88,6 +88,8 @@ github.com/richardwooding/agentkit/mcp v0.5.0 h1:jOBTyJwLSHnCchj/6bnZhx/xpdXkim5
 github.com/richardwooding/agentkit/mcp v0.5.0/go.mod h1:vzOEmlHJHo7o3F4k24hfNnq+kjZ5l8q5lOVan6ugkWU=
 github.com/richardwooding/llmkit v0.3.0 h1:1gpxFqNhXGcjxVUvxn/tnVkQKA7LK3q6eDb9PuQFIwo=
 github.com/richardwooding/llmkit v0.3.0/go.mod h1:HkivIVVayrt98U1sbwytl3YMenoZya8K7P4gYZEgLv8=
+github.com/richardwooding/shellclass v0.1.0 h1:LjJE0XJm86dyzmq6MBSOEe69Ltg2srvDYFrewCIv+Ms=
+github.com/richardwooding/shellclass v0.1.0/go.mod h1:EanhaHH6jJzjvxdk3b1YwkmPRJNuiKOdKwPOUFq//3I=
 github.com/richardwooding/ssrfguard v0.2.2 h1:/EtPjdiMUkA1EKTgbaCrumgiDkul5bEi77A57KxJJz8=
 github.com/richardwooding/ssrfguard v0.2.2/go.mod h1:l26en+xGOtuFaRcpYqXkaCC2QdWggOyCw+DM5RzQpJQ=
 github.com/rivo/uniseg v0.4.7 h1:WUdvkW8uEhrYfLC4ZzdpI2ztxP1I582+49Oc5Mq64VQ=

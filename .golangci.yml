@@ -15,11 +15,7 @@
 #    exemption for fmt.Fprint*. A failed write to the terminal is not
 #    something a CLI can act on, so those calls are excluded explicitly.
 #
-# 3. goconst is off for internal/policy/shellclass: the package is mostly
-#    data tables of command and subcommand names ("delete", "init", "env"…)
-#    and a named constant per verb would make them harder to read and audit,
-#    not easier. It is also off in tests, where repeated literals are table
-#    rows.
+# 3. goconst is off in tests, where repeated literals are table rows.
 version: "2"
 linters:
   enable:
@@ -50,6 +46,3 @@ linters:
           - goconst
           - gocyclo
           - gocognit
-      - path: internal/policy/shellclass/
-        linters:
-          - goconst

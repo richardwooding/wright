@@ -17,7 +17,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/richardwooding/wright/internal/policy/shellclass"
+	"github.com/richardwooding/shellclass"
 )
 
 // Mode is the permission mode. The zero value is the safe default.

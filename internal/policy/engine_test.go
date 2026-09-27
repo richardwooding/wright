@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/richardwooding/shellclass"
 	"github.com/richardwooding/wright/internal/policy"
-	"github.com/richardwooding/wright/internal/policy/shellclass"
 	"github.com/richardwooding/wright/internal/tools"
 	"github.com/richardwooding/wright/internal/workspace"
 )

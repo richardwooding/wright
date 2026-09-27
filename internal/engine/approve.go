@@ -11,9 +11,9 @@ import (
 
 	"github.com/richardwooding/agentkit"
 
+	"github.com/richardwooding/shellclass"
 	"github.com/richardwooding/wright/internal/audit"
 	"github.com/richardwooding/wright/internal/policy"
-	"github.com/richardwooding/wright/internal/policy/shellclass"
 	"github.com/richardwooding/wright/internal/sandbox"
 )
 

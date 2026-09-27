@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The shell classifier is now a library:
+  [`shellclass`](https://github.com/richardwooding/shellclass).** It was always
+  a leaf — one dependency and a `Workspace` interface the caller implements —
+  so it moved out unchanged apart from `Command.RuleWords`, which is now
+  `Command.Prefix`. Nothing about wright's behaviour changes; the import DAG
+  test no longer has to keep it a leaf, because it is one by construction.
+
 ### Fixed
 
 - **A repository's own `.git/config` could run a program on the host.** Several

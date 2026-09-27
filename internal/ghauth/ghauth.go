@@ -3,7 +3,7 @@
 //
 // It runs as the user, before any model call, and that is the whole of its
 // security story: `gh auth token` is hard-denied for the *agent*
-// (internal/policy/shellclass), which may never mint or read a credential.
+// (github.com/richardwooding/shellclass), which may never mint or read a credential.
 // wright may, once, on the user's instruction. What the agent gets is the use
 // of a token whose provenance it cannot see and which it cannot re-mint.
 //

@@ -8,7 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Go 1.27, pure Go, no cgo): a Bubble Tea v2 TUI and a headless mode around an
 `agentkit` agent, with a permission engine, an OS sandbox, secret redaction and a
 tamper-evident audit log between the model and the machine. Generic agent/LLM
-plumbing belongs in `agentkit`/`llmkit`; everything coding-specific lives here.
+plumbing belongs in `agentkit`/`llmkit`; general-purpose Go libraries that are
+neither — `shellclass`, `ssrfguard` — live in their own repos; everything
+coding-specific lives here.
 It works end to end today — `wright`, `wright -p`, sessions, audit, MCP,
 skills, sub-agents — and is pre-1.0, first tagged as v0.1.0. User-facing documentation
 lives in `README.md` and `docs/index.html`; keep both honest about what exists,
@@ -20,7 +22,7 @@ because "no invented capabilities" is part of the product.
 go build ./... && go vet ./... && go fix -diff ./...     # CI fails on any go fix diff; run it before pushing
 go test -race ./...                                   # offline; sandbox tests skip when bwrap/landlock are unavailable
 go test -race -run TestEvaluateTable ./internal/policy   # one table
-go test -fuzz=FuzzAnalyze -fuzztime=30s ./internal/policy/shellclass
+go test -fuzz=FuzzAnalyze -fuzztime=30s .   # in ../shellclass, not here
 go test -fuzz=FuzzParseRule -fuzztime=30s ./internal/policy
 go test -fuzz=FuzzRedact -fuzztime=30s ./internal/redact
 go test -run 'TestImportDAG|TestNoUnexpectedNetwork' ./internal/app -v
@@ -106,7 +108,6 @@ internal/
   mcpclient/  MCP servers: transport (stdio in the sandbox | HTTP via ssrfguard), handshake, tool+annotation listing, trust record, consent; Set{Tools, Servers, Describe, Close}
   agents/     sub-agents as tools: explore (read-only, fast model) + custom .wright/agents/*.md definitions; Build/Toolset/Names/Docs
   policy/     rule grammar, modes, verdict lattice, hard-deny set, grants, child engines
-  policy/shellclass/  mvdan.cc/sh AST → per-command class; Unknown/HardDeny; leaf package (interface Workspace)
   sandbox/    Backend: container | bwrap | landlock | seatbelt | none; filtered Env(); __sandbox Helper;
               Grant/WithGrant + ToolPrefixes: the per-call widening an approval earns
   workspace/  roots + extra dirs, symlink-safe Resolve, .gitignore/.wrightignore, secret/protected paths
@@ -127,11 +128,13 @@ docs/         gloam Pages site (gloam.css/gloam.js vendored; sync-gloam.sh + glo
 ```
 
 Import DAG, enforced by `TestImportDAG` in `internal/app` over `go list -deps`:
-`tui` never imports `tools`, `sandbox`, `policy/shellclass` (it may name
+`tui` never imports `tools` or `sandbox` (it may name
 `policy.Mode`/`GrantOffer`, which `engine.Approval` carries); `tools` never imports `tui`
-or `engine`; `policy` never imports `tui`, `engine`, `tools`; `shellclass`
-imports nothing internal (it takes a small `Workspace` interface that
-`policy.NewShellWorkspace` adapts). `engine` is the seam between agent and UI.
+or `engine`; `policy` never imports `tui`, `engine`, `tools`. `shellclass` is
+now an external module (`github.com/richardwooding/shellclass`), so the DAG no
+longer has to keep it a leaf — it is one by construction, taking a small
+`Workspace` interface that `policy.NewShellWorkspace` adapts.
+`engine` is the seam between agent and UI.
 `skillsdir`, `mcpclient` and `agents` are feature packages the app composes:
 they never import `tui`, `engine` or `app`, and reach the engine only through
 `Options` (`Tools`, `Extra`, `Describe`).
@@ -861,7 +864,7 @@ client to HTTP MCP transports, and `diag`, which *listens* and never dials).
   trailers belong — and `tui/highlight` colours the text. Both are leaves,
   pinned by `dag_test.go`: a renderer must not be able to reach the permission
   engine. That is why bash's language comes from a gated word scan and not
-  from `policy/shellclass`, whose AST answer is better but whose import would
+  from `shellclass`, whose AST answer is better but whose import would
   put a security component on the render path. The gate refuses anything with
   `;|&><`, anything that is not a pager, and any command naming two languages,
   so its failure mode is "plain", never "wrong". Never call `lexers.Analyse`:

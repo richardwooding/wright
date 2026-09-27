@@ -17,7 +17,7 @@ import (
 //
 // It is purely lexical and gated hard, because its failure mode has to be
 // "unchanged" and never "mangled". Deliberately not a call into
-// policy/shellclass: that is a security component the import DAG keeps out of
+// shellclass: that is a security component the import DAG keeps out of
 // the TUI, and re-parsing every command on the render path to answer a
 // cosmetic question would be the wrong trade — the same reasoning as
 // bashLanguage in lang.go.
