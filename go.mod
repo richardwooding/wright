@@ -4,13 +4,13 @@ go 1.27.0
 
 require (
 	charm.land/bubbles/v2 v2.2.1
-	charm.land/bubbletea/v2 v2.0.9
+	charm.land/bubbletea/v2 v2.0.10
 	charm.land/glamour/v2 v2.0.1
 	charm.land/lipgloss/v2 v2.0.6
-	github.com/alecthomas/chroma/v2 v2.14.0
+	github.com/alecthomas/chroma/v2 v2.27.0
 	github.com/alecthomas/kong v1.16.1
 	github.com/aymanbagabas/go-udiff v0.4.1
-	github.com/bmatcuk/doublestar/v4 v4.10.1
+	github.com/bmatcuk/doublestar/v4 v4.10.2
 	github.com/charmbracelet/x/ansi v0.11.8
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20260913004009-c615ff2f7805
 	github.com/charmbracelet/x/term v0.2.2
@@ -20,7 +20,7 @@ require (
 	github.com/richardwooding/agentkit/mcp v0.5.0
 	github.com/richardwooding/llmkit v0.3.0
 	github.com/richardwooding/shellclass v0.1.0
-	github.com/richardwooding/ssrfguard v0.2.2
+	github.com/richardwooding/ssrfguard v0.3.0
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
 	golang.org/x/net v0.59.0
 	golang.org/x/time v0.16.0
@@ -39,7 +39,7 @@ require (
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect
-	github.com/dlclark/regexp2 v1.11.0 // indirect
+	github.com/dlclark/regexp2/v2 v2.2.1 // indirect
 	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/lucasb-eyer/go-colorful v1.4.1 // indirect
