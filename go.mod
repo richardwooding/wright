@@ -18,7 +18,7 @@ require (
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/richardwooding/agentkit v0.5.0
 	github.com/richardwooding/agentkit/mcp v0.5.0
-	github.com/richardwooding/llmkit v0.3.0
+	github.com/richardwooding/llmkit v0.3.1
 	github.com/richardwooding/shellclass v0.1.0
 	github.com/richardwooding/ssrfguard v0.3.0
 	github.com/sabhiram/go-gitignore v0.0.0-20210923224102-525f6e181f06
@@ -28,7 +28,7 @@ require (
 )
 
 require (
-	cloud.google.com/go/compute/metadata v0.3.0 // indirect
+	cloud.google.com/go/compute/metadata v0.9.1 // indirect
 	github.com/atotto/clipboard v0.1.4 // indirect
 	github.com/aymerick/douceur v0.2.0 // indirect
 	github.com/charmbracelet/colorprofile v0.4.3 // indirect
