@@ -16,7 +16,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/landlock-lsm/go-landlock v0.10.1
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/richardwooding/agentkit v0.5.0
+	github.com/richardwooding/agentkit v0.5.2
 	github.com/richardwooding/agentkit/mcp v0.5.0
 	github.com/richardwooding/llmkit v0.3.1
 	github.com/richardwooding/shellclass v0.1.0
